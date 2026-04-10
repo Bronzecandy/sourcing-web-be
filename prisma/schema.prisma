@@ -1,0 +1,117 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model AppRank {
+  id          Int      @id @default(autoincrement())
+  date        DateTime @db.Date
+  appId       Int
+  androidRank Int?
+  iosRank     Int?
+  raw         Json?    @db.Json
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([date, appId], map: "apprank_date_appid_unique")
+  @@index([appId], map: "apprank_appid_index")
+}
+
+model AppReview {
+  id        Int       @id @default(autoincrement())
+  reviewId  String    @unique(map: "appreview_reviewid_unique") @db.VarChar(32)
+  appId     Int
+  raw       Json?     @db.Json
+  createdAt DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime  @default(now()) @db.Timestamptz(6)
+  reviewAt  DateTime? @db.Timestamptz(6)
+
+  @@index([appId], map: "appreview_appid_index")
+  @@index([reviewAt], map: "appreview_reviewat_index")
+}
+
+model admin_Group {
+  id              Int               @id @default(autoincrement())
+  name            String?           @unique(map: "admin_group_name_unique") @db.VarChar(64)
+  createdAt       DateTime          @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime          @default(now()) @db.Timestamptz(6)
+  rules           Json?             @db.Json
+  admin_GroupPerm admin_GroupPerm[]
+  admin_UserGroup admin_UserGroup[]
+}
+
+model admin_GroupPerm {
+  groupId        Int
+  resourceId     Int
+  read           Boolean?       @default(false)
+  create         Boolean?       @default(false)
+  update         Boolean?       @default(false)
+  delete         Boolean?       @default(false)
+  createdAt      DateTime       @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime       @default(now()) @db.Timestamptz(6)
+  admin_Group    admin_Group    @relation(fields: [groupId], references: [id], onDelete: Cascade, map: "admin_groupperm_groupid_foreign")
+  admin_Resource admin_Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade, map: "admin_groupperm_resourceid_foreign")
+
+  @@id([groupId, resourceId])
+}
+
+model admin_Log {
+  id         BigInt     @id @default(autoincrement())
+  userId     Int
+  action     String     @db.VarChar(64)
+  args       Json?      @db.Json
+  ret        Json?      @db.Json
+  createdAt  DateTime   @default(now()) @db.Timestamptz(6)
+  admin_User admin_User @relation(fields: [userId], references: [id], onDelete: Cascade, map: "admin_log_userid_foreign")
+
+  @@index([action], map: "admin_log_action_index")
+}
+
+model admin_Resource {
+  id              Int               @id @default(autoincrement())
+  name            String?           @unique(map: "admin_resource_name_unique") @db.VarChar(64)
+  read            Int               @default(1) @db.SmallInt
+  create          Int               @default(192) @db.SmallInt
+  update          Int               @default(192) @db.SmallInt
+  delete          Int               @default(192) @db.SmallInt
+  createdAt       DateTime          @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime          @default(now()) @db.Timestamptz(6)
+  admin_GroupPerm admin_GroupPerm[]
+}
+
+model admin_User {
+  id              Int               @id @default(autoincrement())
+  email           String            @unique(map: "admin_user_email_unique") @db.VarChar(255)
+  role            Int               @default(0) @db.SmallInt
+  name            String?           @db.VarChar(255)
+  icon            String?
+  createdAt       DateTime          @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime          @default(now()) @db.Timestamptz(6)
+  groups          Json?             @db.Json
+  admin_Log       admin_Log[]
+  admin_UserGroup admin_UserGroup[]
+}
+
+model admin_UserGroup {
+  userId      Int
+  groupId     Int
+  admin_Group admin_Group @relation(fields: [groupId], references: [id], onDelete: Cascade, map: "admin_usergroup_groupid_foreign")
+  admin_User  admin_User  @relation(fields: [userId], references: [id], onDelete: Cascade, map: "admin_usergroup_userid_foreign")
+
+  @@id([userId, groupId])
+}
+
+model knex_migrations {
+  id             Int       @id @default(autoincrement())
+  name           String?   @db.VarChar(255)
+  batch          Int?
+  migration_time DateTime? @db.Timestamptz(6)
+}
+
+model knex_migrations_lock {
+  index     Int  @id @default(autoincrement())
+  is_locked Int?
+}
