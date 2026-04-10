@@ -2,7 +2,7 @@ import translate from "google-translate-api-x";
 import fs from "fs";
 import path from "path";
 
-const CACHE_FILE = path.join(__dirname, "../../.translation-cache.json");
+const CACHE_FILE = path.join(process.cwd(), ".translation-cache.json");
 const MIN_DELAY_MS = 300;
 const MAX_RETRIES = 3;
 

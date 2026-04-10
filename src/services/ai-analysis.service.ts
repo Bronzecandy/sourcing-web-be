@@ -5,7 +5,7 @@ import type { AIAnalysisResult, AIFeedbackItem, SentimentBreakdown, SentimentCri
 import fs from "fs";
 import path from "path";
 
-const STORE_FILE = path.join(__dirname, "../../.ai-analysis-store.json");
+const STORE_FILE = path.join(process.cwd(), ".ai-analysis-store.json");
 
 function loadStore(): Record<string, AIAnalysisResult[]> {
   try {
