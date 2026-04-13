@@ -68,45 +68,32 @@ function parseReviewRow(
 }
 
 async function fetchStratifiedReviews(appId: number): Promise<StratifiedReview[]> {
-  const bucketQueries = RATING_BUCKETS.map((bucket) =>
-    pool.query<{ raw: Record<string, unknown>; reviewAt: Date | null }>(
-      `SELECT raw, "reviewAt"
-       FROM "AppReview"
-       WHERE "appId" = $1
-         AND raw IS NOT NULL
-         AND raw->'review'->'score' IS NOT NULL
-         AND (raw->'review'->'score')::text::numeric BETWEEN $2 AND $3
-       ORDER BY "reviewAt" DESC
-       LIMIT $4`,
-      [appId, bucket.min, bucket.max, PER_BUCKET_LIMIT]
-    )
-  );
-
-  const results = await Promise.all(bucketQueries);
-  const allReviews: StratifiedReview[] = [];
-
-  for (let i = 0; i < results.length; i++) {
-    for (const row of results[i].rows) {
-      const r = parseReviewRow(row, RATING_BUCKETS[i].label);
-      if (r) allReviews.push(r);
-    }
-  }
-
-  if (allReviews.length > 0) return allReviews;
+  const startMs = Date.now();
 
   const { rows } = await pool.query<{ raw: Record<string, unknown>; reviewAt: Date | null }>(
     `SELECT raw, "reviewAt"
      FROM "AppReview"
-     WHERE "appId" = $1 AND raw IS NOT NULL
-     ORDER BY "reviewAt" DESC
-     LIMIT $2`,
-    [appId, PER_BUCKET_LIMIT * 5]
+     WHERE "appId" = $1
+       AND raw IS NOT NULL
+     ORDER BY "reviewAt" DESC`,
+    [appId]
   );
 
+  console.log(`[AI Analysis] Fetched ${rows.length} raw reviews in ${Date.now() - startMs}ms`);
+
+  const allReviews: StratifiedReview[] = [];
+
   for (const row of rows) {
-    const r = parseReviewRow(row, "Unrated");
+    const raw = row.raw;
+    const review = raw?.review as Record<string, unknown> | undefined;
+    const score = Math.round(Number(review?.score ?? 0));
+    const bucket = RATING_BUCKETS.find((b) => score >= b.min && score <= b.max);
+    const bucketLabel = bucket?.label ?? "Unrated";
+    const r = parseReviewRow(row, bucketLabel);
     if (r) allReviews.push(r);
   }
+
+  console.log(`[AI Analysis] Parsed ${allReviews.length} valid reviews in ${Date.now() - startMs}ms`);
 
   return allReviews;
 }

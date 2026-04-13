@@ -8,6 +8,15 @@ import {
 
 const router = Router();
 
+function startKeepAlive(res: import("express").Response): NodeJS.Timeout {
+  res.setHeader("Content-Type", "application/json");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders();
+  return setInterval(() => {
+    res.write(" ");
+  }, 10_000);
+}
+
 router.get("/all", async (_req, res) => {
   try {
     const all = aiAnalysisService.getAllAnalyses();
@@ -19,16 +28,19 @@ router.get("/all", async (_req, res) => {
 });
 
 router.post("/analyze-external", async (req, res) => {
+  const keepAlive = startKeepAlive(res);
   try {
     const input = String(req.body?.input ?? "").trim();
     if (!input) {
-      res.status(400).json({ success: false, error: "Missing input (TapTap URL or App ID)" });
+      clearInterval(keepAlive);
+      res.end(JSON.stringify({ success: false, error: "Missing input (TapTap URL or App ID)" }));
       return;
     }
 
     const appId = parseAppIdFromInput(input);
     if (!appId || appId <= 0) {
-      res.status(400).json({ success: false, error: "Invalid TapTap URL or App ID" });
+      clearInterval(keepAlive);
+      res.end(JSON.stringify({ success: false, error: "Invalid TapTap URL or App ID" }));
       return;
     }
 
@@ -39,7 +51,8 @@ router.post("/analyze-external", async (req, res) => {
     const reviews = await fetchExternalReviews(appId);
 
     if (reviews.length === 0) {
-      res.status(404).json({ success: false, error: `No reviews found for "${appInfo.title}" (appId: ${appId})` });
+      clearInterval(keepAlive);
+      res.end(JSON.stringify({ success: false, error: `No reviews found for "${appInfo.title}" (appId: ${appId})` }));
       return;
     }
 
@@ -50,23 +63,28 @@ router.post("/analyze-external", async (req, res) => {
       reviews,
     );
 
-    res.json({ success: true, data: result });
+    clearInterval(keepAlive);
+    res.end(JSON.stringify({ success: true, data: result }));
   } catch (err) {
+    clearInterval(keepAlive);
     console.error("[analysis route] POST analyze-external:", err);
     const message = err instanceof Error ? err.message : "External analysis failed";
-    res.status(500).json({ success: false, error: message });
+    res.end(JSON.stringify({ success: false, error: message }));
   }
 });
 
 router.post("/analyze/:appId", async (req, res) => {
+  const keepAlive = startKeepAlive(res);
   try {
     const appId = parseInt(String(req.params.appId));
     const result = await aiAnalysisService.analyzeGameReviews(appId);
-    res.json({ success: true, data: result });
+    clearInterval(keepAlive);
+    res.end(JSON.stringify({ success: true, data: result }));
   } catch (err) {
+    clearInterval(keepAlive);
     console.error("[analysis route] POST analyze:", err);
     const message = err instanceof Error ? err.message : "Analysis failed";
-    res.status(500).json({ success: false, error: message });
+    res.end(JSON.stringify({ success: false, error: message }));
   }
 });
 
