@@ -4,9 +4,40 @@ import {
   parseAppIdFromInput,
   fetchAppInfo,
   fetchExternalReviews,
+  type ExternalReview,
 } from "../services/taptap-client.service";
 
 const router = Router();
+
+const TAPTAP_PROXY_URL = process.env.TAPTAP_PROXY_URL || "";
+const TAPTAP_PROXY_KEY = process.env.TAPTAP_PROXY_KEY || "";
+
+async function fetchViaProxy(appId: number): Promise<{
+  appInfo: { title: string; iconUrl: string | null };
+  reviews: ExternalReview[];
+}> {
+  const url = `${TAPTAP_PROXY_URL}/api/full/${appId}`;
+  const headers: Record<string, string> = {};
+  if (TAPTAP_PROXY_KEY) headers["x-api-key"] = TAPTAP_PROXY_KEY;
+
+  const res = await fetch(url, { headers, signal: AbortSignal.timeout(300_000) });
+  const raw = await res.text();
+  const trimmed = raw.trim();
+  const json = JSON.parse(trimmed);
+  if (!json.success) throw new Error(json.error ?? "Proxy request failed");
+
+  return {
+    appInfo: {
+      title: json.data.appInfo.title,
+      iconUrl: json.data.appInfo.iconUrl,
+    },
+    reviews: json.data.reviews as ExternalReview[],
+  };
+}
+
+function useProxy(): boolean {
+  return !!TAPTAP_PROXY_URL;
+}
 
 function startKeepAlive(res: import("express").Response): NodeJS.Timeout {
   res.setHeader("Content-Type", "application/json");
@@ -44,22 +75,34 @@ router.post("/analyze-external", async (req, res) => {
       return;
     }
 
-    console.log(`[analyze-external] Fetching app info for appId=${appId}`);
-    const appInfo = await fetchAppInfo(appId);
+    let appTitle: string;
+    let appIcon: string | null;
+    let reviews: ExternalReview[];
 
-    console.log(`[analyze-external] Fetching reviews for "${appInfo.title}" (appId=${appId})`);
-    const reviews = await fetchExternalReviews(appId);
+    if (useProxy()) {
+      console.log(`[analyze-external] Using TapTap proxy for appId=${appId}`);
+      const proxy = await fetchViaProxy(appId);
+      appTitle = proxy.appInfo.title;
+      appIcon = proxy.appInfo.iconUrl;
+      reviews = proxy.reviews;
+    } else {
+      console.log(`[analyze-external] Direct TapTap fetch for appId=${appId}`);
+      const appInfo = await fetchAppInfo(appId);
+      appTitle = appInfo.title;
+      appIcon = appInfo.iconUrl;
+      reviews = await fetchExternalReviews(appId);
+    }
 
     if (reviews.length === 0) {
       clearInterval(keepAlive);
-      res.end(JSON.stringify({ success: false, error: `No reviews found for "${appInfo.title}" (appId: ${appId})` }));
+      res.end(JSON.stringify({ success: false, error: `No reviews found for "${appTitle}" (appId: ${appId})` }));
       return;
     }
 
     const result = await aiAnalysisService.analyzeExternalReviews(
       appId,
-      appInfo.title,
-      appInfo.iconUrl,
+      appTitle,
+      appIcon,
       reviews,
     );
 

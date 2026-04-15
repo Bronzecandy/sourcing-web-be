@@ -55,17 +55,17 @@ async function collectTopAppIds(): Promise<number[]> {
   }, "collectTopAppIds");
 }
 
-const BATCH_SIZE = 5;
-const BATCH_DELAY_MS = 500;
+const BATCH_SIZE = 20;
+const BATCH_DELAY_MS = 50;
 
 export async function precomputeAll(): Promise<{ durationMs: number; keys: number }> {
   const start = Date.now();
   setForceRefresh(true);
 
   try {
-    // Phase 1: Dashboard + dates + tags + rankings — run sequentially to avoid overwhelming DB
+    // Phase 1: Dashboard + dates + tags + rankings — all in parallel
     console.log("[precompute] Phase 1: Dashboard + Rankings...");
-    await runSequential([
+    await runBatch([
       { label: "dashboard", fn: () => gameService.getDashboardStats() },
       { label: "dates", fn: () => gameService.getAvailableDates() },
       { label: "tags", fn: () => gameService.getTags() },
@@ -74,12 +74,12 @@ export async function precomputeAll(): Promise<{ durationMs: number; keys: numbe
         fn: () => gameService.getRankings({ platform, page: "1", limit: "1" }),
       })),
     ]);
+    console.log(`[precompute] Phase 1 done (${((Date.now() - start) / 1000).toFixed(1)}s)`);
 
-    // Phase 2: Potential analysis — sequential by platform to reduce DB pressure
+    // Phase 2: Potential analysis — all platforms in parallel
     console.log("[precompute] Phase 2: Potential analysis...");
-    for (const platform of ALL_PLATFORMS) {
-      console.log(`[precompute]   platform=${platform}...`);
-      await runSequential([
+    await runBatch(
+      ALL_PLATFORMS.flatMap((platform) => [
         ...POTENTIAL_DAYS.map((days) => ({
           label: `potential-${platform}-${days}`,
           fn: () => rankingService.calculatePotentialScores(days, platform),
@@ -92,9 +92,9 @@ export async function precomputeAll(): Promise<{ durationMs: number; keys: numbe
           label: `reserve-${platform}-${days}`,
           fn: () => rankingService.getTopReserveGrowth(days, platform),
         })),
-      ]);
-      await sleep(1000);
-    }
+      ])
+    );
+    console.log(`[precompute] Phase 2 done (${((Date.now() - start) / 1000).toFixed(1)}s)`);
 
     // Phase 3: Game details + potential details for top 200
     console.log("[precompute] Phase 3: Game details + potential details (top 200)...");
@@ -118,10 +118,8 @@ export async function precomputeAll(): Promise<{ durationMs: number; keys: numbe
         ])
       );
 
-      if ((i / BATCH_SIZE) % 10 === 0) {
-        const elapsed = ((Date.now() - start) / 1000).toFixed(0);
-        console.log(`[precompute] ${progress} done (${elapsed}s elapsed)`);
-      }
+      const elapsed = ((Date.now() - start) / 1000).toFixed(0);
+      console.log(`[precompute] ${progress} done (${elapsed}s elapsed)`);
 
       if (i + BATCH_SIZE < appIds.length) await sleep(BATCH_DELAY_MS);
     }
