@@ -10,8 +10,10 @@ function isRetryableDbError(err: unknown): boolean {
   const code = (err as { code?: string }).code;
   const msg = String((err as { message?: string }).message ?? "");
   return code === "40001" || code === "P2034" || code === "P1008"
-    || msg.includes("timed out") || msg.includes("SocketTimeout")
-    || msg.includes("ETIMEDOUT") || msg.includes("ECONNRESET");
+    || msg.includes("timed out") || msg.includes("timeout exceeded")
+    || msg.includes("SocketTimeout")
+    || msg.includes("ETIMEDOUT") || msg.includes("ECONNRESET")
+    || msg.includes("Connection terminated");
 }
 
 async function retry<T>(
@@ -55,8 +57,8 @@ async function collectTopAppIds(): Promise<number[]> {
   }, "collectTopAppIds");
 }
 
-const BATCH_SIZE = 20;
-const BATCH_DELAY_MS = 50;
+const BATCH_SIZE = 5;
+const BATCH_DELAY_MS = 200;
 
 export async function precomputeAll(): Promise<{ durationMs: number; keys: number }> {
   const start = Date.now();
@@ -76,24 +78,27 @@ export async function precomputeAll(): Promise<{ durationMs: number; keys: numbe
     ]);
     console.log(`[precompute] Phase 1 done (${((Date.now() - start) / 1000).toFixed(1)}s)`);
 
-    // Phase 2: Potential analysis — all platforms in parallel
+    // Phase 2: Potential analysis — per platform sequentially, queries within a platform in parallel
     console.log("[precompute] Phase 2: Potential analysis...");
-    await runBatch(
-      ALL_PLATFORMS.flatMap((platform) => [
-        ...POTENTIAL_DAYS.map((days) => ({
-          label: `potential-${platform}-${days}`,
-          fn: () => rankingService.calculatePotentialScores(days, platform),
-        })),
-        ...POTENTIAL_DAYS.map((days) => ({
-          label: `breakout-${platform}-${days}`,
-          fn: () => rankingService.detectBreakoutGames(days, 10, platform),
-        })),
-        ...POTENTIAL_DAYS.map((days) => ({
-          label: `reserve-${platform}-${days}`,
-          fn: () => rankingService.getTopReserveGrowth(days, platform),
-        })),
-      ])
-    );
+    for (const platform of ALL_PLATFORMS) {
+      console.log(`[precompute]   platform=${platform}...`);
+      await runBatch(
+        [
+          ...POTENTIAL_DAYS.map((days) => ({
+            label: `potential-${platform}-${days}`,
+            fn: () => rankingService.calculatePotentialScores(days, platform),
+          })),
+          ...POTENTIAL_DAYS.map((days) => ({
+            label: `breakout-${platform}-${days}`,
+            fn: () => rankingService.detectBreakoutGames(days, 10, platform),
+          })),
+          ...POTENTIAL_DAYS.map((days) => ({
+            label: `reserve-${platform}-${days}`,
+            fn: () => rankingService.getTopReserveGrowth(days, platform),
+          })),
+        ]
+      );
+    }
     console.log(`[precompute] Phase 2 done (${((Date.now() - start) / 1000).toFixed(1)}s)`);
 
     // Phase 3: Game details + potential details for top 200

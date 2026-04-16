@@ -267,7 +267,7 @@ export class AIAnalysisService {
     appId: number,
     gameName: string,
     reviews: StratifiedReview[],
-    opts?: { source?: "database" | "external"; iconUrl?: string | null },
+    opts?: { source?: "database" | "external" | "csv-upload"; iconUrl?: string | null },
   ): Promise<AIAnalysisResult> {
     const bucketCounts = buildBucketCounts(reviews);
     const dateRange = getDateRange(reviews);
@@ -353,12 +353,13 @@ export class AIAnalysisService {
     gameName: string,
     iconUrl: string | null,
     reviews: StratifiedReview[],
+    source: "external" | "csv-upload" = "external",
   ): Promise<AIAnalysisResult> {
     if (reviews.length === 0) {
       throw new Error(`No reviews found for ${gameName} (appId: ${appId})`);
     }
 
-    return this.runLLMAnalysis(appId, gameName, reviews, { source: "external", iconUrl });
+    return this.runLLMAnalysis(appId, gameName, reviews, { source, iconUrl });
   }
 }
 

@@ -1,4 +1,5 @@
 import { Router } from "express";
+import multer from "multer";
 import { aiAnalysisService } from "../services/ai-analysis.service";
 import {
   parseAppIdFromInput,
@@ -6,8 +7,10 @@ import {
   fetchExternalReviews,
   type ExternalReview,
 } from "../services/taptap-client.service";
+import { parseCsvBuffer } from "../utils/csv-parser";
 
 const router = Router();
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
 const TAPTAP_PROXY_URL = process.env.TAPTAP_PROXY_URL || "";
 const TAPTAP_PROXY_KEY = process.env.TAPTAP_PROXY_KEY || "";
@@ -37,6 +40,14 @@ async function fetchViaProxy(appId: number): Promise<{
 
 function useProxy(): boolean {
   return !!TAPTAP_PROXY_URL;
+}
+
+function hashStringToNumber(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash);
 }
 
 function startKeepAlive(res: import("express").Response): NodeJS.Timeout {
@@ -112,6 +123,37 @@ router.post("/analyze-external", async (req, res) => {
     clearInterval(keepAlive);
     console.error("[analysis route] POST analyze-external:", err);
     const message = err instanceof Error ? err.message : "External analysis failed";
+    res.end(JSON.stringify({ success: false, error: message }));
+  }
+});
+
+router.post("/analyze-csv", upload.single("file"), async (req, res) => {
+  const keepAlive = startKeepAlive(res);
+  try {
+    if (!req.file) {
+      clearInterval(keepAlive);
+      res.end(JSON.stringify({ success: false, error: "No file uploaded" }));
+      return;
+    }
+
+    const { reviews, gameName, appId } = parseCsvBuffer(req.file.buffer);
+
+    const numericId = /^\d+$/.test(appId) ? Number(appId) : hashStringToNumber(appId);
+
+    const result = await aiAnalysisService.analyzeExternalReviews(
+      numericId,
+      gameName,
+      null,
+      reviews,
+      "csv-upload",
+    );
+
+    clearInterval(keepAlive);
+    res.end(JSON.stringify({ success: true, data: result }));
+  } catch (err) {
+    clearInterval(keepAlive);
+    console.error("[analysis route] POST analyze-csv:", err);
+    const message = err instanceof Error ? err.message : "CSV analysis failed";
     res.end(JSON.stringify({ success: false, error: message }));
   }
 });

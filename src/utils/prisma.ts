@@ -6,8 +6,8 @@ const connectionString = process.env.DATABASE_URL!;
 
 export const pool = new pg.Pool({
   connectionString,
-  max: 5,
-  connectionTimeoutMillis: 30_000,
+  max: 15,
+  connectionTimeoutMillis: 60_000,
   idleTimeoutMillis: 60_000,
   statement_timeout: 120_000,
   query_timeout: 120_000,
