@@ -64,9 +64,38 @@ function findColumn(headers: string[], ...candidates: string[]): number {
   return -1;
 }
 
-export function parseCsvBuffer(buffer: Buffer): ParsedCsvResult {
+function decodeBuffer(buffer: Buffer): string {
+  // UTF-16 LE BOM: FF FE
+  if (buffer.length >= 2 && buffer[0] === 0xff && buffer[1] === 0xfe) {
+    return buffer.toString("utf16le").slice(1); // decode and strip BOM
+  }
+  // UTF-16 BE BOM: FE FF — swap bytes to LE then decode
+  if (buffer.length >= 2 && buffer[0] === 0xfe && buffer[1] === 0xff) {
+    const swapped = Buffer.alloc(buffer.length);
+    for (let i = 0; i < buffer.length - 1; i += 2) {
+      swapped[i] = buffer[i + 1];
+      swapped[i + 1] = buffer[i];
+    }
+    return swapped.toString("utf16le").slice(1);
+  }
+  // No BOM but contains lots of \x00 → likely UTF-16 LE without BOM
+  const nullCount = buffer.slice(0, Math.min(200, buffer.length)).filter((b) => b === 0).length;
+  if (nullCount > 20) {
+    return buffer.toString("utf16le");
+  }
+  // UTF-8 (strip BOM if present)
   let text = buffer.toString("utf-8");
-  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1); // strip BOM
+  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+  return text;
+}
+
+function stripNullBytes(s: string): string {
+  return s.replace(/\0/g, "");
+}
+
+export function parseCsvBuffer(buffer: Buffer): ParsedCsvResult {
+  let text = decodeBuffer(buffer);
+  text = stripNullBytes(text);
 
   const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
   if (lines.length < 2) {
