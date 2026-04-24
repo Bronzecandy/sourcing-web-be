@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import gameRoutes from "./routes/game.routes";
+import translateRoutes from "./routes/translate.routes";
 import rankingRoutes from "./routes/ranking.routes";
 import analysisRoutes from "./routes/analysis.routes";
 import { errorHandler } from "./middleware/error-handler";
@@ -47,6 +48,7 @@ app.post("/api/admin/refresh-cache", async (_req, res) => {
   res.json({ success: true, durationMs, cacheKeys: keys });
 });
 
+app.use("/api/translate", translateRoutes);
 app.use("/api/games", gameRoutes);
 app.use("/api/ranking", rankingRoutes);
 app.use("/api/analysis", analysisRoutes);

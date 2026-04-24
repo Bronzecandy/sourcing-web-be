@@ -55,7 +55,8 @@ router.get("/compare", async (req, res) => {
 router.get("/:appId", async (req, res) => {
   const appId = parseInt(String(req.params.appId));
   const days = parseInt(String(req.query.days ?? "30"));
-  const game = await gameService.getGameDetail(appId, days);
+  const contentLang = String(req.query.contentLang ?? "vi") === "en" ? "en" : "vi";
+  const game = await gameService.getGameDetail(appId, days, contentLang);
   if (!game) {
     res.status(404).json({ success: false, error: "Game not found" });
     return;

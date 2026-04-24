@@ -2,7 +2,7 @@ import { prisma } from "../utils/prisma";
 import { pool } from "../utils/prisma";
 import { getCachedOrFetch } from "../utils/cache";
 import { translateTag, translateTags } from "../utils/tag-translator";
-import { translateText } from "../utils/translator";
+import { translateText, translateVietnameseToEnglish } from "../utils/translator";
 import type {
   RankingQuery,
   DashboardStats,
@@ -247,9 +247,9 @@ export class GameService {
     );
   }
 
-  async getGameDetail(appId: number, days: number = 30) {
+  async getGameDetail(appId: number, days: number = 30, contentLang: "vi" | "en" = "vi") {
     return getCachedOrFetch(
-      `game-detail-${appId}-${days}`,
+      `game-detail-${appId}-${days}-${contentLang}`,
       async () => {
         const rankings = await prisma.appRank.findMany({
           where: { appId },
@@ -277,11 +277,20 @@ export class GameService {
           }
         );
 
-        const [description, developerNote, actualReviewCount] = await Promise.all([
+        const [descriptionVi, developerNoteVi, actualReviewCount] = await Promise.all([
           translateText(rawApp?.description?.text ?? null, `desc-${appId}`),
           translateText(rawApp?.developer_note?.text ?? null, `devnote-${appId}`),
           prisma.appReview.count({ where: { appId } }),
         ]);
+
+        const description =
+          contentLang === "en" && descriptionVi
+            ? await translateVietnameseToEnglish(descriptionVi, `desc-en-${appId}`)
+            : descriptionVi;
+        const developerNote =
+          contentLang === "en" && developerNoteVi
+            ? await translateVietnameseToEnglish(developerNoteVi, `devnote-en-${appId}`)
+            : developerNoteVi;
 
         const reviewDistribution: Record<string, number> = {};
         try {

@@ -53,6 +53,8 @@ const AI_SINGLE_PROMPT_MAX_CHARS = intEnv("AI_SINGLE_PROMPT_MAX_CHARS", 500_000)
 const AI_MAP_CHUNK_MAX_CHARS = intEnv("AI_MAP_CHUNK_MAX_CHARS", 300_000);
 /** Parallel map() LLM calls per wave. Lower (e.g. 2) if you hit 429 from the provider. */
 const AI_MAP_CONCURRENCY = Math.max(1, intEnv("AI_MAP_CONCURRENCY", 6));
+/** After packing, merge down to at most this many map batches (default 3). */
+const AI_MAX_MAP_CHUNKS = Math.max(1, intEnv("AI_MAX_MAP_CHUNKS", 3));
 
 function collapseWhitespace(s: string): string {
   return s.replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
@@ -72,21 +74,21 @@ function lineForReview(global1Based: number, r: StratifiedReview): string {
   return `[#${global1Based}|${r.score}★|${r.date}]\n${r.text}`;
 }
 
-const SYSTEM_MAP = `You are extracting signals from ONE batch of mobile game reviews (TapTap, mixed languages). Output in ENGLISH only. Respond with ONLY a valid JSON object, no markdown fences, no other text. Schema:
+const SYSTEM_MAP = `Bạn đang trích xuất tín hiệu từ MỘT lô đánh giá người chơi về game mobile (nhiều ngôn ngữ). Chỉ trả lời bằng TIẾNG VIỆT. Chỉ trả về MỘT object JSON hợp lệ, không markdown, không text ngoài JSON. Schema:
 {
-  "strengths": [{"point":"...","roughCount":<how many reviews in this batch support this, integer>}],
-  "weaknesses": [{"point":"...","roughCount":<integer>}],
+  "strengths": [{"point":"...","roughCount":<số review trong lô này ủng hộ ý này, số nguyên>}],
+  "weaknesses": [{"point":"...","roughCount":<số nguyên>}],
   "topicHints": {"gameplay":0-100,"graphics":0-100,"story":0-100,"monetization":0-100,"performance":0-100,"community":0-100},
-  "subsetSummary":"2-3 sentences: sentiment and key issues in THIS batch only, referencing patterns not exact counts"
+  "subsetSummary":"2-3 câu tiếng Việt: cảm xúc và vấn đề chính CHỈ trong lô này"
 }
-roughCount is only for this subset, not the whole game.`;
+roughCount chỉ cho lô này, không phải toàn game.`;
 
-const SYSTEM_REDUCE = `You are a senior game industry analyst. You are given pre-extractions from ALL batches of the same game's reviews; batches are disjoint and together cover 100% of the collected reviews. You also receive exact per-rating-bucket review counts. Synthesize one holistic view. If batch extractions disagree, reason about the overall data. You MUST respond with ONLY a valid JSON object, no markdown fences, no other text, matching the user schema.`;
+const SYSTEM_REDUCE = `Bạn là chuyên gia phân tích game mobile. Bạn nhận kết quả trích xuất từ TẤT CẢ các lô đánh giá của cùng một game; các lô không trùng nhau và cùng phủ toàn bộ review đã thu thập. Bạn cũng có số lượng review theo từng mức sao. Hãy tổng hợp một bức tranh thống nhất. Nếu các lô mâu thuẫn, hãy suy luận theo toàn dữ liệu. BẮT BUỘC chỉ trả về MỘT object JSON hợp lệ, không markdown, không text ngoài JSON, đúng schema người dùng cung cấp. Mọi văn bản trong JSON phải bằng TIẾNG VIỆT.`;
 
-const SYSTEM_PROMPT = `You are a senior game industry analyst specializing in mobile gaming market intelligence.
-You will receive user reviews from TapTap (a Chinese game platform), stratified across all rating levels (1-5 stars).
-Reviews may be in Chinese, English, or mixed. Analyze them thoroughly and respond in ENGLISH only.
-You MUST respond with ONLY a valid JSON object. No markdown fences, no explanation, no extra text before or after the JSON.`;
+const SYSTEM_PROMPT = `Bạn là chuyên gia phân tích thị trường game mobile.
+Bạn nhận đánh giá người chơi (TapTap hoặc nguồn khác), phân tầng theo sao 1-5.
+Review có thể tiếng Trung, Anh, Việt hoặc hỗn hợp. Phân tích kỹ và trả lời toàn bộ bằng TIẾNG VIỆT.
+BẮT BUỘC chỉ trả về MỘT object JSON hợp lệ. Không markdown, không giải thích ngoài JSON.`;
 
 export interface StratifiedReview {
   text: string;
@@ -169,60 +171,59 @@ function buildReviewTextBlock(
     .join("\n\n");
 }
 
-const FINAL_OUTPUT_SPEC = `Return a JSON object with this exact structure:
+const FINAL_OUTPUT_SPEC = `Trả về một object JSON đúng cấu trúc sau (toàn bộ chuỗi tiếng Việt):
 {
-  "summary": "A concise 3-4 sentence overview of overall player sentiment and what kind of game this appears to be",
+  "summaryBullets": ["Gạch đầu dòng 1: ý chính về cảm xúc tổng thể", "Gạch đầu dòng 2: ...", "..."],
   "strengths": [
-    {"point": "description of a strength", "mentionRate": <integer 0-100, % of reviews mentioning this>}
+    {"point": "mô tả điểm mạnh bằng tiếng Việt", "mentionRate": <số nguyên 0-100, % review nhắc tới>}
   ],
   "weaknesses": [
-    {"point": "description of a weakness", "mentionRate": <integer 0-100, % of reviews mentioning this>}
+    {"point": "mô tả điểm yếu bằng tiếng Việt", "mentionRate": <số nguyên 0-100>}
   ],
-  "sentimentScore": <integer 0-100>,
+  "sentimentScore": <số nguyên 0-100>,
   "sentimentBreakdown": {
     "ratingDistribution": {
-      "score": <integer 0-100, based on the weighted average of star ratings: 1★=0, 2★=25, 3★=50, 4★=75, 5★=100>,
-      "reasoning": "1-2 sentences explaining the rating distribution pattern, e.g. 'X% of reviews are 4-5 stars, indicating generally positive ratings'"
+      "score": <0-100, trung bình có trọng số theo sao: 1★=0, 2★=25, 3★=50, 4★=75, 5★=100>,
+      "reasoning": "1-2 câu tiếng Việt"
     },
     "textSentiment": {
-      "score": <integer 0-100, based on the actual tone and language used in review text, independent of star rating>,
-      "reasoning": "1-2 sentences on what the text reveals, e.g. 'Despite high ratings, many reviews express frustration about monetization'"
+      "score": <0-100, cảm xúc thực tế trong lời văn review>,
+      "reasoning": "1-2 câu tiếng Việt"
     },
     "issueSeverity": {
-      "score": <integer 0-100, higher=less severe issues. Based on how critical/game-breaking the reported issues are>,
-      "reasoning": "1-2 sentences on issue severity, e.g. 'Major complaints are cosmetic; no widespread crashes or data loss reported'"
+      "score": <0-100, cao = vấn đề ít nghiêm trọng>,
+      "reasoning": "1-2 câu tiếng Việt"
     },
     "trendMomentum": {
-      "score": <integer 0-100, based on whether recent reviews are more positive or negative than older ones>,
-      "reasoning": "1-2 sentences on trend direction, e.g. 'Recent reviews show improvement after the latest update addressed key complaints'"
+      "score": <0-100, review gần đây tích cực hơn hay tiêu cực hơn quá khứ>,
+      "reasoning": "1-2 câu tiếng Việt"
     },
-    "formula": "A clear 1-sentence explanation: 'Final score X = (ratingDistribution×30% + textSentiment×35% + issueSeverity×20% + trendMomentum×15%)'"
+    "formula": "Một câu tiếng Việt: Điểm cuối X = (ratingDistribution×30% + textSentiment×35% + issueSeverity×20% + trendMomentum×15%)"
   },
-  "recentTrend": "A 3-4 sentence description of how player sentiment has changed over time based on the review dates. Note any recent improvements or deterioration",
+  "recentTrendBullets": ["Gạch đầu dòng 1: xu hướng theo thời gian", "Gạch đầu dòng 2: ...", "..."],
   "topics": {
-    "gameplay": <integer 0-100, how much players discuss core gameplay mechanics>,
-    "graphics": <integer 0-100, how much players discuss visuals/art style>,
-    "story": <integer 0-100, how much players discuss narrative/story>,
-    "monetization": <integer 0-100, how much players discuss pricing/IAP/gacha>,
-    "performance": <integer 0-100, how much players discuss bugs/crashes/optimization>,
-    "community": <integer 0-100, how much players discuss social features/multiplayer/community>
+    "gameplay": <0-100>,
+    "graphics": <0-100>,
+    "story": <0-100>,
+    "monetization": <0-100>,
+    "performance": <0-100>,
+    "community": <0-100>
   }
 }
 
-IMPORTANT rules:
-- sentimentScore MUST equal the weighted result of sentimentBreakdown: ratingDistribution×0.30 + textSentiment×0.35 + issueSeverity×0.20 + trendMomentum×0.15, rounded to nearest integer.
-- Each breakdown score must have concrete reasoning referencing actual review content.
-- For strengths and weaknesses: include ONLY key points actually mentioned. Do NOT pad to a fixed number.
-- mentionRate must be an integer representing the estimated % of analyzed reviews that mention this specific point.
-- Sort each list by mentionRate descending (most mentioned first).
-- Be specific and actionable (e.g. "Satisfying combat combo system" not just "Good gameplay").`;
+Quy tắc:
+- summaryBullets: 4–10 dòng, mỗi phần tử là MỘT gạch đầu dòng ngắn gọn (KHÔNG gộp thành đoạn văn dài một chuỗi).
+- recentTrendBullets: 3–8 dòng, theo mốc thời gian / bản cập nhật nếu có trong dữ liệu.
+- sentimentScore PHẢI bằng làm tròn: ratingDistribution×0.30 + textSentiment×0.35 + issueSeverity×0.20 + trendMomentum×0.15.
+- strengths/weaknesses: chỉ điểm thực sự có trong review; mentionRate là % ước lượng trên TOÀN BỘ review đã phân tích; sắp xếp mentionRate giảm dần.
+- Cụ thể, hành động được (ví dụ "hệ chiến đấu combo hấp dẫn" thay vì "gameplay hay").`;
 
 function buildAnalysisPrompt(gameName: string, reviews: StratifiedReview[]): string {
   const reviewBlock = buildReviewTextBlock(reviews, 1);
 
-  return `Analyze the following ${reviews.length} player reviews for the mobile game "${gameName}" from TapTap.
-Reviews are stratified across all rating levels (1-5 stars) to ensure balanced coverage of both positive and negative feedback.
-Each line is [#index|star rating|date] then the review text.
+  return `Phân tích ${reviews.length} đánh giá người chơi cho game mobile "${gameName}".
+Dữ liệu đã phân tầng theo sao 1-5 để cân bằng ý kiến tích cực và tiêu cực.
+Mỗi dòng có dạng [#chỉ mục|số sao|ngày] rồi đến nội dung review.
 
 Reviews:
 ${reviewBlock}
@@ -271,13 +272,25 @@ function packReviewsIntoMapChunks(
   return chunks;
 }
 
+function mergeMapChunksToMax(chunks: ReviewChunk[], max: number): ReviewChunk[] {
+  if (chunks.length <= max) return chunks;
+  const groupSize = Math.ceil(chunks.length / max);
+  const out: ReviewChunk[] = [];
+  for (let i = 0; i < chunks.length; i += groupSize) {
+    const group = chunks.slice(i, i + groupSize);
+    const reviews = group.flatMap((c) => c.reviews);
+    out.push({ firstIndex1Based: group[0]!.firstIndex1Based, reviews });
+  }
+  return out;
+}
+
 function buildMapUserPrompt(
   gameName: string,
   batch: number,
   totalBatches: number,
   reviewBlock: string,
 ): string {
-  return `Game: "${gameName}" — map batch ${batch}/${totalBatches} (this slice is one disjoint part of the full collected set). Format: [#n|stars|date] then text.
+  return `Game: "${gameName}" — lô trích xuất ${batch}/${totalBatches} (một phần rời của toàn bộ review). Định dạng: [#n|sao|ngày] rồi nội dung.
 ${reviewBlock}`;
 }
 
@@ -288,18 +301,38 @@ function buildReduceUserPrompt(
   dateRange: { start: string | null; end: string | null },
   mapRawJsonStrings: string[],
 ): string {
-  return `Synthesize a single analysis for the mobile game "${gameName}" from ${mapRawJsonStrings.length} disjoint batch extractions, together covering all ${totalReviews} collected reviews (none omitted from collection; batch order is not chronological by itself).
+  return `Tổng hợp MỘT bản phân tích cho game "${gameName}" từ ${mapRawJsonStrings.length} lô trích xuất rời nhau, cùng phủ toàn bộ ${totalReviews} review đã thu thập (không bỏ sót; thứ tự lô không nhất thiết theo thời gian).
 
-Hard facts (use for calibration):
-- review count: ${totalReviews}
-- per-bucket counts: ${JSON.stringify(bucketCounts)}
-- date range: ${dateRange.start ?? "unknown"} .. ${dateRange.end ?? "unknown"}
-- mentionRate in the final JSON must be estimated as % of the FULL ${totalReviews} reviews, informed by the extractions and bucket counts (not the map batch "roughCount" as the final %).
+Số liệu tham chiếu:
+- số review: ${totalReviews}
+- số theo bucket: ${JSON.stringify(bucketCounts)}
+- khoảng ngày: ${dateRange.start ?? "unknown"} .. ${dateRange.end ?? "unknown"}
+- mentionRate trong JSON cuối phải ước lượng theo % trên TOÀN BỘ ${totalReviews} review (không dùng trực tiếp roughCount của từng lô làm % cuối).
 
-Batch extractions (JSON, one per batch; subset indices only refer within that batch):
-${mapRawJsonStrings.map((s, i) => `--- map ${i + 1} ---\n${s}`).join("\n\n")}
+Dữ liệu từng lô (JSON, mỗi lô một khối):
+${mapRawJsonStrings.map((s, i) => `--- lô ${i + 1} ---\n${s}`).join("\n\n")}
 
 ${FINAL_OUTPUT_SPEC}`;
+}
+
+function normalizeBulletArray(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((x) => String(x).trim()).filter((s) => s.length > 0);
+}
+
+function bulletsFromLegacyParagraph(text: string): string[] {
+  const t = text.trim();
+  if (!t) return [];
+  const byNewline = t
+    .split(/\n+/)
+    .map((l) => l.replace(/^[-•*·]\s*/, "").trim())
+    .filter(Boolean);
+  if (byNewline.length > 1) return byNewline;
+  const sentences = t
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  return sentences.length > 0 ? sentences : [t];
 }
 
 function assignTier(rate: number): "frequent" | "moderate" | "rare" {
@@ -425,24 +458,31 @@ export class AIAnalysisService {
         throw new Error(`LLM request failed (${status ?? "unknown"})`);
       }
     } else {
-      const mapChunks = packReviewsIntoMapChunks(prepared, AI_MAP_CHUNK_MAX_CHARS);
+      const packed = packReviewsIntoMapChunks(prepared, AI_MAP_CHUNK_MAX_CHARS);
+      const mapChunks = mergeMapChunksToMax(packed, AI_MAX_MAP_CHUNKS);
+      if (packed.length !== mapChunks.length) {
+        console.log(
+          `[AI Analysis] ${gameName}: merged map batches ${packed.length} → ${mapChunks.length} (max ${AI_MAX_MAP_CHUNKS})`,
+        );
+      }
       const mapOut: string[] = new Array(mapChunks.length);
       const conc = Math.min(AI_MAP_CONCURRENCY, mapChunks.length);
+      const totalBatches = mapChunks.length;
       console.log(
-        `[AI Analysis] ${gameName}: map-reduce, ${reviews.length} reviews, ${mapChunks.length} map batches, ` +
+        `[AI Analysis] ${gameName}: map-reduce, ${reviews.length} reviews, ${totalBatches} map batches, ` +
         `concurrency=${conc}, model=${model} (single ~${estTokens(oneShot)} chars, threshold ${AI_SINGLE_PROMPT_MAX_CHARS})`
       );
 
-      const runMapBatch = async (c: (typeof mapChunks)[0], i: number): Promise<string> => {
+      const runMapBatch = async (c: (typeof mapChunks)[0], batchIndex1: number): Promise<string> => {
         const block = buildReviewTextBlock(c.reviews, c.firstIndex1Based);
-        const u = buildMapUserPrompt(gameName, i + 1, mapChunks.length, block);
+        const u = buildMapUserPrompt(gameName, batchIndex1, totalBatches, block);
         const est = estTokens(SYSTEM_MAP + u);
         console.log(
-          `[AI Analysis] ${gameName}: map ${i + 1}/${mapChunks.length} (reviews ${c.reviews.length}, ~${est} tok) start`
+          `[AI Analysis] ${gameName}: map ${batchIndex1}/${totalBatches} (reviews ${c.reviews.length}, ~${est} tok) start`
         );
         const response = await callLLM(SYSTEM_MAP, u, 4_096);
         console.log(
-          `[AI Analysis] ${gameName}: map ${i + 1} ok (${response.inputTokens ?? "?"}in/${response.outputTokens ?? "?"}out tok)`
+          `[AI Analysis] ${gameName}: map ${batchIndex1} ok (${response.inputTokens ?? "?"}in/${response.outputTokens ?? "?"}out tok)`
         );
         return response.content.trim();
       };
@@ -452,7 +492,7 @@ export class AIAnalysisService {
         try {
           const slice = mapChunks.slice(w, end);
           const wave = await Promise.all(
-            slice.map((chunk, offset) => runMapBatch(chunk, w + offset + 1))
+            slice.map((chunk, offset) => runMapBatch(chunk, w + offset + 1)),
           );
           for (let k = 0; k < wave.length; k++) mapOut[w + k] = wave[k]!;
         } catch (llmErr: unknown) {
@@ -492,18 +532,36 @@ export class AIAnalysisService {
 
     const breakdown = parseSentimentBreakdown(analysis.sentimentBreakdown);
 
+    let summaryBullets = normalizeBulletArray(analysis.summaryBullets);
+    if (summaryBullets.length === 0 && typeof analysis.summary === "string" && analysis.summary.trim()) {
+      summaryBullets = bulletsFromLegacyParagraph(analysis.summary);
+    }
+    if (summaryBullets.length === 0) {
+      summaryBullets = ["Không có tóm tắt."];
+    }
+
+    let recentTrendBullets = normalizeBulletArray(analysis.recentTrendBullets);
+    if (recentTrendBullets.length === 0 && typeof analysis.recentTrend === "string" && analysis.recentTrend.trim()) {
+      recentTrendBullets = bulletsFromLegacyParagraph(analysis.recentTrend);
+    }
+
+    const summary = summaryBullets.join("\n");
+    const recentTrend = recentTrendBullets.length > 0 ? recentTrendBullets.join("\n") : "";
+
     const result: AIAnalysisResult = {
       appId,
       gameName,
       iconUrl: opts?.iconUrl ?? null,
       source: opts?.source ?? "database",
-      summary: analysis.summary ?? "No summary available",
+      summary,
+      summaryBullets,
       strengths: parseFeedbackItems(analysis.strengths),
       weaknesses: parseFeedbackItems(analysis.weaknesses),
       sentimentScore: typeof analysis.sentimentScore === "number" ? analysis.sentimentScore : 50,
       sentimentBreakdown: breakdown ?? undefined,
       topics: analysis.topics ?? {},
-      recentTrend: typeof analysis.recentTrend === "string" ? analysis.recentTrend : "",
+      recentTrend,
+      recentTrendBullets: recentTrendBullets.length > 0 ? recentTrendBullets : undefined,
       reviewsAnalyzed: reviews.length,
       bucketCounts,
       dateRangeStart: dateRange.start,

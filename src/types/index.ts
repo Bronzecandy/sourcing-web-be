@@ -146,13 +146,17 @@ export interface AIAnalysisResult {
   gameName?: string;
   iconUrl?: string | null;
   source?: "database" | "external" | "csv-upload";
+  /** Joined bullets for backward compatibility */
   summary: string;
+  /** One bullet per string (Vietnamese from LLM) */
+  summaryBullets?: string[];
   strengths: AIFeedbackItem[];
   weaknesses: AIFeedbackItem[];
   sentimentScore: number;
   sentimentBreakdown?: SentimentBreakdown;
   topics: Record<string, number>;
   recentTrend: string;
+  recentTrendBullets?: string[];
   reviewsAnalyzed: number;
   bucketCounts: Record<string, number>;
   dateRangeStart: string | null;
