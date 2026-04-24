@@ -34,6 +34,55 @@ const RATING_BUCKETS = [
 
 const PER_BUCKET_LIMIT = 100_000;
 
+function intEnv(name: string, def: number): number {
+  const v = process.env[name];
+  if (v == null || v === "") return def;
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) ? n : def;
+}
+
+/** Truncate + normalize per review before sending to the LLM. Collection logic is unchanged. */
+const AI_REVIEW_MAX_CHARS = (() => {
+  const m = intEnv("AI_REVIEW_MAX_CHARS", 2_000);
+  return m <= 0 ? Number.POSITIVE_INFINITY : m;
+})();
+
+/** If the (compressed) one-shot prompt is longer, use map-reduce. Tune down if 400s on small context models. */
+const AI_SINGLE_PROMPT_MAX_CHARS = intEnv("AI_SINGLE_PROMPT_MAX_CHARS", 500_000);
+/** Max characters of review text block per map batch (larger = fewer map rounds, faster with concurrency). */
+const AI_MAP_CHUNK_MAX_CHARS = intEnv("AI_MAP_CHUNK_MAX_CHARS", 300_000);
+/** Parallel map() LLM calls per wave. Lower (e.g. 2) if you hit 429 from the provider. */
+const AI_MAP_CONCURRENCY = Math.max(1, intEnv("AI_MAP_CONCURRENCY", 6));
+
+function collapseWhitespace(s: string): string {
+  return s.replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function clipReviewTextForLLM(text: string): string {
+  const t = collapseWhitespace(text);
+  if (t.length <= AI_REVIEW_MAX_CHARS) return t;
+  return `${t.slice(0, Math.max(0, Math.floor(AI_REVIEW_MAX_CHARS) - 1))}…`;
+}
+
+function withClippedText(r: StratifiedReview): StratifiedReview {
+  return { ...r, text: clipReviewTextForLLM(r.text) };
+}
+
+function lineForReview(global1Based: number, r: StratifiedReview): string {
+  return `[#${global1Based}|${r.score}★|${r.date}]\n${r.text}`;
+}
+
+const SYSTEM_MAP = `You are extracting signals from ONE batch of mobile game reviews (TapTap, mixed languages). Output in ENGLISH only. Respond with ONLY a valid JSON object, no markdown fences, no other text. Schema:
+{
+  "strengths": [{"point":"...","roughCount":<how many reviews in this batch support this, integer>}],
+  "weaknesses": [{"point":"...","roughCount":<integer>}],
+  "topicHints": {"gameplay":0-100,"graphics":0-100,"story":0-100,"monetization":0-100,"performance":0-100,"community":0-100},
+  "subsetSummary":"2-3 sentences: sentiment and key issues in THIS batch only, referencing patterns not exact counts"
+}
+roughCount is only for this subset, not the whole game.`;
+
+const SYSTEM_REDUCE = `You are a senior game industry analyst. You are given pre-extractions from ALL batches of the same game's reviews; batches are disjoint and together cover 100% of the collected reviews. You also receive exact per-rating-bucket review counts. Synthesize one holistic view. If batch extractions disagree, reason about the overall data. You MUST respond with ONLY a valid JSON object, no markdown fences, no other text, matching the user schema.`;
+
 const SYSTEM_PROMPT = `You are a senior game industry analyst specializing in mobile gaming market intelligence.
 You will receive user reviews from TapTap (a Chinese game platform), stratified across all rating levels (1-5 stars).
 Reviews may be in Chinese, English, or mixed. Analyze them thoroughly and respond in ENGLISH only.
@@ -110,22 +159,17 @@ function getDateRange(reviews: StratifiedReview[]): { start: string | null; end:
   return { start: dates[0] ?? null, end: dates[dates.length - 1] ?? null };
 }
 
-function buildAnalysisPrompt(gameName: string, reviews: StratifiedReview[]): string {
-  const reviewBlock = reviews
-    .map(
-      (r, i) =>
-        `[#${i + 1} | Rating: ${r.score}/5 | Date: ${r.date} | Bucket: ${r.bucket}]\n${r.text}`
-    )
-    .join("\n---\n");
+function buildReviewTextBlock(
+  reviews: StratifiedReview[],
+  firstIndex1Based: number,
+): string {
+  const start = firstIndex1Based;
+  return reviews
+    .map((r, i) => lineForReview(start + i, r))
+    .join("\n\n");
+}
 
-  return `Analyze the following ${reviews.length} player reviews for the mobile game "${gameName}" from TapTap.
-Reviews are stratified across all rating levels (1-5 stars) to ensure balanced coverage of both positive and negative feedback.
-Each review includes its star rating (1-5), date, and sentiment bucket.
-
-Reviews:
-${reviewBlock}
-
-Return a JSON object with this exact structure:
+const FINAL_OUTPUT_SPEC = `Return a JSON object with this exact structure:
 {
   "summary": "A concise 3-4 sentence overview of overall player sentiment and what kind of game this appears to be",
   "strengths": [
@@ -172,6 +216,90 @@ IMPORTANT rules:
 - mentionRate must be an integer representing the estimated % of analyzed reviews that mention this specific point.
 - Sort each list by mentionRate descending (most mentioned first).
 - Be specific and actionable (e.g. "Satisfying combat combo system" not just "Good gameplay").`;
+
+function buildAnalysisPrompt(gameName: string, reviews: StratifiedReview[]): string {
+  const reviewBlock = buildReviewTextBlock(reviews, 1);
+
+  return `Analyze the following ${reviews.length} player reviews for the mobile game "${gameName}" from TapTap.
+Reviews are stratified across all rating levels (1-5 stars) to ensure balanced coverage of both positive and negative feedback.
+Each line is [#index|star rating|date] then the review text.
+
+Reviews:
+${reviewBlock}
+
+${FINAL_OUTPUT_SPEC}`;
+}
+
+function lineCharLen(r: StratifiedReview, global1Based: number): number {
+  return lineForReview(global1Based, r).length;
+}
+
+type ReviewChunk = { firstIndex1Based: number; reviews: StratifiedReview[] };
+
+function packReviewsIntoMapChunks(
+  reviews: StratifiedReview[],
+  maxBlockChars: number,
+): ReviewChunk[] {
+  const chunks: ReviewChunk[] = [];
+  let current: StratifiedReview[] = [];
+  let used = 0;
+  let firstG = 1;
+  let g = 0;
+
+  for (const r of reviews) {
+    g += 1;
+    const sep = current.length > 0 ? 2 : 0;
+    let row: StratifiedReview = r;
+    if (sep + lineCharLen(row, g) > maxBlockChars) {
+      const budget = Math.max(40, maxBlockChars - sep - 40);
+      row = { ...r, text: `${r.text.slice(0, Math.max(0, budget - 1))}…` };
+    }
+    const add = sep + lineCharLen(row, g);
+    if (current.length > 0 && used + add > maxBlockChars) {
+      chunks.push({ firstIndex1Based: firstG, reviews: current });
+      current = [];
+      used = 0;
+      firstG = g;
+    }
+    current.push(row);
+    used += add;
+  }
+
+  if (current.length > 0) {
+    chunks.push({ firstIndex1Based: firstG, reviews: current });
+  }
+  return chunks;
+}
+
+function buildMapUserPrompt(
+  gameName: string,
+  batch: number,
+  totalBatches: number,
+  reviewBlock: string,
+): string {
+  return `Game: "${gameName}" — map batch ${batch}/${totalBatches} (this slice is one disjoint part of the full collected set). Format: [#n|stars|date] then text.
+${reviewBlock}`;
+}
+
+function buildReduceUserPrompt(
+  gameName: string,
+  totalReviews: number,
+  bucketCounts: Record<string, number>,
+  dateRange: { start: string | null; end: string | null },
+  mapRawJsonStrings: string[],
+): string {
+  return `Synthesize a single analysis for the mobile game "${gameName}" from ${mapRawJsonStrings.length} disjoint batch extractions, together covering all ${totalReviews} collected reviews (none omitted from collection; batch order is not chronological by itself).
+
+Hard facts (use for calibration):
+- review count: ${totalReviews}
+- per-bucket counts: ${JSON.stringify(bucketCounts)}
+- date range: ${dateRange.start ?? "unknown"} .. ${dateRange.end ?? "unknown"}
+- mentionRate in the final JSON must be estimated as % of the FULL ${totalReviews} reviews, informed by the extractions and bucket counts (not the map batch "roughCount" as the final %).
+
+Batch extractions (JSON, one per batch; subset indices only refer within that batch):
+${mapRawJsonStrings.map((s, i) => `--- map ${i + 1} ---\n${s}`).join("\n\n")}
+
+${FINAL_OUTPUT_SPEC}`;
 }
 
 function assignTier(rate: number): "frequent" | "moderate" | "rare" {
@@ -271,22 +399,88 @@ export class AIAnalysisService {
   ): Promise<AIAnalysisResult> {
     const bucketCounts = buildBucketCounts(reviews);
     const dateRange = getDateRange(reviews);
-    const prompt = buildAnalysisPrompt(gameName, reviews);
+    const prepared: StratifiedReview[] = reviews.map((r) => withClippedText(r));
 
     const model = getModel();
-    const promptTokenEstimate = Math.ceil(prompt.length / 3);
-    console.log(`[AI Analysis] ${gameName}: sending ${reviews.length} reviews to LLM (model=${model}, ~${promptTokenEstimate} tokens)`);
+    const oneShot = buildAnalysisPrompt(gameName, prepared);
+    const estTokens = (s: string) => Math.ceil(s.length / 3);
 
     let content: string;
-    try {
-      const response = await callLLM(SYSTEM_PROMPT, prompt, 16_384);
-      content = response.content;
-      console.log(`[AI Analysis] ${gameName}: LLM responded (${response.inputTokens ?? "?"}in/${response.outputTokens ?? "?"}out tokens)`);
-    } catch (llmErr: unknown) {
-      const status = (llmErr as { status?: number }).status;
-      const body = (llmErr as { error?: unknown }).error;
-      console.error(`[AI Analysis] LLM error (status ${status}):`, JSON.stringify(body ?? llmErr));
-      throw new Error(`LLM request failed (${status ?? "unknown"})`);
+
+    if (oneShot.length <= AI_SINGLE_PROMPT_MAX_CHARS) {
+      console.log(
+        `[AI Analysis] ${gameName}: single call, ${reviews.length} reviews, model=${model}, ` +
+        `~${estTokens(oneShot)} prompt tok (cap reviews=${Number.isFinite(AI_REVIEW_MAX_CHARS) ? AI_REVIEW_MAX_CHARS : "unlimited"})`
+      );
+      try {
+        const response = await callLLM(SYSTEM_PROMPT, oneShot, 16_384);
+        content = response.content;
+        console.log(
+          `[AI Analysis] ${gameName}: LLM done (${response.inputTokens ?? "?"}in/${response.outputTokens ?? "?"}out tok)`
+        );
+      } catch (llmErr: unknown) {
+        const status = (llmErr as { status?: number }).status;
+        const body = (llmErr as { error?: unknown }).error;
+        console.error(`[AI Analysis] LLM error (status ${status}):`, JSON.stringify(body ?? llmErr));
+        throw new Error(`LLM request failed (${status ?? "unknown"})`);
+      }
+    } else {
+      const mapChunks = packReviewsIntoMapChunks(prepared, AI_MAP_CHUNK_MAX_CHARS);
+      const mapOut: string[] = new Array(mapChunks.length);
+      const conc = Math.min(AI_MAP_CONCURRENCY, mapChunks.length);
+      console.log(
+        `[AI Analysis] ${gameName}: map-reduce, ${reviews.length} reviews, ${mapChunks.length} map batches, ` +
+        `concurrency=${conc}, model=${model} (single ~${estTokens(oneShot)} chars, threshold ${AI_SINGLE_PROMPT_MAX_CHARS})`
+      );
+
+      const runMapBatch = async (c: (typeof mapChunks)[0], i: number): Promise<string> => {
+        const block = buildReviewTextBlock(c.reviews, c.firstIndex1Based);
+        const u = buildMapUserPrompt(gameName, i + 1, mapChunks.length, block);
+        const est = estTokens(SYSTEM_MAP + u);
+        console.log(
+          `[AI Analysis] ${gameName}: map ${i + 1}/${mapChunks.length} (reviews ${c.reviews.length}, ~${est} tok) start`
+        );
+        const response = await callLLM(SYSTEM_MAP, u, 4_096);
+        console.log(
+          `[AI Analysis] ${gameName}: map ${i + 1} ok (${response.inputTokens ?? "?"}in/${response.outputTokens ?? "?"}out tok)`
+        );
+        return response.content.trim();
+      };
+
+      for (let w = 0; w < mapChunks.length; w += conc) {
+        const end = Math.min(w + conc, mapChunks.length);
+        try {
+          const slice = mapChunks.slice(w, end);
+          const wave = await Promise.all(
+            slice.map((chunk, offset) => runMapBatch(chunk, w + offset + 1))
+          );
+          for (let k = 0; k < wave.length; k++) mapOut[w + k] = wave[k]!;
+        } catch (llmErr: unknown) {
+          const status = (llmErr as { status?: number }).status;
+          const body = (llmErr as { error?: unknown }).error;
+          console.error(`[AI Analysis] LLM error (map wave ${w}..${end - 1}, status ${status}):`, JSON.stringify(body ?? llmErr));
+          throw new Error(`LLM request failed (${status ?? "unknown"})`);
+        }
+      }
+      const reducePrompt = buildReduceUserPrompt(
+        gameName,
+        reviews.length,
+        bucketCounts,
+        dateRange,
+        mapOut,
+      );
+      try {
+        const response = await callLLM(SYSTEM_REDUCE, reducePrompt, 16_384);
+        content = response.content;
+        console.log(
+          `[AI Analysis] ${gameName}: reduce done (${response.inputTokens ?? "?"}in/${response.outputTokens ?? "?"}out tok)`
+        );
+      } catch (llmErr: unknown) {
+        const status = (llmErr as { status?: number }).status;
+        const body = (llmErr as { error?: unknown }).error;
+        console.error(`[AI Analysis] LLM error (reduce, status ${status}):`, JSON.stringify(body ?? llmErr));
+        throw new Error(`LLM request failed (${status ?? "unknown"})`);
+      }
     }
 
     let cleaned = content.trim();

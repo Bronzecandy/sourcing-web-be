@@ -9,9 +9,20 @@ import { cache } from "./utils/cache";
 
 const app = express();
 
+function resolveCorsOrigin(): string | string[] {
+  const raw = process.env.CORS_ORIGIN?.trim() || "http://localhost:5173";
+  if (raw.includes(",")) {
+    return raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+  return raw;
+}
+
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN || "http://localhost:5173",
+    origin: resolveCorsOrigin(),
     credentials: true,
   })
 );
