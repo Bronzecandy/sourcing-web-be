@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "items": [
+    {
+      "type": "genre_tags",
+      "label": "休闲",
+      "detailVi": "Chưa khớp tag/genre trong genre-tiers.json. Thêm pattern vào \"tagPatterns\" hoặc để mặc định LLM (điểm gốc ~50).",
+      "jsonSuggestion": {
+        "hint": "Thêm một object vào tagPatterns trong genre-tiers.json",
+        "example": {
+          "match": [
+            "休闲"
+          ],
+          "tier": "B"
+        }
+      },
+      "appId": 845749,
+      "gameName": "纸嫁衣9",
+      "id": "53bf1cc3-8f26-4b80-8ec7-977c9d113b87",
+      "createdAt": "2026-05-04T06:46:51.663Z",
+      "status": "merged"
+    },
+    {
+      "type": "studio",
+      "label": "西木木",
+      "detailVi": "Developer \"西木木\" chưa có trong studio-tiers.json. Thêm entry và chỉnh score (ví dụ 55).",
+      "jsonSuggestion": {
+        "names": [
+          "西木木"
+        ],
+        "score": 55,
+        "tier": "custom",
+        "roles": [
+          "developer"
+        ]
+      },
+      "appId": 813133,
+      "gameName": "善良都市",
+      "id": "d5059897-f5c8-4e1e-b935-fcbdd9015ad2",
+      "createdAt": "2026-05-04T10:06:27.388Z",
+      "status": "merged"
+    },
+    {
+      "type": "studio",
+      "label": "西木木",
+      "detailVi": "Developer name is not listed in studio-tiers.json. Merge adds an entry; adjust score if needed (example baseline 55).",
+      "jsonSuggestion": {
+        "names": [
+          "西木木"
+        ],
+        "score": 55,
+        "tier": "custom",
+        "roles": [
+          "developer"
+        ]
+      },
+      "appId": 813133,
+      "gameName": "善良都市",
+      "id": "5ac31e54-9eda-4987-8f08-5458754d8294",
+      "createdAt": "2026-05-04T10:42:25.767Z",
+      "status": "merged"
+    }
+  ]
+}

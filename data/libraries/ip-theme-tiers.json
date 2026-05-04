@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "neutralScore": 55,
+  "keywordPatterns": [
+    { "match": ["major ip", "big ip", "anime", "manga", "marvel", "dc comic", "naruto", "one piece", "genshin", "star wars", "blockbuster ip"], "score": 88 },
+    { "match": ["novel", "light novel", "novel adaptation", "licensed", "franchise"], "score": 78 },
+    { "match": ["original ip", "new ip", "indie story", "original world"], "score": 68 }
+  ],
+  "notes": "English keywords only. Chinese title/tag text is still searched in raw haystack; tag names are also appended in English via translateTag() for matching."
+}

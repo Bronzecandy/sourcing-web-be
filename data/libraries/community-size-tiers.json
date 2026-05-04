@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "neutralScore": 55,
+  "fanTierRules": [
+    { "minFans": 5000000, "score": 92 },
+    { "minFans": 1000000, "score": 82 },
+    { "minFans": 500000, "score": 72 },
+    { "minFans": 100000, "score": 62 },
+    { "minFans": 0, "score": 52 }
+  ],
+  "notes": "Ước lượng từ fans_count TapTap khi có; bổ sung research Reddit/Discord sau (CSV). Chỉnh ngưỡng hoặc thêm tier."
+}

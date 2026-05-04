@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "neutralScore": 55,
+  "maxMbGood": 3500,
+  "rules": [
+    { "maxMb": 500, "score": 95, "label": "Rất nhẹ" },
+    { "maxMb": 1500, "score": 85, "label": "Nhẹ" },
+    { "maxMb": 3500, "score": 72, "label": "Trung bình" },
+    { "maxMb": 8000, "score": 58, "label": "Nặng" },
+    { "maxMb": 999999, "score": 45, "label": "Rất nặng" }
+  ],
+  "notes": "Chỉnh ngưỡng MB hoặc điểm; khi có package size từ store/API sẽ map vào đây."
+}

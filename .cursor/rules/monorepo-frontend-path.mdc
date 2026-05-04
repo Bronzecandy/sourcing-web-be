@@ -1,0 +1,21 @@
+---
+description: Frontend (React/Vite) sống ở thư mục fe cạnh be — không sửa UI nhầm trong be/public
+alwaysApply: true
+---
+
+# Monorepo: đường dẫn FE
+
+- **Backend (API, Prisma, rubric JSON):** thư mục hiện tại của workspace — `Sourcing/be` (package `be`).
+- **Frontend (React, Vite, trang, component):** **`Sourcing/fe`** — cạnh `be`, **không** nằm trong `be`.
+- **Đường dẫn đầy đủ (máy user):** `C:\Users\thanhnam.tran_ctv\Desktop\Sourcing\fe`
+- **Từ thư mục gốc `be`:** mã nguồn UI là **`../fe/`** (ví dụ `../fe/src/pages/`, `../fe/src/components/`).
+
+## Khi user nhắc “FE”, “UI”, “giao diện”, “chỉnh màn hình”
+
+1. Sửa file dưới **`fe/src/`** (và cấu hình Vite ở `fe/` nếu cần).
+2. **Không** dùng `be/public/*.html` làm app chính (chỉ có thể có trang admin tĩnh lẻ; app review là Vite ở `fe`).
+3. Nếu workspace Cursor chỉ mở `be` và tool không thấy `fe`, dùng **đường dẫn tuyệt đối** tới `...\Sourcing\fe\...` hoặc yêu cầu user **Add Folder to Workspace** thêm folder `fe`.
+
+## Backend chỉ trả JSON
+
+API (`be`) chỉ định nghĩa types / payload; hiển thị Có/Không, Red Flag, rubric — làm **ở `fe`**.

@@ -1,7 +1,23 @@
 import { callLLM, getModel } from "../utils/ai-client";
 import { pool } from "../utils/prisma";
 import { prisma } from "../utils/prisma";
-import type { AIAnalysisResult, AIFeedbackItem, SentimentBreakdown, SentimentCriterion, TapTapRawApp } from "../types";
+import type { AIAnalysisResult, TapTapRawApp } from "../types";
+import { buildAnalysisContextFromRaw, type AnalysisContext } from "./analysis-context";
+import { getActiveCriteria, loadRubricManifest } from "./rubric-manifest";
+import {
+  appendRubricSpec,
+  formatContextForPrompt,
+  formatLibraryScoresForPrompt,
+  mergeRubricFromLlm,
+  parseLlmRubricRows,
+  parseRedFlagSignals,
+  resolveLibraryScores,
+  inferGenrePack,
+  buildLibraryRequests,
+  persistLibraryRequestsToFile,
+  buildRedFlagAtAGlance,
+  buildRedFlagsChecklist,
+} from "./rubric-merge";
 import fs from "fs";
 import path from "path";
 
@@ -55,9 +71,63 @@ const AI_MAP_CHUNK_MAX_CHARS = intEnv("AI_MAP_CHUNK_MAX_CHARS", 300_000);
 const AI_MAP_CONCURRENCY = Math.max(1, intEnv("AI_MAP_CONCURRENCY", 6));
 /** After packing, merge down to at most this many map batches (default 3). */
 const AI_MAX_MAP_CHUNKS = Math.max(1, intEnv("AI_MAX_MAP_CHUNKS", 3));
+/** Fetch reviews in batches to survive replica recovery conflicts + retry transient PG errors. */
+const AI_REVIEW_FETCH_BATCH = Math.max(50, intEnv("AI_REVIEW_FETCH_BATCH", 1000));
 
 function collapseWhitespace(s: string): string {
   return s.replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/**
+ * LLM output often includes raw U+0000–U+001F inside JSON string values; `JSON.parse` rejects those.
+ * Escape only inside double-quoted string literals (respects `\"` and `\\`).
+ */
+function escapeControlCharsInJsonStringLiterals(text: string): string {
+  let out = "";
+  let inString = false;
+  let escape = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]!;
+    const code = c.charCodeAt(0);
+    if (escape) {
+      out += c;
+      escape = false;
+      continue;
+    }
+    if (c === "\\") {
+      out += c;
+      escape = true;
+      continue;
+    }
+    if (c === '"') {
+      inString = !inString;
+      out += c;
+      continue;
+    }
+    if (inString && code <= 0x1f) {
+      out += "\\u" + code.toString(16).padStart(4, "0");
+      continue;
+    }
+    out += c;
+  }
+  return out;
+}
+
+function parseLlmJsonOutput(content: string): Record<string, unknown> {
+  let cleaned = content.trim();
+  if (cleaned.startsWith("```")) {
+    cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim();
+  }
+  try {
+    return JSON.parse(cleaned) as Record<string, unknown>;
+  } catch (firstErr: unknown) {
+    try {
+      return JSON.parse(escapeControlCharsInJsonStringLiterals(cleaned)) as Record<string, unknown>;
+    } catch {
+      console.error("[AI Analysis] JSON.parse failed (after control-char repair):", firstErr);
+      throw firstErr;
+    }
+  }
 }
 
 function clipReviewTextForLLM(text: string): string {
@@ -76,12 +146,10 @@ function lineForReview(global1Based: number, r: StratifiedReview): string {
 
 const SYSTEM_MAP = `Bạn đang trích xuất tín hiệu từ MỘT lô đánh giá người chơi về game mobile (nhiều ngôn ngữ). Chỉ trả lời bằng TIẾNG VIỆT. Chỉ trả về MỘT object JSON hợp lệ, không markdown, không text ngoài JSON. Schema:
 {
-  "strengths": [{"point":"...","roughCount":<số review trong lô này ủng hộ ý này, số nguyên>}],
-  "weaknesses": [{"point":"...","roughCount":<số nguyên>}],
-  "topicHints": {"gameplay":0-100,"graphics":0-100,"story":0-100,"monetization":0-100,"performance":0-100,"community":0-100},
+  "topicHints": {"gameplay":0-100,"graphics":0-100,"story":0-100,"monetization":0-100,"performance":0-100},
   "subsetSummary":"2-3 câu tiếng Việt: cảm xúc và vấn đề chính CHỈ trong lô này"
 }
-roughCount chỉ cho lô này, không phải toàn game.`;
+Chỉ số topicHints là ước lượng mức độ thảo luận trong lô này. Không cần strengths/weaknesses ở bước này.`;
 
 const SYSTEM_REDUCE = `Bạn là chuyên gia phân tích game mobile. Bạn nhận kết quả trích xuất từ TẤT CẢ các lô đánh giá của cùng một game; các lô không trùng nhau và cùng phủ toàn bộ review đã thu thập. Bạn cũng có số lượng review theo từng mức sao. Hãy tổng hợp một bức tranh thống nhất. Nếu các lô mâu thuẫn, hãy suy luận theo toàn dữ liệu. BẮT BUỘC chỉ trả về MỘT object JSON hợp lệ, không markdown, không text ngoài JSON, đúng schema người dùng cung cấp. Mọi văn bản trong JSON phải bằng TIẾNG VIỆT.`;
 
@@ -95,6 +163,43 @@ export interface StratifiedReview {
   score: number;
   date: string;
   bucket: string;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetryablePgError(err: unknown): boolean {
+  const e = err as { code?: string; message?: string };
+  if (e.code === "40001" || e.code === "40P01" || e.code === "57P03") return true;
+  return typeof e.message === "string" && e.message.includes("conflict with recovery");
+}
+
+async function queryReviewBatch(
+  appId: number,
+  afterId: number,
+  limit: number,
+): Promise<{ id: number; raw: Record<string, unknown>; reviewAt: Date | null }[]> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const res = await pool.query<{ id: number; raw: Record<string, unknown>; reviewAt: Date | null }>(
+        `SELECT id, raw, "reviewAt"
+         FROM "AppReview"
+         WHERE "appId" = $1 AND id > $2 AND raw IS NOT NULL
+         ORDER BY id ASC
+         LIMIT $3`,
+        [appId, afterId, limit],
+      );
+      return res.rows;
+    } catch (err) {
+      lastErr = err;
+      if (!isRetryablePgError(err) || attempt === 3) throw err;
+      console.warn(`[AI Analysis] AppReview batch retry ${attempt + 1}/3:`, (err as Error).message);
+      await sleep(250 * (attempt + 1));
+    }
+  }
+  throw lastErr;
 }
 
 function parseReviewRow(
@@ -120,29 +225,49 @@ function parseReviewRow(
 
 async function fetchStratifiedReviews(appId: number): Promise<StratifiedReview[]> {
   const startMs = Date.now();
+  const rows: { raw: Record<string, unknown>; reviewAt: Date | null }[] = [];
+  let afterId = 0;
 
-  const { rows } = await pool.query<{ raw: Record<string, unknown>; reviewAt: Date | null }>(
-    `SELECT raw, "reviewAt"
-     FROM "AppReview"
-     WHERE "appId" = $1
-       AND raw IS NOT NULL
-     ORDER BY "reviewAt" DESC`,
-    [appId]
-  );
+  for (;;) {
+    let batch: { id: number; raw: Record<string, unknown>; reviewAt: Date | null }[];
+    try {
+      batch = await queryReviewBatch(appId, afterId, AI_REVIEW_FETCH_BATCH);
+    } catch (err) {
+      console.error(`[AI Analysis] AppReview batch failed after retries for appId=${appId}:`, err);
+      throw err;
+    }
+    if (batch.length === 0) break;
+    for (const row of batch) {
+      rows.push({ raw: row.raw, reviewAt: row.reviewAt });
+      afterId = row.id;
+    }
+    if (batch.length < AI_REVIEW_FETCH_BATCH) break;
+  }
 
-  console.log(`[AI Analysis] Fetched ${rows.length} raw reviews in ${Date.now() - startMs}ms`);
+  console.log(`[AI Analysis] Fetched ${rows.length} raw reviews (batched) in ${Date.now() - startMs}ms`);
 
   const allReviews: StratifiedReview[] = [];
 
   for (const row of rows) {
-    const raw = row.raw;
-    const review = raw?.review as Record<string, unknown> | undefined;
-    const score = Math.round(Number(review?.score ?? 0));
-    const bucket = RATING_BUCKETS.find((b) => score >= b.min && score <= b.max);
-    const bucketLabel = bucket?.label ?? "Unrated";
-    const r = parseReviewRow(row, bucketLabel);
-    if (r) allReviews.push(r);
+    try {
+      const raw = row.raw;
+      const review = raw?.review as Record<string, unknown> | undefined;
+      const score = Math.round(Number(review?.score ?? 0));
+      const bucket = RATING_BUCKETS.find((b) => score >= b.min && score <= b.max);
+      const bucketLabel = bucket?.label ?? "Unrated";
+      const r = parseReviewRow(row, bucketLabel);
+      if (r) allReviews.push(r);
+    } catch (rowErr) {
+      console.warn("[AI Analysis] skip corrupt AppReview row:", (rowErr as Error).message);
+    }
   }
+
+  allReviews.sort((a, b) => {
+    if (a.date === "unknown" && b.date === "unknown") return 0;
+    if (a.date === "unknown") return 1;
+    if (b.date === "unknown") return -1;
+    return b.date.localeCompare(a.date);
+  });
 
   console.log(`[AI Analysis] Parsed ${allReviews.length} valid reviews in ${Date.now() - startMs}ms`);
 
@@ -171,64 +296,44 @@ function buildReviewTextBlock(
     .join("\n\n");
 }
 
-const FINAL_OUTPUT_SPEC = `Trả về một object JSON đúng cấu trúc sau (toàn bộ chuỗi tiếng Việt):
+const FINAL_OUTPUT_SPEC = `Trả về một object JSON đúng cấu trúc sau (toàn bộ chuỗi tiếng Việt). ĐIỂM CHÍNH là rubricCriteria — phải đủ mọi id đã liệt kê; điểm mạnh/yếu gắn với TỪNG tiêu chí trong rubricCriteria, không dùng strengths/weaknesses tổng hợp riêng.
 {
-  "summaryBullets": ["Gạch đầu dòng 1: ý chính về cảm xúc tổng thể", "Gạch đầu dòng 2: ...", "..."],
-  "strengths": [
-    {"point": "mô tả điểm mạnh bằng tiếng Việt", "mentionRate": <số nguyên 0-100, % review nhắc tới>}
-  ],
-  "weaknesses": [
-    {"point": "mô tả điểm yếu bằng tiếng Việt", "mentionRate": <số nguyên 0-100>}
-  ],
-  "sentimentScore": <số nguyên 0-100>,
-  "sentimentBreakdown": {
-    "ratingDistribution": {
-      "score": <0-100, trung bình có trọng số theo sao: 1★=0, 2★=25, 3★=50, 4★=75, 5★=100>,
-      "reasoning": "1-2 câu tiếng Việt"
-    },
-    "textSentiment": {
-      "score": <0-100, cảm xúc thực tế trong lời văn review>,
-      "reasoning": "1-2 câu tiếng Việt"
-    },
-    "issueSeverity": {
-      "score": <0-100, cao = vấn đề ít nghiêm trọng>,
-      "reasoning": "1-2 câu tiếng Việt"
-    },
-    "trendMomentum": {
-      "score": <0-100, review gần đây tích cực hơn hay tiêu cực hơn quá khứ>,
-      "reasoning": "1-2 câu tiếng Việt"
-    },
-    "formula": "Một câu tiếng Việt: Điểm cuối X = (ratingDistribution×30% + textSentiment×35% + issueSeverity×20% + trendMomentum×15%)"
-  },
-  "recentTrendBullets": ["Gạch đầu dòng 1: xu hướng theo thời gian", "Gạch đầu dòng 2: ...", "..."],
-  "topics": {
-    "gameplay": <0-100>,
-    "graphics": <0-100>,
-    "story": <0-100>,
-    "monetization": <0-100>,
-    "performance": <0-100>,
-    "community": <0-100>
-  }
+  "summaryBullets": ["3–8 gạch đầu dòng ngắn: bức tranh tổng thể từ review"],
+  "recentTrendBullets": ["2–6 gạch đầu dòng: xu hướng theo thời gian nếu thấy trong dữ liệu"],
+  "rubricCriteria": [ ... theo spec rubric bên dưới ... ],
+  "redFlagSignals": { ... }
 }
 
-Quy tắc:
-- summaryBullets: 4–10 dòng, mỗi phần tử là MỘT gạch đầu dòng ngắn gọn (KHÔNG gộp thành đoạn văn dài một chuỗi).
-- recentTrendBullets: 3–8 dòng, theo mốc thời gian / bản cập nhật nếu có trong dữ liệu.
-- sentimentScore PHẢI bằng làm tròn: ratingDistribution×0.30 + textSentiment×0.35 + issueSeverity×0.20 + trendMomentum×0.15.
-- strengths/weaknesses: chỉ điểm thực sự có trong review; mentionRate là % ước lượng trên TOÀN BỘ review đã phân tích; sắp xếp mentionRate giảm dần.
-- Cụ thể, hành động được (ví dụ "hệ chiến đấu combo hấp dẫn" thay vì "gameplay hay").`;
+Không trả các trường: strengths, weaknesses (toàn cục), sentimentScore, sentimentBreakdown, topics — các trường đó không còn dùng.
 
-function buildAnalysisPrompt(gameName: string, reviews: StratifiedReview[]): string {
+Quy tắc:
+- summaryBullets / recentTrendBullets: mỗi phần tử một ý ngắn.
+- Red Flag: severity trong redFlagSignals (không chấm điểm); các dòng rubricCriteria có id "red_flag.*" đặt score null — xem spec rubric chi tiết.
+- Với MỖI tiêu chí trong rubricCriteria: strengths và weaknesses là mảng các chuỗi ngắn riêng của tiêu chí đó (1–5 mục mỗi loại nếu có dữ liệu).`;
+
+function buildAnalysisPrompt(
+  gameName: string,
+  reviews: StratifiedReview[],
+  finalSpec: string,
+  contextBlock: string,
+  libraryBlock: string,
+): string {
   const reviewBlock = buildReviewTextBlock(reviews, 1);
 
   return `Phân tích ${reviews.length} đánh giá người chơi cho game mobile "${gameName}".
 Dữ liệu đã phân tầng theo sao 1-5 để cân bằng ý kiến tích cực và tiêu cực.
 Mỗi dòng có dạng [#chỉ mục|số sao|ngày] rồi đến nội dung review.
 
+${contextBlock}
+
+${libraryBlock}
+
+Research / external knowledge: When TapTap or stored metadata is incomplete, you may use widely known public facts about "${gameName}" (genre, franchise/IP, typical hardware expectations, art direction) to inform rubric reasoning. Cross-check any inference against the deterministic library scores above when those scores apply.
+
 Reviews:
 ${reviewBlock}
 
-${FINAL_OUTPUT_SPEC}`;
+${finalSpec}`;
 }
 
 function lineCharLen(r: StratifiedReview, global1Based: number): number {
@@ -300,6 +405,9 @@ function buildReduceUserPrompt(
   bucketCounts: Record<string, number>,
   dateRange: { start: string | null; end: string | null },
   mapRawJsonStrings: string[],
+  finalSpec: string,
+  contextBlock: string,
+  libraryBlock: string,
 ): string {
   return `Tổng hợp MỘT bản phân tích cho game "${gameName}" từ ${mapRawJsonStrings.length} lô trích xuất rời nhau, cùng phủ toàn bộ ${totalReviews} review đã thu thập (không bỏ sót; thứ tự lô không nhất thiết theo thời gian).
 
@@ -307,12 +415,16 @@ Số liệu tham chiếu:
 - số review: ${totalReviews}
 - số theo bucket: ${JSON.stringify(bucketCounts)}
 - khoảng ngày: ${dateRange.start ?? "unknown"} .. ${dateRange.end ?? "unknown"}
-- mentionRate trong JSON cuối phải ước lượng theo % trên TOÀN BỘ ${totalReviews} review (không dùng trực tiếp roughCount của từng lô làm % cuối).
+- mentionCount trong rubricCriteria phải ước lượng theo % trên TOÀN BỘ ${totalReviews} review khi có thể.
+
+${contextBlock}
+
+${libraryBlock}
 
 Dữ liệu từng lô (JSON, mỗi lô một khối):
 ${mapRawJsonStrings.map((s, i) => `--- lô ${i + 1} ---\n${s}`).join("\n\n")}
 
-${FINAL_OUTPUT_SPEC}`;
+${finalSpec}`;
 }
 
 function normalizeBulletArray(raw: unknown): string[] {
@@ -333,49 +445,6 @@ function bulletsFromLegacyParagraph(text: string): string[] {
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
   return sentences.length > 0 ? sentences : [t];
-}
-
-function assignTier(rate: number): "frequent" | "moderate" | "rare" {
-  if (rate >= 30) return "frequent";
-  if (rate >= 10) return "moderate";
-  return "rare";
-}
-
-function parseFeedbackItems(raw: unknown): AIFeedbackItem[] {
-  if (!Array.isArray(raw)) return [];
-  return raw.map((item: unknown) => {
-    if (typeof item === "string") {
-      return { point: item, mentionRate: 0, tier: "rare" as const };
-    }
-    const obj = item as Record<string, unknown>;
-    const rate = typeof obj.mentionRate === "number" ? obj.mentionRate : 0;
-    return {
-      point: String(obj.point ?? obj.description ?? ""),
-      mentionRate: rate,
-      tier: assignTier(rate),
-    };
-  }).filter((i) => i.point.length > 0)
-    .sort((a, b) => b.mentionRate - a.mentionRate);
-}
-
-function parseCriterion(raw: unknown): SentimentCriterion {
-  const obj = (raw ?? {}) as Record<string, unknown>;
-  return {
-    score: typeof obj.score === "number" ? obj.score : 50,
-    reasoning: typeof obj.reasoning === "string" ? obj.reasoning : "",
-  };
-}
-
-function parseSentimentBreakdown(raw: unknown): SentimentBreakdown | null {
-  if (!raw || typeof raw !== "object") return null;
-  const obj = raw as Record<string, unknown>;
-  return {
-    ratingDistribution: parseCriterion(obj.ratingDistribution),
-    textSentiment: parseCriterion(obj.textSentiment),
-    issueSeverity: parseCriterion(obj.issueSeverity),
-    trendMomentum: parseCriterion(obj.trendMomentum),
-    formula: typeof obj.formula === "string" ? obj.formula : "",
-  };
 }
 
 export class AIAnalysisService {
@@ -428,14 +497,28 @@ export class AIAnalysisService {
     appId: number,
     gameName: string,
     reviews: StratifiedReview[],
-    opts?: { source?: "database" | "external" | "csv-upload"; iconUrl?: string | null },
+    opts: {
+      source?: "database" | "external" | "csv-upload";
+      iconUrl?: string | null;
+      analysisContext: AnalysisContext;
+    },
   ): Promise<AIAnalysisResult> {
     const bucketCounts = buildBucketCounts(reviews);
     const dateRange = getDateRange(reviews);
     const prepared: StratifiedReview[] = reviews.map((r) => withClippedText(r));
 
+    const manifest = loadRubricManifest();
+    const inferredPack = inferGenrePack(opts.analysisContext.tagValues);
+    const activeCriteria = getActiveCriteria(manifest, inferredPack);
+    const finalSpec = appendRubricSpec(FINAL_OUTPUT_SPEC, activeCriteria);
+    const contextBlock = formatContextForPrompt(opts.analysisContext);
+    const libraryEntries = resolveLibraryScores(opts.analysisContext, manifest);
+    const libraryRequests = buildLibraryRequests(opts.analysisContext, libraryEntries);
+    persistLibraryRequestsToFile(opts.analysisContext, libraryRequests);
+    const libraryBlock = formatLibraryScoresForPrompt(libraryEntries);
+
     const model = getModel();
-    const oneShot = buildAnalysisPrompt(gameName, prepared);
+    const oneShot = buildAnalysisPrompt(gameName, prepared, finalSpec, contextBlock, libraryBlock);
     const estTokens = (s: string) => Math.ceil(s.length / 3);
 
     let content: string;
@@ -508,6 +591,9 @@ export class AIAnalysisService {
         bucketCounts,
         dateRange,
         mapOut,
+        finalSpec,
+        contextBlock,
+        libraryBlock,
       );
       try {
         const response = await callLLM(SYSTEM_REDUCE, reducePrompt, 16_384);
@@ -523,14 +609,21 @@ export class AIAnalysisService {
       }
     }
 
-    let cleaned = content.trim();
-    if (cleaned.startsWith("```")) {
-      cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim();
-    }
+    const analysis = parseLlmJsonOutput(content);
 
-    const analysis = JSON.parse(cleaned);
+    const rubric = mergeRubricFromLlm(
+      manifest,
+      activeCriteria,
+      libraryEntries,
+      parseLlmRubricRows(analysis as Record<string, unknown>),
+      parseRedFlagSignals(analysis as Record<string, unknown>),
+      reviews.length,
+    );
 
-    const breakdown = parseSentimentBreakdown(analysis.sentimentBreakdown);
+    const mainScore = rubric.aggregate.weightedScore ?? 50;
+
+    const redFlagAtAGlance = buildRedFlagAtAGlance(rubric);
+    const redFlagsChecklist = buildRedFlagsChecklist(rubric);
 
     let summaryBullets = normalizeBulletArray(analysis.summaryBullets);
     if (summaryBullets.length === 0 && typeof analysis.summary === "string" && analysis.summary.trim()) {
@@ -551,15 +644,17 @@ export class AIAnalysisService {
     const result: AIAnalysisResult = {
       appId,
       gameName,
-      iconUrl: opts?.iconUrl ?? null,
-      source: opts?.source ?? "database",
+      iconUrl: opts.iconUrl ?? null,
+      redFlagAtAGlance,
+      redFlagsChecklist,
+      source: opts.source ?? "database",
       summary,
       summaryBullets,
-      strengths: parseFeedbackItems(analysis.strengths),
-      weaknesses: parseFeedbackItems(analysis.weaknesses),
-      sentimentScore: typeof analysis.sentimentScore === "number" ? analysis.sentimentScore : 50,
-      sentimentBreakdown: breakdown ?? undefined,
-      topics: analysis.topics ?? {},
+      strengths: [],
+      weaknesses: [],
+      sentimentScore: mainScore,
+      sentimentBreakdown: undefined,
+      topics: {},
       recentTrend,
       recentTrendBullets: recentTrendBullets.length > 0 ? recentTrendBullets : undefined,
       reviewsAnalyzed: reviews.length,
@@ -567,6 +662,8 @@ export class AIAnalysisService {
       dateRangeStart: dateRange.start,
       dateRangeEnd: dateRange.end,
       analyzedAt: new Date().toISOString(),
+      rubric,
+      libraryRequests,
     };
 
     const store = loadStore();
@@ -597,7 +694,18 @@ export class AIAnalysisService {
       throw new Error(`No reviews found for ${gameName} (appId: ${appId})`);
     }
 
-    return this.runLLMAnalysis(appId, gameName, reviews, { source: "database", iconUrl });
+    const analysisContext = buildAnalysisContextFromRaw(
+      appId,
+      gameName,
+      iconUrl,
+      (latestRank?.raw ?? null) as TapTapRawApp | Record<string, unknown> | null,
+    );
+
+    return this.runLLMAnalysis(appId, gameName, reviews, {
+      source: "database",
+      iconUrl,
+      analysisContext,
+    });
   }
 
   async analyzeExternalReviews(
@@ -611,7 +719,9 @@ export class AIAnalysisService {
       throw new Error(`No reviews found for ${gameName} (appId: ${appId})`);
     }
 
-    return this.runLLMAnalysis(appId, gameName, reviews, { source, iconUrl });
+    const analysisContext = buildAnalysisContextFromRaw(appId, gameName, iconUrl, null);
+
+    return this.runLLMAnalysis(appId, gameName, reviews, { source, iconUrl, analysisContext });
   }
 }
 

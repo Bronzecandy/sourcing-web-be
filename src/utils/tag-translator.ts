@@ -380,3 +380,26 @@ export function translateTag(tag: string): string {
 export function translateTags(tags: string[]): string[] {
   return tags.map(translateTag);
 }
+
+/**
+ * Dùng cho thư viện JSON (match tiếng Anh): mỗi tag gốc + bản dịch EN từ TAG_MAP
+ * để khớp dữ liệu tiếng Trung trong DB với pattern lib tiếng Anh.
+ */
+export function tagsForLibraryMatching(tags: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const pushNorm = (s: string) => {
+    const t = s.trim();
+    if (!t) return;
+    const k = t.toLowerCase();
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push(t);
+  };
+  for (const raw of tags) {
+    const en = translateTag(raw);
+    pushNorm(en);
+    if (en.trim() !== raw.trim()) pushNorm(raw);
+  }
+  return out;
+}

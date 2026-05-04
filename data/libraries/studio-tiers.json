@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "neutralScore": 55,
+  "entries": [
+    {
+      "names": [
+        "miHoYo",
+        "hoyoverse",
+        "cognosphere"
+      ],
+      "score": 92,
+      "tier": "S",
+      "roles": [
+        "developer",
+        "publisher"
+      ]
+    },
+    {
+      "names": [
+        "tencent",
+        "timi",
+        "lightspeed",
+        "proxima beta"
+      ],
+      "score": 78,
+      "tier": "A",
+      "roles": [
+        "developer",
+        "publisher"
+      ]
+    },
+    {
+      "names": [
+        "netease",
+        "网易",
+        "netease games",
+        "网易游戏",
+        "杭州网易雷火",
+        "netease leihuo"
+      ],
+      "score": 76,
+      "tier": "A",
+      "roles": [
+        "developer",
+        "publisher"
+      ]
+    },
+    {
+      "names": [
+        "joker",
+        "joker studio",
+        "asmoon",
+        "asymmetric"
+      ],
+      "score": 74,
+      "tier": "A",
+      "roles": [
+        "developer"
+      ]
+    },
+    {
+      "names": [
+        "supercell",
+        "blizzard",
+        "activision"
+      ],
+      "score": 80,
+      "tier": "A",
+      "roles": [
+        "developer",
+        "publisher"
+      ]
+    },
+    {
+      "names": [
+        "indie",
+        "独立"
+      ],
+      "score": 48,
+      "tier": "C",
+      "roles": [
+        "developer"
+      ]
+    },
+    {
+      "names": [
+        "西木木"
+      ],
+      "score": 55,
+      "tier": "C",
+      "roles": [
+        "developer"
+      ]
+    }
+  ]
+}

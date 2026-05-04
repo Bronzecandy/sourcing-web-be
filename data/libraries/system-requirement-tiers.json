@@ -1,0 +1,58 @@
+{
+  "version": 2,
+  "neutralScore": 55,
+  "keywordPatterns": [
+    {
+      "match": [
+        "snapdragon 8",
+        "a17",
+        "a18",
+        "m1",
+        "m2",
+        "m3",
+        "m4",
+        "flagship",
+        "high-end",
+        "max settings",
+        "ultra settings",
+        "4k",
+        "120fps",
+        "ray tracing"
+      ],
+      "score": 72
+    },
+    {
+      "match": [
+        "low spec",
+        "low-end",
+        "old phone",
+        "stutter",
+        "lag",
+        "low fps",
+        "heating",
+        "throttle",
+        "2gb ram",
+        "3gb ram"
+      ],
+      "score": 48
+    },
+    {
+      "match": [
+        "64-bit",
+        "android 10",
+        "android 11",
+        "android 12",
+        "android 13",
+        "android 14",
+        "ios 12",
+        "ios 13",
+        "ios 14",
+        "ios 15",
+        "ios 16",
+        "ios 17"
+      ],
+      "score": 62
+    }
+  ],
+  "notes": "English keywords. Raw store text may be Chinese; haystack still includes original description + English-mapped tags."
+}

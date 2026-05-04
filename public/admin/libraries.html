@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Thư viện rubric (JSON)</title>
+    <style>
+      :root {
+        --bg: #0f1419;
+        --panel: #1a2332;
+        --border: #2d3a4d;
+        --text: #e7edf4;
+        --muted: #8b9cb3;
+        --accent: #3b82f6;
+        --ok: #22c55e;
+        --err: #ef4444;
+        --font: "Segoe UI", system-ui, sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--font);
+        font-size: 14px;
+        line-height: 1.5;
+      }
+      .wrap {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 1.25rem 1rem 3rem;
+      }
+      h1 {
+        font-size: 1.35rem;
+        font-weight: 600;
+        margin: 0 0 0.25rem;
+      }
+      .sub {
+        color: var(--muted);
+        font-size: 0.9rem;
+        margin-bottom: 1.25rem;
+      }
+      .sub code {
+        background: var(--panel);
+        padding: 0.1rem 0.35rem;
+        border-radius: 4px;
+      }
+      .layout {
+        display: grid;
+        gap: 1rem;
+        grid-template-columns: 220px 1fr;
+      }
+      @media (max-width: 800px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 0.75rem;
+      }
+      .panel h2 {
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        margin: 0 0 0.5rem;
+      }
+      ul.files {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        max-height: 60vh;
+        overflow: auto;
+      }
+      ul.files li button {
+        width: 100%;
+        text-align: left;
+        padding: 0.45rem 0.5rem;
+        margin-bottom: 4px;
+        border-radius: 6px;
+        border: 1px solid transparent;
+        background: transparent;
+        color: var(--text);
+        cursor: pointer;
+        font-size: 12px;
+        font-family: ui-monospace, monospace;
+      }
+      ul.files li button:hover {
+        background: rgba(59, 130, 246, 0.12);
+      }
+      ul.files li button.active {
+        border-color: var(--accent);
+        background: rgba(59, 130, 246, 0.18);
+      }
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        align-items: center;
+        margin-bottom: 0.5rem;
+      }
+      .toolbar span.file-label {
+        font-family: ui-monospace, monospace;
+        font-size: 13px;
+        color: var(--muted);
+      }
+      button.primary {
+        background: var(--accent);
+        color: #fff;
+        border: none;
+        padding: 0.45rem 0.9rem;
+        border-radius: 6px;
+        cursor: pointer;
+        font-weight: 500;
+      }
+      button.primary:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+      button.ghost {
+        background: transparent;
+        color: var(--text);
+        border: 1px solid var(--border);
+        padding: 0.45rem 0.75rem;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      textarea.editor {
+        width: 100%;
+        min-height: 420px;
+        resize: vertical;
+        font-family: ui-monospace, "Cascadia Code", monospace;
+        font-size: 12px;
+        line-height: 1.45;
+        padding: 0.75rem;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: #0d1117;
+        color: var(--text);
+      }
+      .msg {
+        margin-top: 0.5rem;
+        padding: 0.5rem 0.65rem;
+        border-radius: 6px;
+        font-size: 13px;
+      }
+      .msg.ok {
+        background: rgba(34, 197, 94, 0.12);
+        color: #86efac;
+        border: 1px solid rgba(34, 197, 94, 0.35);
+      }
+      .msg.err {
+        background: rgba(239, 68, 68, 0.12);
+        color: #fca5a5;
+        border: 1px solid rgba(239, 68, 68, 0.35);
+      }
+      .pending-item {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 0.65rem;
+        margin-bottom: 0.5rem;
+      }
+      .pending-item strong {
+        display: block;
+        margin-bottom: 0.25rem;
+      }
+      .pending-item small {
+        color: var(--muted);
+      }
+      .pending-actions {
+        margin-top: 0.5rem;
+        display: flex;
+        gap: 0.35rem;
+      }
+      .studio-form {
+        display: grid;
+        gap: 0.5rem;
+        margin-top: 0.5rem;
+      }
+      .studio-form input {
+        padding: 0.45rem 0.5rem;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: #0d1117;
+        color: var(--text);
+      }
+      .row2 {
+        display: grid;
+        grid-template-columns: 1fr 100px;
+        gap: 0.5rem;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Thư viện rubric</h1>
+      <p class="sub">
+        Chỉnh trực tiếp JSON trong <code>data/libraries/</code>. API:
+        <code>/api/libraries/*</code>. Nếu mở từ dev frontend (port khác), thêm query
+        <code>?api=http://localhost:3001</code> (đổi đúng cổng backend).
+      </p>
+
+      <div class="layout">
+        <aside class="panel">
+          <h2>File</h2>
+          <ul class="files" id="file-list"></ul>
+        </aside>
+        <section class="panel">
+          <div class="toolbar">
+            <span class="file-label" id="current-file">Chọn một file —</span>
+            <button type="button" class="ghost" id="btn-reload">Tải lại</button>
+            <button type="button" class="ghost" id="btn-format">Format JSON</button>
+            <button type="button" class="primary" id="btn-save" disabled>Lưu</button>
+          </div>
+          <textarea class="editor" id="editor" spellcheck="false" placeholder="Chọn file bên trái…"></textarea>
+          <div id="editor-msg"></div>
+        </section>
+      </div>
+
+      <div class="layout" style="margin-top: 1rem; grid-template-columns: 1fr 1fr">
+        <div class="panel">
+          <h2>Yêu cầu bổ sung (pending)</h2>
+          <button type="button" class="ghost" id="btn-refresh-pending" style="margin-bottom: 0.5rem">
+            Làm mới danh sách
+          </button>
+          <div id="pending-list"></div>
+        </div>
+        <div class="panel">
+          <h2>Thêm nhanh studio</h2>
+          <p class="sub" style="margin: 0 0 0.5rem">Gọi API append vào <code>studio-tiers.json</code> — sau đó mở file và chỉnh score.</p>
+          <div class="studio-form">
+            <input type="text" id="studio-names" placeholder="Tên studio (cách nhau bởi dấu phẩy)" />
+            <div class="row2">
+              <input type="number" id="studio-score" placeholder="Score" value="55" />
+              <input type="text" id="studio-tier" placeholder="Tier (tùy chọn)" />
+            </div>
+            <button type="button" class="primary" id="btn-studio">Thêm entry</button>
+            <div id="studio-msg"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        const apiBase = new URLSearchParams(location.search).get("api") ?? "";
+
+        function apiUrl(path) {
+          return apiBase.replace(/\/$/, "") + path;
+        }
+
+        let currentId = null;
+        let dirty = false;
+
+        const el = {
+          fileList: document.getElementById("file-list"),
+          editor: document.getElementById("editor"),
+          currentFile: document.getElementById("current-file"),
+          btnSave: document.getElementById("btn-save"),
+          btnReload: document.getElementById("btn-reload"),
+          btnFormat: document.getElementById("btn-format"),
+          editorMsg: document.getElementById("editor-msg"),
+          pendingList: document.getElementById("pending-list"),
+          btnRefreshPending: document.getElementById("btn-refresh-pending"),
+          studioNames: document.getElementById("studio-names"),
+          studioScore: document.getElementById("studio-score"),
+          studioTier: document.getElementById("studio-tier"),
+          btnStudio: document.getElementById("btn-studio"),
+          studioMsg: document.getElementById("studio-msg"),
+        };
+
+        el.editor.addEventListener("input", () => {
+          dirty = true;
+          el.btnSave.disabled = !currentId;
+        });
+
+        function setMsg(target, text, type) {
+          target.innerHTML = "";
+          if (!text) return;
+          const d = document.createElement("div");
+          d.className = "msg " + (type === "ok" ? "ok" : "err");
+          d.textContent = text;
+          target.appendChild(d);
+        }
+
+        async function loadFiles() {
+          const res = await fetch(apiUrl("/api/libraries/files"));
+          const json = await res.json();
+          if (!json.success) throw new Error(json.error || "files failed");
+          el.fileList.innerHTML = "";
+          for (const id of json.data) {
+            const li = document.createElement("li");
+            const b = document.createElement("button");
+            b.type = "button";
+            b.textContent = id;
+            b.dataset.id = id;
+            b.addEventListener("click", () => selectFile(id));
+            li.appendChild(b);
+            el.fileList.appendChild(li);
+          }
+        }
+
+        function highlightActive() {
+          el.fileList.querySelectorAll("button").forEach((b) => {
+            b.classList.toggle("active", b.dataset.id === currentId);
+          });
+        }
+
+        async function selectFile(id) {
+          if (dirty && !confirm("Chưa lưu — bỏ qua thay đổi?")) return;
+          currentId = id;
+          dirty = false;
+          highlightActive();
+          el.currentFile.textContent = id;
+          setMsg(el.editorMsg, "", "");
+          const res = await fetch(apiUrl("/api/libraries/" + encodeURIComponent(id)));
+          const json = await res.json();
+          if (!json.success) throw new Error(json.error || "read failed");
+          el.editor.value = JSON.stringify(json.data, null, 2);
+          el.btnSave.disabled = false;
+        }
+
+        async function save() {
+          if (!currentId) return;
+          let parsed;
+          try {
+            parsed = JSON.parse(el.editor.value);
+          } catch (e) {
+            setMsg(el.editorMsg, "JSON không hợp lệ: " + (e && e.message), "err");
+            return;
+          }
+          const res = await fetch(apiUrl("/api/libraries/" + encodeURIComponent(currentId)), {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(parsed),
+          });
+          const json = await res.json();
+          if (!json.success) {
+            setMsg(el.editorMsg, json.error || "Lưu thất bại", "err");
+            return;
+          }
+          dirty = false;
+          setMsg(el.editorMsg, "Đã lưu.", "ok");
+        }
+
+        function formatJson() {
+          try {
+            const o = JSON.parse(el.editor.value);
+            el.editor.value = JSON.stringify(o, null, 2);
+            setMsg(el.editorMsg, "Đã format.", "ok");
+          } catch (e) {
+            setMsg(el.editorMsg, "Không format được: " + (e && e.message), "err");
+          }
+        }
+
+        async function loadPending() {
+          const res = await fetch(apiUrl("/api/libraries/pending"));
+          const json = await res.json();
+          if (!json.success) throw new Error(json.error || "pending failed");
+          el.pendingList.innerHTML = "";
+          const items = json.data || [];
+          if (items.length === 0) {
+            el.pendingList.textContent = "Không có pending.";
+            return;
+          }
+          for (const p of items) {
+            const div = document.createElement("div");
+            div.className = "pending-item";
+            div.innerHTML =
+              "<strong>" +
+              escapeHtml(p.type) +
+              " — " +
+              escapeHtml(p.label) +
+              "</strong>" +
+              "<small>#" +
+              escapeHtml(p.id) +
+              " · app " +
+              p.appId +
+              " · " +
+              escapeHtml(p.gameName) +
+              "</small>" +
+              "<div style='margin-top:0.35rem;font-size:12px'>" +
+              escapeHtml(p.detailVi || "") +
+              "</div>";
+            const actions = document.createElement("div");
+            actions.className = "pending-actions";
+            const bDone = document.createElement("button");
+            bDone.type = "button";
+            bDone.className = "ghost";
+            bDone.textContent = "Đánh dấu merged";
+            bDone.addEventListener("click", async () => {
+              await fetch(apiUrl("/api/libraries/pending/" + encodeURIComponent(p.id) + "/resolve"), {
+                method: "POST",
+              });
+              loadPending();
+            });
+            const bDel = document.createElement("button");
+            bDel.type = "button";
+            bDel.className = "ghost";
+            bDel.textContent = "Xóa";
+            bDel.addEventListener("click", async () => {
+              if (!confirm("Xóa dòng pending này?")) return;
+              await fetch(apiUrl("/api/libraries/pending/" + encodeURIComponent(p.id)), { method: "DELETE" });
+              loadPending();
+            });
+            actions.appendChild(bDone);
+            actions.appendChild(bDel);
+            div.appendChild(actions);
+            el.pendingList.appendChild(div);
+          }
+        }
+
+        function escapeHtml(s) {
+          const d = document.createElement("div");
+          d.textContent = s;
+          return d.innerHTML;
+        }
+
+        async function addStudio() {
+          const raw = el.studioNames.value.trim();
+          const names = raw
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean);
+          const score = parseFloat(el.studioScore.value, 10);
+          if (names.length === 0 || !Number.isFinite(score)) {
+            setMsg(el.studioMsg, "Cần ít nhất một tên và score hợp lệ.", "err");
+            return;
+          }
+          const tier = el.studioTier.value.trim();
+          const res = await fetch(apiUrl("/api/libraries/studio"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              names,
+              score,
+              tier: tier || undefined,
+            }),
+          });
+          const json = await res.json();
+          if (!json.success) {
+            setMsg(el.studioMsg, json.error || "Thất bại", "err");
+            return;
+          }
+          setMsg(el.studioMsg, "Đã thêm vào studio-tiers.json. Mở file để chỉnh score nếu cần.", "ok");
+        }
+
+        el.btnSave.addEventListener("click", () => save().catch((e) => setMsg(el.editorMsg, String(e), "err")));
+        el.btnReload.addEventListener("click", () => {
+          if (currentId) selectFile(currentId).catch((e) => setMsg(el.editorMsg, String(e), "err"));
+        });
+        el.btnFormat.addEventListener("click", formatJson);
+        el.btnRefreshPending.addEventListener("click", () =>
+          loadPending().catch((e) => (el.pendingList.textContent = String(e))),
+        );
+        el.btnStudio.addEventListener("click", () =>
+          addStudio().catch((e) => setMsg(el.studioMsg, String(e), "err")),
+        );
+
+        loadFiles().catch((e) => {
+          el.fileList.innerHTML = "<li style='color:#f88'>" + escapeHtml(String(e)) + "</li>";
+        });
+        loadPending().catch((e) => {
+          el.pendingList.textContent = String(e);
+        });
+      })();
+    </script>
+  </body>
+</html>

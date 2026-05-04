@@ -1,9 +1,11 @@
 import express from "express";
+import path from "path";
 import cors from "cors";
 import gameRoutes from "./routes/game.routes";
 import translateRoutes from "./routes/translate.routes";
 import rankingRoutes from "./routes/ranking.routes";
 import analysisRoutes from "./routes/analysis.routes";
+import librariesRoutes from "./routes/libraries.routes";
 import { errorHandler } from "./middleware/error-handler";
 import { precomputeAll } from "./precompute";
 import { cache } from "./utils/cache";
@@ -52,6 +54,13 @@ app.use("/api/translate", translateRoutes);
 app.use("/api/games", gameRoutes);
 app.use("/api/ranking", rankingRoutes);
 app.use("/api/analysis", analysisRoutes);
+app.use("/api/libraries", librariesRoutes);
+
+app.get("/admin/libraries", (_req, res) => {
+  res.sendFile(path.join(process.cwd(), "public", "admin", "libraries.html"));
+});
+
+app.use(express.static(path.join(process.cwd(), "public")));
 
 app.use(errorHandler);
 

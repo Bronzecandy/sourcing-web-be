@@ -22,6 +22,7 @@ cron.schedule("15 10 * * *", () => runPrecompute("cron"), {
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
   console.log(`Health check: http://localhost:${PORT}/api/health`);
+  console.log(`Library admin UI: http://localhost:${PORT}/admin/libraries`);
   console.log(`AI model: ${process.env.OPENAI_MODEL ?? "(not set)"}`);
   console.log(`Cron: pre-compute daily at 10:15 Asia/Ho_Chi_Minh`);
   if (process.env.SKIP_WARMUP === "1") {

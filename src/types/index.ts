@@ -20,6 +20,13 @@ export interface TapTapRawApp {
   description?: { text: string };
   developer_note?: { text: string };
   tags?: Array<{ id: number; value: string }>;
+  /** TapTap API may expose developer / publisher in various shapes */
+  developer?: string | { name?: string };
+  publisher?: string | { name?: string };
+  developers?: Array<{ name?: string }>;
+  /** Khối thông tin trên trang chi tiết TapTap (tên nhà phát hành / công ty...) */
+  information?: Array<{ text?: string; value?: string; label?: string; title?: string }>;
+  information_bar?: Array<{ text?: string; value?: string; label?: string }>;
   stat?: {
     rating?: {
       score: string;
@@ -45,6 +52,11 @@ export interface TapTapRawApp {
   is_exclusive?: boolean;
   editor_choice?: boolean;
   supported_platforms?: Array<{ key: string }>;
+  /** Bytes or MB depending on API — extractor normalizes to MB */
+  apk_size?: number;
+  package_size?: number;
+  file_size?: number;
+  download_size?: number;
 }
 
 export interface TapTapRawReview {
@@ -141,10 +153,135 @@ export interface SentimentBreakdown {
   formula: string;
 }
 
+export type RubricScoreSource = "library" | "llm" | "merged";
+
+/** Kết quả khớp thư viện deterministic trước khi merge LLM */
+export interface LibraryResolvedEntry {
+  criterionId: string;
+  score: number;
+  matchedKey: string;
+  confidence: "high" | "medium" | "low";
+}
+
+/** Yêu cầu bổ sung/thư viện khi không khớp — hiển thị cho admin (tiếng Anh) */
+export interface LibraryRequestItem {
+  kind:
+    | "genre_tags"
+    | "studio"
+    | "game_size"
+    | "ip_theme"
+    | "system_spec"
+    | "art_style"
+    | "update_signal"
+    | "community_signal";
+  label: string;
+  /** English description for the admin / merge queue (legacy name `messageVi` was Vietnamese). */
+  detailEn: string;
+  jsonSuggestion: Record<string, unknown>;
+}
+
+/** Mức rủi ro / nghiêm trọng (Red Flag) — không gộp vào điểm rubric chính */
+export type RedFlagSeverity = "none" | "low" | "medium" | "high";
+
+export interface RubricCriterionOutput {
+  id: string;
+  partId: string;
+  elementVi: string;
+  input: string;
+  weightInPart: number;
+  score: number | null;
+  /** Chỉ dùng khi partId === "red_flag": mức rủi ro, không phải điểm 0–100 */
+  severity?: RedFlagSeverity | null;
+  /**
+   * Red Flag: hiển thị Có (true) / Không (false) / chưa rõ (null) thay cho ô điểm.
+   * Với bạo lực/sexual: Có = có rủi ro (severity khác "none"); Không = "none"; null = chưa đủ dữ liệu.
+   */
+  flagPresent?: boolean | null;
+  reasoning?: string;
+  mentionCount?: number;
+  /** Điểm mạnh gắn với tiêu chí này (từ LLM, tiếng Việt) */
+  strengths?: string[];
+  /** Điểm yếu gắn với tiêu chí này */
+  weaknesses?: string[];
+  source: RubricScoreSource;
+  confidence?: "high" | "medium" | "low";
+  matchedLibraryKey?: string;
+}
+
+export interface RubricRedFlagBlock {
+  /** true = có dấu hiệu; false = không; null/undefined = chưa đủ dữ liệu (API tri-state) */
+  politics?: boolean | null;
+  casino?: boolean | null;
+  /** Tôn giáo nhạy cảm, cực đoan, nội dung phản cảm tôn giáo tại VN */
+  religionSensitive?: boolean | null;
+  /** Mức bạo lực gây sốc / rủi ro thị trường (không phải “điểm” rubric) */
+  violenceSeverity?: RedFlagSeverity | null;
+  sexualSeverity?: RedFlagSeverity | null;
+  /**
+   * @deprecated Phản hồi LLM cũ có thể còn số; ưu tiên hiển thị `violenceSeverity`. Khi merge, có thể suy ra severity từ số nếu thiếu chuỗi.
+   */
+  violenceScore?: number | null;
+  /**
+   * @deprecated Tương tự `violenceScore`.
+   */
+  sexualScore?: number | null;
+  otherTaboosNote?: string | null;
+}
+
+export interface RubricAggregate {
+  weightedScore: number | null;
+  band5: number | null;
+  decision: "good_for_test" | "need_verification" | "drop";
+  lowScoreCriteriaCount: number;
+  redFlagHardGate: boolean;
+}
+
+export interface RubricBlock {
+  manifestVersion: number;
+  criteria: RubricCriterionOutput[];
+  aggregate: RubricAggregate;
+  redFlag: RubricRedFlagBlock;
+  dataConfidence: {
+    reviewCount: number;
+    meetsThreshold: boolean;
+    threshold: number;
+  };
+}
+
+/** Bảng Có/Không nhanh cho FE (đặt ngay sau redFlagAtAGlance) */
+export interface RedFlagsChecklist {
+  politics: boolean | null;
+  religion: boolean | null;
+  casino: boolean | null;
+  /** Có rủi ro bạo lực gore (severity ≠ none) */
+  violenceConcern: boolean | null;
+  /** Có rủi ro sexual (severity ≠ none) */
+  sexualConcern: boolean | null;
+}
+
+/** Tóm tắt red flag đặt đầu response để UI đọc nhanh (không thay thế rubric.redFlag đầy đủ). */
+export interface RedFlagAtAGlance {
+  headlineVi: string;
+  riskLevel: "clear" | "low" | "medium" | "high" | "critical";
+  blockedByHardGate: boolean;
+  /** Politics/casino hoặc bạo lực/gợi dục từ medium trở lên */
+  hasElevatedRisk: boolean;
+  politics: boolean | null;
+  religion: boolean | null;
+  casino: boolean | null;
+  violenceSeverity: RedFlagSeverity | null;
+  sexualSeverity: RedFlagSeverity | null;
+  otherTaboosNote?: string | null;
+}
+
 export interface AIAnalysisResult {
   appId: number;
   gameName?: string;
   iconUrl?: string | null;
+  /** Đặt gần đầu JSON để client hiển thị red flag trước phần rubric chi tiết */
+  redFlagAtAGlance?: RedFlagAtAGlance;
+  /** Có/Không từng mục — ưu tiên bind ô “điểm” trên UI */
+  redFlagsChecklist?: RedFlagsChecklist;
   source?: "database" | "external" | "csv-upload";
   /** Joined bullets for backward compatibility */
   summary: string;
@@ -162,4 +299,8 @@ export interface AIAnalysisResult {
   dateRangeStart: string | null;
   dateRangeEnd: string | null;
   analyzedAt: string;
+  /** Extended rubric + library merge (optional for older stored analyses) */
+  rubric?: RubricBlock;
+  /** Gợi ý bổ sung thư viện JSON khi thiếu khớp Genre/Developer/... */
+  libraryRequests?: LibraryRequestItem[];
 }

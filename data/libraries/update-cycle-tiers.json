@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "neutralScore": 55,
+  "rules": [
+    { "maxDaysSinceUpdate": 14, "score": 95, "label": "Update rất gần" },
+    { "maxDaysSinceUpdate": 45, "score": 82, "label": "<~1.5 tháng" },
+    { "maxDaysSinceUpdate": 90, "score": 68, "label": "<~3 tháng" },
+    { "maxDaysSinceUpdate": 180, "score": 52, "label": "<~6 tháng" },
+    { "maxDaysSinceUpdate": 99999, "score": 38, "label": "Lâu không update" }
+  ],
+  "notes": "Dựa trên ngày cập nhật gần nhất (TapTap update_time nếu có). CSV: max điểm nếu chu kỳ < 2 tháng."
+}

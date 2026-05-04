@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "neutralScore": 55,
+  "keywordPatterns": [
+    { "match": ["pixel", "pixel art", "8-bit", "16-bit", "retro"], "score": 68 },
+    { "match": ["3d", "unreal", "ue4", "ue5", "realistic", "realism", "high quality graphics"], "score": 78 },
+    { "match": ["2d", "live2d", "spine", "anime style", "anime art"], "score": 75 },
+    { "match": ["low poly", "cartoon", "stylized", "chibi", "cel-shaded", "toon"], "score": 70 }
+  ],
+  "notes": "English only. ZH art terms in store text are still in haystack; English tag aliases are merged for matching."
+}
