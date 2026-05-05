@@ -6,6 +6,7 @@ import {
   fetchAppInfo,
   fetchExternalReviews,
   fetchAppDetailRaw,
+  pickTapTapDetailFromProxyBundle,
   type ExternalReview,
 } from "../services/taptap-client.service";
 import { parseCsvBuffer } from "../utils/csv-parser";
@@ -19,6 +20,8 @@ const TAPTAP_PROXY_KEY = process.env.TAPTAP_PROXY_KEY || "";
 async function fetchViaProxy(appId: number): Promise<{
   appInfo: { title: string; iconUrl: string | null };
   reviews: ExternalReview[];
+  /** Snapshot app/v4/detail nếu proxy trả kèm — dùng khi backend không gọi trực tiếp TapTap CN được. */
+  detailFromProxy: Record<string, unknown> | null;
 }> {
   const url = `${TAPTAP_PROXY_URL}/api/full/${appId}`;
   const headers: Record<string, string> = {};
@@ -30,12 +33,16 @@ async function fetchViaProxy(appId: number): Promise<{
   const json = JSON.parse(trimmed);
   if (!json.success) throw new Error(json.error ?? "Proxy request failed");
 
+  const data = json.data as {
+    appInfo: { title: string; iconUrl: string | null };
+    reviews: ExternalReview[];
+  };
+  const detailFromProxy = pickTapTapDetailFromProxyBundle(json.data);
+
   return {
-    appInfo: {
-      title: json.data.appInfo.title,
-      iconUrl: json.data.appInfo.iconUrl,
-    },
-    reviews: json.data.reviews as ExternalReview[],
+    appInfo: data.appInfo,
+    reviews: data.reviews,
+    detailFromProxy,
   };
 }
 
@@ -90,6 +97,7 @@ router.post("/analyze-external", async (req, res) => {
     let appTitle: string;
     let appIcon: string | null;
     let reviews: ExternalReview[];
+    let detailRaw: Record<string, unknown> | null = null;
 
     if (useProxy()) {
       console.log(`[analyze-external] Using TapTap proxy for appId=${appId}`);
@@ -97,6 +105,7 @@ router.post("/analyze-external", async (req, res) => {
       appTitle = proxy.appInfo.title;
       appIcon = proxy.appInfo.iconUrl;
       reviews = proxy.reviews;
+      detailRaw = proxy.detailFromProxy;
     } else {
       console.log(`[analyze-external] Direct TapTap fetch for appId=${appId}`);
       const appInfo = await fetchAppInfo(appId);
@@ -111,7 +120,14 @@ router.post("/analyze-external", async (req, res) => {
       return;
     }
 
-    const detailRaw = await fetchAppDetailRaw(appId);
+    if (!detailRaw) {
+      detailRaw = await fetchAppDetailRaw(appId);
+    }
+    if (!detailRaw) {
+      console.warn(
+        `[analyze-external] No app/v4/detail snapshot for appId=${appId} (proxy bundle empty + direct TapTap failed?) — developer/publisher/tags may be missing in prompt.`,
+      );
+    }
 
     const result = await aiAnalysisService.analyzeExternalReviews(
       appId,

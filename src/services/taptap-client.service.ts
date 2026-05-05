@@ -103,6 +103,37 @@ export async function fetchAppDetailRaw(appId: number): Promise<Record<string, u
   }
 }
 
+function looksLikeTapTapAppDetail(obj: unknown): obj is Record<string, unknown> {
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return false;
+  const o = obj as Record<string, unknown>;
+  if (Array.isArray(o.information)) return true;
+  if (typeof o.title === "string" && o.title.length > 0 && (o.stat != null || Array.isArray(o.tags))) return true;
+  return false;
+}
+
+/**
+ * Phản hồi proxy `/api/full/:id` có thể kèm snapshot app/v4/detail dưới nhiều tên field — gom một object dùng cho extractTags / extractDeveloperPublisher.
+ */
+export function pickTapTapDetailFromProxyBundle(payload: unknown): Record<string, unknown> | null {
+  if (!payload || typeof payload !== "object") return null;
+  const root = payload as Record<string, unknown>;
+  const nestedKeys = ["detailRaw", "appDetail", "detail", "app_v4", "taptapDetail", "raw", "fullApp", "app"];
+  for (const k of nestedKeys) {
+    const v = root[k];
+    if (looksLikeTapTapAppDetail(v)) return v;
+  }
+  if (looksLikeTapTapAppDetail(root)) return root;
+  const inner: unknown = root["data"];
+  if (inner && typeof inner === "object" && !Array.isArray(inner)) {
+    const innerObj = inner as Record<string, unknown>;
+    for (const k of nestedKeys) {
+      const v = innerObj[k];
+      if (looksLikeTapTapAppDetail(v)) return v;
+    }
+  }
+  return null;
+}
+
 interface PageResult {
   list: Array<Record<string, unknown>>;
   nextPage: boolean;

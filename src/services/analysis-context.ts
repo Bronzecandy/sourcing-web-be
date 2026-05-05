@@ -63,6 +63,34 @@ function firstFromEntityArray(arr: unknown): string | null {
   return null;
 }
 
+/** TapTap CN: hàng title「厂商」= tên hiển thị;「供应商」/ key developer_legal_name = pháp nhân */
+function textFromInformationRowByPredicate(arr: unknown, pred: (r: Record<string, unknown>) => boolean): string | null {
+  if (!Array.isArray(arr)) return null;
+  for (const row of arr) {
+    if (!row || typeof row !== "object") continue;
+    const r = row as Record<string, unknown>;
+    if (!pred(r)) continue;
+    const t = str(r.text) ?? str(r.value);
+    if (t) return t;
+  }
+  return null;
+}
+
+function isVendorDisplayRow(r: Record<string, unknown>): boolean {
+  const title = str(r.title);
+  if (title === "厂商") return true;
+  if (title && /^developer$/i.test(title)) return true;
+  return false;
+}
+
+function isSupplierLegalRow(r: Record<string, unknown>): boolean {
+  if (typeof r.key === "string" && r.key === "developer_legal_name") return true;
+  const title = str(r.title);
+  if (title === "供应商") return true;
+  if (title && /^publisher$/i.test(title)) return true;
+  return false;
+}
+
 /** TapTap thường đặt tên nhà phát hành trong `information` / `information_bar` (mảng object có .text), không có field developer riêng. */
 function textsFromInformationRows(arr: unknown): string[] {
   if (!Array.isArray(arr)) return [];
@@ -113,6 +141,16 @@ export function extractDeveloperPublisher(raw: TapTapRawApp | Record<string, unk
 
   const infoTexts = textsFromInformationRows(o.information);
   const barTexts = textsFromInformationRows(o.information_bar);
+
+  const devFromRows =
+    textFromInformationRowByPredicate(o.information, isVendorDisplayRow) ??
+    textFromInformationRowByPredicate(o.information_bar, isVendorDisplayRow);
+  const pubFromRows =
+    textFromInformationRowByPredicate(o.information, isSupplierLegalRow) ??
+    textFromInformationRowByPredicate(o.information_bar, isSupplierLegalRow);
+
+  if (!developerName && devFromRows) developerName = devFromRows;
+  if (!publisherName && pubFromRows) publisherName = pubFromRows;
 
   if (!developerName) {
     developerName = infoTexts[0] ?? barTexts[0] ?? null;
