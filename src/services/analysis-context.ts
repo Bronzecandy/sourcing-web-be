@@ -43,7 +43,7 @@ function pickEntityName(obj: unknown): string | null {
 }
 
 /** Gộp root `app` (TapTap đôi khi bọc payload trong app). Ưu tiên field ở lớp ngoài. */
-function tapTapEffectiveRoot(raw: Record<string, unknown>): Record<string, unknown> {
+export function tapTapEffectiveRoot(raw: Record<string, unknown>): Record<string, unknown> {
   const inner = raw.app;
   if (inner && typeof inner === "object") {
     return { ...(inner as Record<string, unknown>), ...raw };
@@ -130,11 +130,58 @@ export function extractDeveloperPublisher(raw: TapTapRawApp | Record<string, unk
   return { developerName, publisherName, developerResolvedViaPublisherFallback };
 }
 
+function tagStringsFromArray(arr: unknown): string[] {
+  if (!Array.isArray(arr)) return [];
+  const out: string[] = [];
+  for (const item of arr) {
+    if (typeof item === "string") {
+      if (item.trim()) out.push(item.trim());
+      continue;
+    }
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    const v =
+      str(o.value) ??
+      str(o.name) ??
+      str(o.title) ??
+      str(o.tag_name) ??
+      str(o.label) ??
+      str(o.text);
+    if (v) out.push(v);
+  }
+  return out;
+}
+
+/**
+ * Genre / category tags from TapTap detail JSON (several API shapes + nested `app`).
+ */
 export function extractTags(raw: TapTapRawApp | Record<string, unknown> | null | undefined): string[] {
   if (!raw || typeof raw !== "object") return [];
-  const tags = (raw as TapTapRawApp).tags;
-  if (!Array.isArray(tags)) return [];
-  return tags.map((t) => (typeof t?.value === "string" ? t.value : "")).filter(Boolean);
+  const root = tapTapEffectiveRoot(raw as Record<string, unknown>);
+
+  const fromGenre: string[] = [];
+  if (typeof root.genre === "string" && root.genre.trim()) fromGenre.push(root.genre.trim());
+  else if (Array.isArray(root.genre)) fromGenre.push(...tagStringsFromArray(root.genre));
+
+  const buckets = [
+    ...tagStringsFromArray(root.tags),
+    ...tagStringsFromArray(root.tag_list),
+    ...tagStringsFromArray(root.game_tags),
+    ...tagStringsFromArray(root.genre_tags),
+    ...tagStringsFromArray(root.genres),
+    ...tagStringsFromArray(root.categories),
+    ...fromGenre,
+  ];
+
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (const x of buckets) {
+    const k = x.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    deduped.push(x);
+  }
+  return deduped;
 }
 
 function num(v: unknown): number | null {
@@ -151,7 +198,7 @@ function num(v: unknown): number | null {
  */
 export function extractInstallSizeMb(raw: TapTapRawApp | Record<string, unknown> | null | undefined): number | null {
   if (!raw || typeof raw !== "object") return null;
-  const o = raw as Record<string, unknown>;
+  const o = tapTapEffectiveRoot(raw as Record<string, unknown>);
   const candidates = [
     num(o.apk_size),
     num(o.package_size),
@@ -174,7 +221,8 @@ export function extractDaysSinceUpdate(
   raw: TapTapRawApp | Record<string, unknown> | null | undefined,
 ): number | null {
   if (!raw || typeof raw !== "object") return null;
-  const t = num((raw as TapTapRawApp).update_time);
+  const o = tapTapEffectiveRoot(raw as Record<string, unknown>);
+  const t = num(o.update_time);
   if (t == null || t <= 0) return null;
   const sec = t > 1e12 ? t / 1000 : t;
   const days = (Date.now() / 1000 - sec) / 86400;
@@ -183,21 +231,20 @@ export function extractDaysSinceUpdate(
 
 export function extractFansCount(raw: TapTapRawApp | Record<string, unknown> | null | undefined): number | null {
   if (!raw || typeof raw !== "object") return null;
-  const n = num((raw as TapTapRawApp).stat?.fans_count);
+  const o = tapTapEffectiveRoot(raw as Record<string, unknown>);
+  const stat = o.stat as Record<string, unknown> | undefined;
+  const n = num(stat?.fans_count);
   if (n == null || n < 0) return null;
   return n;
 }
 
 export function buildSearchHaystack(raw: TapTapRawApp | Record<string, unknown> | null | undefined): string {
   if (!raw || typeof raw !== "object") return "";
-  const o = raw as TapTapRawApp;
+  const root = tapTapEffectiveRoot(raw as Record<string, unknown>);
+  const o = root as unknown as TapTapRawApp;
   const chunks: string[] = [];
   if (typeof o.title === "string") chunks.push(o.title);
-  if (Array.isArray(o.tags)) {
-    for (const t of o.tags) {
-      if (typeof t?.value === "string") chunks.push(t.value);
-    }
-  }
+  chunks.push(...extractTags(raw));
   const desc = o.description?.text;
   if (typeof desc === "string") chunks.push(desc);
   if (typeof o.rec_text === "string") chunks.push(o.rec_text);

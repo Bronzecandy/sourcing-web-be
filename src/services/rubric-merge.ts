@@ -2,6 +2,7 @@ import type {
   RubricAggregate,
   RubricBlock,
   RubricCriterionOutput,
+  RubricPartRollup,
   LibraryResolvedEntry,
   RubricRedFlagBlock,
   RubricScoreSource,
@@ -12,6 +13,61 @@ import type {
 import type { AnalysisContext } from "./analysis-context";
 import type { RubricCriterionDef, RubricManifest } from "./rubric-manifest";
 import { translateTags } from "../utils/tag-translator";
+
+/** Trọng số phần "Theo thể loại" khi gói base / không schema riêng. */
+export const GENRE_PART_WEIGHT_FOR_BASE_PACK = 0.04;
+/**
+ * Khi có gói thể loại (MOBA, Card RPG, …): trọng số **phần Gameplay** và **phần Theo thể loại** trong điểm tổng.
+ * Các phần còn lại (Tổng quan, Hình ảnh & nội dung, Monetization, Social, LiveOps) giữ **tỷ lệ tương đối** trong manifest và chiếm phần còn lại (~62%).
+ */
+export const NON_BASE_GAMEPLAY_PART_WEIGHT = 0.14;
+export const NON_BASE_GENRE_PART_WEIGHT = 0.24;
+
+const NON_BASE_POOL_PART_IDS = ["overview", "presentation", "monetization", "socialization", "liveops"] as const;
+
+/** Trọng số từng phần thực tế khi tính điểm tổng (sau khi cân theo gói thể loại). */
+export function resolveEffectivePartWeights(manifest: RubricManifest, packResolved: string): Map<string, number> {
+  const isBase = packResolved === "base";
+  const scored = manifest.parts.filter((p) => p.id !== "red_flag" && p.weight > 0);
+
+  const out = new Map<string, number>();
+
+  if (isBase) {
+    const gEff = GENRE_PART_WEIGHT_FOR_BASE_PACK;
+    const nonGenreFileSum = scored.filter((p) => p.id !== "genre_specific").reduce((s, p) => s + p.weight, 0);
+    const scale = nonGenreFileSum > 0 ? (1 - gEff) / nonGenreFileSum : 1;
+    for (const p of scored) {
+      if (p.id === "genre_specific") out.set(p.id, gEff);
+      else out.set(p.id, p.weight * scale);
+    }
+    return out;
+  }
+
+  const manifestById = new Map(manifest.parts.map((p) => [p.id, p.weight]));
+  let poolManifestSum = 0;
+  for (const id of NON_BASE_POOL_PART_IDS) {
+    poolManifestSum += manifestById.get(id) ?? 0;
+  }
+
+  const remainder = 1 - NON_BASE_GAMEPLAY_PART_WEIGHT - NON_BASE_GENRE_PART_WEIGHT;
+
+  for (const id of NON_BASE_POOL_PART_IDS) {
+    const w = manifestById.get(id) ?? 0;
+    const eff = poolManifestSum > 0 ? (w / poolManifestSum) * remainder : 0;
+    out.set(id, eff);
+  }
+  out.set("gameplay", NON_BASE_GAMEPLAY_PART_WEIGHT);
+  out.set("genre_specific", NON_BASE_GENRE_PART_WEIGHT);
+
+  return out;
+}
+
+export function resolveGenrePackForWeights(
+  inferredPack: string | null | undefined,
+  manifest: RubricManifest,
+): string {
+  return inferredPack ?? manifest.genrePackDefault ?? "base";
+}
 
 export { resolveLibraryScores, normalizeName, scoreGenreFromTags, matchStudioName, inferGenrePack, buildLibraryRequests, persistLibraryRequestsToFile } from "./library-resolve";
 
@@ -122,6 +178,8 @@ export function mergeRubricFromLlm(
   llmRows: LlmRubricRow[] | null | undefined,
   redFlagRaw: Record<string, unknown> | null | undefined,
   reviewCount: number,
+  /** Tag → gói rubric; ảnh hưởng trọng số phần "Theo thể loại" so với các phần khác. */
+  genrePackForWeights?: string | null,
 ): RubricBlock {
   const libById = new Map(libraryEntries.map((e) => [e.criterionId, e]));
   const llmById = new Map((llmRows ?? []).map((r) => [r.id, r]));
@@ -224,7 +282,9 @@ export function mergeRubricFromLlm(
   }
 
   const threshold = 10;
-  const aggregate = computeAggregate(manifest, criteriaOut, redFlag);
+  const packResolved = resolveGenrePackForWeights(genrePackForWeights, manifest);
+  const effectivePartWeights = resolveEffectivePartWeights(manifest, packResolved);
+  const aggregate = computeAggregate(manifest, criteriaOut, redFlag, effectivePartWeights);
   const dataConfidence = {
     reviewCount,
     meetsThreshold: reviewCount >= threshold,
@@ -233,6 +293,7 @@ export function mergeRubricFromLlm(
 
   return {
     manifestVersion: manifest.version,
+    genrePackResolved: packResolved,
     criteria: criteriaOut,
     aggregate,
     redFlag,
@@ -244,6 +305,7 @@ function computeAggregate(
   manifest: RubricManifest,
   criteria: RubricCriterionOutput[],
   redFlag: RubricRedFlagBlock,
+  effectivePartWeights: Map<string, number>,
 ): RubricAggregate {
   const redHard = redFlag.politics === true || redFlag.casino === true;
 
@@ -256,9 +318,12 @@ function computeAggregate(
 
   let sumParts = 0;
   let weightSum = 0;
+  const partRollups: RubricPartRollup[] = [];
 
   for (const part of manifest.parts) {
-    if (part.id === "red_flag" || part.weight <= 0) continue;
+    if (part.id === "red_flag") continue;
+    const wEff = effectivePartWeights.get(part.id) ?? 0;
+    if (wEff <= 0) continue;
     const list = byPart.get(part.id) ?? [];
     let num = 0;
     let den = 0;
@@ -267,21 +332,46 @@ function computeAggregate(
       num += c.score * c.weightInPart;
       den += c.weightInPart;
     }
-    if (den <= 0) continue;
-    const partScore = num / den;
-    sumParts += partScore * part.weight;
-    weightSum += part.weight;
+    const includedInGlobalScore = den > 0;
+    const partScore = includedInGlobalScore ? num / den : null;
+    const numeratorContribution =
+      includedInGlobalScore && partScore != null ? partScore * wEff : null;
+
+    partRollups.push({
+      partId: part.id,
+      labelVi: part.labelVi,
+      weightInTotal: wEff,
+      manifestWeightInTotal: part.weight,
+      partAverageScore:
+        partScore != null ? Math.round(partScore * 100) / 100 : null,
+      scoredWeightSumInPart: den,
+      includedInGlobalScore,
+      numeratorContribution,
+    });
+
+    if (!includedInGlobalScore) continue;
+    sumParts += partScore! * wEff;
+    weightSum += wEff;
   }
 
   const weightedScore = weightSum > 0 ? Math.round(sumParts / weightSum) : null;
   const band5 =
     weightedScore == null ? null : Math.max(1, Math.min(5, Math.ceil(weightedScore / 20)));
 
-  let decision: RubricAggregate["decision"] = "drop";
-  if (redHard) decision = "drop";
-  else if (band5 != null && band5 >= 4) decision = "good_for_test";
-  else if (band5 === 3) decision = "need_verification";
-  else decision = "drop";
+  let decision: RubricAggregate["decision"];
+  if (redHard) {
+    decision = "blocked_red_flag";
+  } else if (weightedScore == null) {
+    decision = "no_test";
+  } else if (weightedScore < 50) {
+    decision = "no_test";
+  } else if (weightedScore < 75) {
+    decision = "consider_test";
+  } else if (weightedScore <= 90) {
+    decision = "suitable_test";
+  } else {
+    decision = "must_test";
+  }
 
   const lowScoreCriteriaCount = criteria.filter(
     (c) => c.partId !== "red_flag" && c.score != null && c.score < 30,
@@ -293,6 +383,8 @@ function computeAggregate(
     decision,
     lowScoreCriteriaCount,
     redFlagHardGate: redHard,
+    partRollups,
+    globalWeightDenominator: weightSum,
   };
 }
 
@@ -416,7 +508,7 @@ export function formatContextForPrompt(ctx: AnalysisContext): string {
       ? " — ghi chú: snapshot không có field developer riêng; đang dùng publisher/vận hành làm tên tham chiếu cho tiêu chí Developer."
       : "";
   return [
-    `Ngữ cảnh game (lấy từ snapshot TapTap đã lưu trong DB / raw crawl — không cần mở tay trên web):`,
+    `Ngữ cảnh game (TapTap app/v4 detail khi phân tích bằng URL; hoặc snapshot AppRank mới nhất trong DB):`,
     `- Tên: ${ctx.gameName}`,
     `- Tag (DB / snapshot): ${tags}`,
     `- Tags mapped to English (tag-translator TAG_MAP → aligns English genre lib): ${tagsEn}`,

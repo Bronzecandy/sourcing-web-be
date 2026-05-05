@@ -59,6 +59,86 @@
       "id": "5ac31e54-9eda-4987-8f08-5458754d8294",
       "createdAt": "2026-05-04T10:42:25.767Z",
       "status": "merged"
+    },
+    {
+      "type": "studio",
+      "label": "火联社",
+      "detailVi": "Developer name is not listed in studio-tiers.json. Merge adds an entry; adjust score if needed (example baseline 55).",
+      "jsonSuggestion": {
+        "names": [
+          "火联社"
+        ],
+        "score": 55,
+        "tier": "custom",
+        "roles": [
+          "developer"
+        ]
+      },
+      "appId": 218283,
+      "gameName": "火柴人联盟3",
+      "id": "1bc21d78-3b47-49fb-ba61-c52a08281928",
+      "createdAt": "2026-05-05T03:29:03.109Z",
+      "status": "pending"
+    },
+    {
+      "type": "studio",
+      "label": "鸿盟工作室",
+      "detailVi": "Developer name is not listed in studio-tiers.json. Merge adds an entry; adjust score if needed (example baseline 55).",
+      "jsonSuggestion": {
+        "names": [
+          "鸿盟工作室"
+        ],
+        "score": 55,
+        "tier": "custom",
+        "roles": [
+          "developer"
+        ]
+      },
+      "appId": 833986,
+      "gameName": "吞噬星空",
+      "id": "b24d779e-9ecf-4c47-b45f-66ce6f24980c",
+      "createdAt": "2026-05-05T07:01:35.269Z",
+      "status": "pending"
+    },
+    {
+      "type": "studio",
+      "label": "黑洞游戏工作室",
+      "detailVi": "Developer name is not listed in studio-tiers.json. Merge adds an entry; adjust score if needed (example baseline 55).",
+      "jsonSuggestion": {
+        "names": [
+          "黑洞游戏工作室"
+        ],
+        "score": 55,
+        "tier": "custom",
+        "roles": [
+          "developer"
+        ]
+      },
+      "appId": 835980,
+      "gameName": "来自黑洞的旅人",
+      "id": "26527cd2-3557-4dd0-abcc-3cd2d52fbb26",
+      "createdAt": "2026-05-05T07:43:46.345Z",
+      "status": "pending"
+    },
+    {
+      "type": "studio",
+      "label": "冬日煮米游戏制作组",
+      "detailVi": "Developer name is not listed in studio-tiers.json. Merge adds an entry; adjust score if needed (example baseline 55).",
+      "jsonSuggestion": {
+        "names": [
+          "冬日煮米游戏制作组"
+        ],
+        "score": 55,
+        "tier": "custom",
+        "roles": [
+          "developer"
+        ]
+      },
+      "appId": 833213,
+      "gameName": "纤维",
+      "id": "5759fd1c-d0e6-427a-b596-d6349f6963fd",
+      "createdAt": "2026-05-05T07:56:12.947Z",
+      "status": "pending"
     }
   ]
 }

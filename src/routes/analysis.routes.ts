@@ -5,6 +5,7 @@ import {
   parseAppIdFromInput,
   fetchAppInfo,
   fetchExternalReviews,
+  fetchAppDetailRaw,
   type ExternalReview,
 } from "../services/taptap-client.service";
 import { parseCsvBuffer } from "../utils/csv-parser";
@@ -110,11 +111,15 @@ router.post("/analyze-external", async (req, res) => {
       return;
     }
 
+    const detailRaw = await fetchAppDetailRaw(appId);
+
     const result = await aiAnalysisService.analyzeExternalReviews(
       appId,
       appTitle,
       appIcon,
       reviews,
+      "external",
+      detailRaw,
     );
 
     clearInterval(keepAlive);

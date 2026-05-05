@@ -89,6 +89,20 @@ export async function fetchAppInfo(appId: number): Promise<TapTapAppInfo> {
   };
 }
 
+/**
+ * Full JSON payload from app/v4/detail — used for tags / haystack in external URL analysis.
+ * Same endpoint as fetchAppInfo; call when you need genre tags without duplicating logic.
+ */
+export async function fetchAppDetailRaw(appId: number): Promise<Record<string, unknown> | null> {
+  try {
+    const data = (await taptapGet("app/v4/detail", { id: appId })) as Record<string, unknown>;
+    return data && typeof data === "object" ? data : null;
+  } catch (e) {
+    console.warn(`[taptap-client] fetchAppDetailRaw(${appId}) failed:`, e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
 interface PageResult {
   list: Array<Record<string, unknown>>;
   nextPage: boolean;

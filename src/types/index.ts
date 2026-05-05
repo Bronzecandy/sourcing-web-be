@@ -228,16 +228,48 @@ export interface RubricRedFlagBlock {
   otherTaboosNote?: string | null;
 }
 
+/** Tổng hợp theo từng đầu mục lớn (manifest.parts) — phục vụ hiển thị & đối chiếu công thức điểm tổng. */
+export interface RubricPartRollup {
+  partId: string;
+  labelVi: string;
+  /** Trọng số phần đang dùng để tính điểm tổng (sau điều chỉnh gói thể loại nếu có). */
+  weightInTotal: number;
+  /** Trọng số trong manifest.json (trước điều chỉnh); khác weightInTotal khi có gói MOBA/Card RPG/… */
+  manifestWeightInTotal?: number;
+  /** Trung bình có trọng số của các tiêu chí con có điểm (1–100); null nếu không có tiêu chí nào có điểm. */
+  partAverageScore: number | null;
+  /** Σ weightInPart chỉ các tiêu chí có điểm — mẫu số khi tính TB phần. */
+  scoredWeightSumInPart: number;
+  /** Phần này có đưa vào điểm tổng không (cần ít nhất một tiêu chí có điểm). */
+  includedInGlobalScore: boolean;
+  /** Phần đóng góp vào tử số: weightInTotal × partAverageScore khi included; ngược lại null. */
+  numeratorContribution: number | null;
+}
+
+/** Quyết định thử nghiệm từ điểm có trọng số 0–100 và red flag cứng. */
+export type RubricTestDecision =
+  | "must_test"
+  | "suitable_test"
+  | "consider_test"
+  | "no_test"
+  | "blocked_red_flag";
+
 export interface RubricAggregate {
   weightedScore: number | null;
   band5: number | null;
-  decision: "good_for_test" | "need_verification" | "drop";
+  decision: RubricTestDecision;
   lowScoreCriteriaCount: number;
   redFlagHardGate: boolean;
+  /** Chi tiết từng phần (bản mới); thiếu ở kết quả lưu cũ. */
+  partRollups?: RubricPartRollup[];
+  /** Mẫu số công thức tổng (bản mới). */
+  globalWeightDenominator?: number;
 }
 
 export interface RubricBlock {
   manifestVersion: number;
+  /** Gói thể loại dùng để cân trọng số các phần (base | cardRpg | moba | …). */
+  genrePackResolved?: string | null;
   criteria: RubricCriterionOutput[];
   aggregate: RubricAggregate;
   redFlag: RubricRedFlagBlock;

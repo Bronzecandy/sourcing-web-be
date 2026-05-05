@@ -618,6 +618,7 @@ export class AIAnalysisService {
       parseLlmRubricRows(analysis as Record<string, unknown>),
       parseRedFlagSignals(analysis as Record<string, unknown>),
       reviews.length,
+      inferredPack,
     );
 
     const mainScore = rubric.aggregate.weightedScore ?? 50;
@@ -714,12 +715,18 @@ export class AIAnalysisService {
     iconUrl: string | null,
     reviews: StratifiedReview[],
     source: "external" | "csv-upload" = "external",
+    tapTapDetailRaw?: Record<string, unknown> | null,
   ): Promise<AIAnalysisResult> {
     if (reviews.length === 0) {
       throw new Error(`No reviews found for ${gameName} (appId: ${appId})`);
     }
 
-    const analysisContext = buildAnalysisContextFromRaw(appId, gameName, iconUrl, null);
+    const analysisContext = buildAnalysisContextFromRaw(
+      appId,
+      gameName,
+      iconUrl,
+      source === "csv-upload" ? null : tapTapDetailRaw ?? null,
+    );
 
     return this.runLLMAnalysis(appId, gameName, reviews, { source, iconUrl, analysisContext });
   }

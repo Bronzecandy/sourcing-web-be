@@ -56,7 +56,7 @@ const byId = new Map(libEntries.map((e) => [e.criterionId, e]));
 assert.equal(byId.get("overview.genre")?.score, 90);
 assert.equal(byId.get("overview.developer")?.score, 92);
 
-const merged = mergeRubricFromLlm(manifest, active, libEntries, [], undefined, 50);
+const merged = mergeRubricFromLlm(manifest, active, libEntries, [], undefined, 50, null);
 const crit = new Map(merged.criteria.map((c) => [c.id, c]));
 assert.equal(crit.get("overview.genre")?.source, "library");
 assert.equal(crit.get("overview.genre")?.score, 90);

@@ -76,6 +76,13 @@ export function inferGenrePack(tagValues: string[]): string | null {
   const tags = tagsForLibraryMatching(tagValues);
   const blob = normalizeName(tags.join(" "));
   if (!blob) return null;
+  /** Genre chỉ là "Card" / 卡牌 / TCG (snapshot TapTap + DB) — blob regex cũ cần thêm "rpg"|"deck"... nên không khớp. */
+  for (const tag of tags) {
+    const n = normalizeName(tag);
+    if (n === "card" || n === "卡牌" || n === "tcg" || n === "ccg" || n === "集换式卡牌") {
+      return "cardRpg";
+    }
+  }
   // Extraction / looter trước (tránh “extraction” bị ăn vào nhánh card)
   if (
     /\bextraction\b|extraction shooter|tarkov|dark zone|looter|loot &|loots|evac|搜打撤|撤离|marathon|escape from|dmz mode|hunt: showdown|arena breakout|delta force/.test(
