@@ -10,6 +10,12 @@ import {
   type ExternalReview,
 } from "../services/taptap-client.service";
 import { parseCsvBuffer } from "../utils/csv-parser";
+import {
+  parseSteamAppIdFromInput,
+  fetchSteamAppDetails,
+  fetchSteamReviewsUpTo,
+  buildSteamDetailRaw,
+} from "../services/steam-client.service";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
@@ -105,9 +111,64 @@ router.post("/analyze-external", async (req, res) => {
   const keepAlive = startKeepAlive(res);
   try {
     const input = String(req.body?.input ?? "").trim();
+    const platformRaw = String(req.body?.platform ?? "taptap").toLowerCase();
+    const platform = platformRaw === "steam" ? "steam" : "taptap";
     if (!input) {
       clearInterval(keepAlive);
-      res.end(JSON.stringify({ success: false, error: "Missing input (TapTap URL or App ID)" }));
+      res.end(JSON.stringify({ success: false, error: "Missing input (URL or App ID)" }));
+      return;
+    }
+
+    if (platform === "steam") {
+      const steamAppId = parseSteamAppIdFromInput(input);
+      if (!steamAppId || steamAppId <= 0) {
+        clearInterval(keepAlive);
+        res.end(
+          JSON.stringify({
+            success: false,
+            error: "Invalid Steam URL or App ID (expected store.steampowered.com/app/NUMBER or numeric ID)",
+          }),
+        );
+        return;
+      }
+
+      console.log(`[analyze-external] Steam platform appId=${steamAppId}`);
+
+      const [appData, reviews] = await Promise.all([
+        fetchSteamAppDetails(steamAppId),
+        fetchSteamReviewsUpTo(steamAppId),
+      ]);
+
+      const gameName =
+        appData && typeof appData.name === "string" && appData.name.trim()
+          ? appData.name.trim()
+          : `Steam App ${steamAppId}`;
+      const iconUrl =
+        appData && typeof appData.header_image === "string" ? appData.header_image : null;
+      const detailRaw = appData ? buildSteamDetailRaw(appData, steamAppId) : null;
+
+      if (reviews.length === 0) {
+        clearInterval(keepAlive);
+        res.end(
+          JSON.stringify({
+            success: false,
+            error: `No reviews found for "${gameName}" (Steam appId: ${steamAppId})`,
+          }),
+        );
+        return;
+      }
+
+      const result = await aiAnalysisService.analyzeExternalReviews(
+        steamAppId,
+        gameName,
+        iconUrl,
+        reviews,
+        "steam",
+        detailRaw,
+      );
+
+      clearInterval(keepAlive);
+      res.end(JSON.stringify({ success: true, data: result }));
       return;
     }
 

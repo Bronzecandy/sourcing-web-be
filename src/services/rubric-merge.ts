@@ -508,7 +508,7 @@ export function formatContextForPrompt(ctx: AnalysisContext): string {
       ? " — ghi chú: snapshot không có field developer riêng; đang dùng publisher/vận hành làm tên tham chiếu cho tiêu chí Developer."
       : "";
   return [
-    `Ngữ cảnh game (TapTap app/v4 detail khi phân tích bằng URL; hoặc snapshot AppRank mới nhất trong DB):`,
+    `Ngữ cảnh game (metadata snapshot — TapTap app detail, Steam Store appdetails, hoặc AppRank trong DB):`,
     `- Tên: ${ctx.gameName}`,
     `- Tag (DB / snapshot): ${tags}`,
     `- Tags mapped to English (tag-translator TAG_MAP → aligns English genre lib): ${tagsEn}`,

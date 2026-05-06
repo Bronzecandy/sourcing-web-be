@@ -113,21 +113,80 @@ function escapeControlCharsInJsonStringLiterals(text: string): string {
   return out;
 }
 
+/**
+ * LLM hay trả JSON không chuẩn: dấu phẩy thừa trước `]` hoặc `}` (trailing commas).
+ * Chỉ xóa khi không nằm trong chuỗi JSON (theo dấu ngoặc kép).
+ */
+function removeJsonTrailingCommas(text: string): string {
+  let out = "";
+  let inString = false;
+  let escape = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]!;
+    if (escape) {
+      out += c;
+      escape = false;
+      continue;
+    }
+    if (inString) {
+      if (c === "\\") {
+        out += c;
+        escape = true;
+      } else if (c === '"') {
+        inString = false;
+        out += c;
+      } else {
+        out += c;
+      }
+      continue;
+    }
+    if (c === '"') {
+      inString = true;
+      out += c;
+      continue;
+    }
+    if (c === ",") {
+      let j = i + 1;
+      while (j < text.length && /\s/.test(text[j]!)) j++;
+      const next = text[j];
+      if (next === "]" || next === "}") {
+        continue;
+      }
+    }
+    out += c;
+  }
+  return out;
+}
+
 function parseLlmJsonOutput(content: string): Record<string, unknown> {
   let cleaned = content.trim();
   if (cleaned.startsWith("```")) {
     cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim();
   }
-  try {
-    return JSON.parse(cleaned) as Record<string, unknown>;
-  } catch (firstErr: unknown) {
+
+  const variants: string[] = [
+    cleaned,
+    escapeControlCharsInJsonStringLiterals(cleaned),
+    removeJsonTrailingCommas(cleaned),
+    removeJsonTrailingCommas(escapeControlCharsInJsonStringLiterals(cleaned)),
+    // hai lần — đôi khi có nhiều cấp phẩy thừa lồng nhau
+    removeJsonTrailingCommas(removeJsonTrailingCommas(cleaned)),
+    removeJsonTrailingCommas(removeJsonTrailingCommas(escapeControlCharsInJsonStringLiterals(cleaned))),
+  ];
+
+  let lastErr: unknown;
+  for (const text of variants) {
     try {
-      return JSON.parse(escapeControlCharsInJsonStringLiterals(cleaned)) as Record<string, unknown>;
-    } catch {
-      console.error("[AI Analysis] JSON.parse failed (after control-char repair):", firstErr);
-      throw firstErr;
+      return JSON.parse(text) as Record<string, unknown>;
+    } catch (e) {
+      lastErr = e;
     }
   }
+
+  const snippet = cleaned.length > 360 ? `${cleaned.slice(0, 180)} … ${cleaned.slice(-120)}` : cleaned;
+  console.error("[AI Analysis] JSON.parse failed after trailing-comma + control-char repairs:", lastErr);
+  console.error("[AI Analysis] Response snippet:", snippet);
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
 
 function clipReviewTextForLLM(text: string): string {
@@ -498,7 +557,7 @@ export class AIAnalysisService {
     gameName: string,
     reviews: StratifiedReview[],
     opts: {
-      source?: "database" | "external" | "csv-upload";
+      source?: "database" | "external" | "csv-upload" | "steam";
       iconUrl?: string | null;
       analysisContext: AnalysisContext;
     },
@@ -714,7 +773,7 @@ export class AIAnalysisService {
     gameName: string,
     iconUrl: string | null,
     reviews: StratifiedReview[],
-    source: "external" | "csv-upload" = "external",
+    source: "external" | "csv-upload" | "steam" = "external",
     tapTapDetailRaw?: Record<string, unknown> | null,
   ): Promise<AIAnalysisResult> {
     if (reviews.length === 0) {

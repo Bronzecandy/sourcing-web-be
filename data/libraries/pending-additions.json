@@ -179,6 +179,66 @@
       "id": "56869771-eb68-433d-9cd7-0c5ef8d063d9",
       "createdAt": "2026-05-06T04:29:24.608Z",
       "status": "pending"
+    },
+    {
+      "type": "studio",
+      "label": "Trickjump Games Ltd",
+      "detailVi": "Developer name is not listed in studio-tiers.json. Merge adds an entry; adjust score if needed (example baseline 55).",
+      "jsonSuggestion": {
+        "names": [
+          "Trickjump Games Ltd"
+        ],
+        "score": 55,
+        "tier": "custom",
+        "roles": [
+          "developer"
+        ]
+      },
+      "appId": 3242950,
+      "gameName": "Outworld Station",
+      "id": "7fe33439-6b77-4c23-ac77-9c30380a20a5",
+      "createdAt": "2026-05-06T10:22:08.724Z",
+      "status": "pending"
+    },
+    {
+      "type": "studio",
+      "label": "MINTROCKET",
+      "detailVi": "Developer name is not listed in studio-tiers.json. Merge adds an entry; adjust score if needed (example baseline 55).",
+      "jsonSuggestion": {
+        "names": [
+          "MINTROCKET"
+        ],
+        "score": 55,
+        "tier": "custom",
+        "roles": [
+          "developer"
+        ]
+      },
+      "appId": 1868140,
+      "gameName": "DAVE THE DIVER",
+      "id": "7ad63efd-8d52-4ede-a3b4-e7516c752ee2",
+      "createdAt": "2026-05-06T10:25:24.596Z",
+      "status": "pending"
+    },
+    {
+      "type": "studio",
+      "label": "玛奇阿朵互娱科技",
+      "detailVi": "Developer name is not listed in studio-tiers.json. Merge adds an entry; adjust score if needed (example baseline 55).",
+      "jsonSuggestion": {
+        "names": [
+          "玛奇阿朵互娱科技"
+        ],
+        "score": 55,
+        "tier": "custom",
+        "roles": [
+          "developer"
+        ]
+      },
+      "appId": 3412900,
+      "gameName": "The Three Kingdoms: Rebirth",
+      "id": "e7dc05cd-0424-4f71-a0e0-f2854d700093",
+      "createdAt": "2026-05-06T10:28:22.575Z",
+      "status": "pending"
     }
   ]
 }

@@ -314,7 +314,7 @@ export interface AIAnalysisResult {
   redFlagAtAGlance?: RedFlagAtAGlance;
   /** Có/Không từng mục — ưu tiên bind ô “điểm” trên UI */
   redFlagsChecklist?: RedFlagsChecklist;
-  source?: "database" | "external" | "csv-upload";
+  source?: "database" | "external" | "csv-upload" | "steam";
   /** Joined bullets for backward compatibility */
   summary: string;
   /** One bullet per string (Vietnamese from LLM) */
