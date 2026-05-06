@@ -6,7 +6,14 @@
       "names": [
         "miHoYo",
         "hoyoverse",
-        "cognosphere"
+        "cognosphere",
+        "timi",
+        "netease",
+        "网易",
+        "netease games",
+        "网易游戏",
+        "杭州网易雷火",
+        "netease leihuo"
       ],
       "score": 92,
       "tier": "S",
@@ -17,13 +24,10 @@
     },
     {
       "names": [
-        "tencent",
-        "timi",
-        "lightspeed",
-        "proxima beta"
+        "tencent"
       ],
-      "score": 78,
-      "tier": "A",
+      "score": 90,
+      "tier": "S",
       "roles": [
         "developer",
         "publisher"
@@ -31,15 +35,11 @@
     },
     {
       "names": [
-        "netease",
-        "网易",
-        "netease games",
-        "网易游戏",
-        "杭州网易雷火",
-        "netease leihuo"
+        "lightspeed",
+        "proxima beta"
       ],
-      "score": 76,
-      "tier": "A",
+      "score": 85,
+      "tier": "S",
       "roles": [
         "developer",
         "publisher"
@@ -84,10 +84,21 @@
     },
     {
       "names": [
-        "西木木"
+        "西木木",
+        "火联社"
       ],
       "score": 55,
       "tier": "C",
+      "roles": [
+        "developer"
+      ]
+    },
+    {
+      "names": [
+        "腾讯"
+      ],
+      "score": 93,
+      "tier": "S",
       "roles": [
         "developer"
       ]

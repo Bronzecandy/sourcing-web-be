@@ -1,7 +1,68 @@
 {
-  "version": 2,
-  "neutralScore": 55,
+  "version": 3,
+  "neutralScore": 65,
   "keywordPatterns": [
+    {
+      "match": [
+        "2gb ram",
+        "3gb ram",
+        "low spec",
+        "low-end",
+        "old phone",
+        "budget phone",
+        "entry-level"
+      ],
+      "score": 90
+    },
+    {
+      "match": [
+        "4gb ram",
+        "android 8",
+        "android 9",
+        "android 10",
+        "ios 12",
+        "ios 13",
+        "mid-low",
+        "older device",
+        "minimum spec"
+      ],
+      "score": 82
+    },
+    {
+      "match": [
+        "6gb ram",
+        "android 11",
+        "android 12",
+        "ios 14",
+        "ios 15",
+        "mid-range",
+        "medium settings",
+        "stable fps"
+      ],
+      "score": 72
+    },
+    {
+      "match": [
+        "8gb ram",
+        "android 13",
+        "ios 16",
+        "upper mid-range",
+        "high settings",
+        "60fps"
+      ],
+      "score": 62
+    },
+    {
+      "match": [
+        "android 14",
+        "ios 17",
+        "snapdragon 7",
+        "dimensity 8",
+        "near flagship",
+        "high-end"
+      ],
+      "score": 52
+    },
     {
       "match": [
         "snapdragon 8",
@@ -12,47 +73,14 @@
         "m3",
         "m4",
         "flagship",
-        "high-end",
         "max settings",
         "ultra settings",
         "4k",
         "120fps",
         "ray tracing"
       ],
-      "score": 72
-    },
-    {
-      "match": [
-        "low spec",
-        "low-end",
-        "old phone",
-        "stutter",
-        "lag",
-        "low fps",
-        "heating",
-        "throttle",
-        "2gb ram",
-        "3gb ram"
-      ],
-      "score": 48
-    },
-    {
-      "match": [
-        "64-bit",
-        "android 10",
-        "android 11",
-        "android 12",
-        "android 13",
-        "android 14",
-        "ios 12",
-        "ios 13",
-        "ios 14",
-        "ios 15",
-        "ios 16",
-        "ios 17"
-      ],
-      "score": 62
+      "score": 40
     }
   ],
-  "notes": "English keywords. Raw store text may be Chinese; haystack still includes original description + English-mapped tags."
+  "notes": "Higher score means wider market penetration / lower hardware requirement. Lower-end devices and older OS versions receive higher scores. Flagship/high-end indicators receive lower scores because they represent a narrower user segment."
 }

@@ -3,13 +3,26 @@
   "defaultScore": 50,
   "notesEditor": "All entries in match[] are ENGLISH keywords/phrases. Chinese TapTap tags are mapped via src/utils/tag-translator.ts (TAG_MAP) before matching; extend TAG_MAP for new ZH tags. Optional: long-form text cache lives in .translation-cache.json (API translations), unrelated to tag tier matching.",
   "tiers": {
-    "S": { "label": "Tier S", "score": 90 },
-    "A": { "label": "Tier A", "score": 72 },
-    "B": { "label": "Tier B", "score": 52 },
-    "C": { "label": "Tier C", "score": 32 }
+    "S": {
+      "label": "Tier S",
+      "score": 90
+    },
+    "A": {
+      "label": "Tier A",
+      "score": 72
+    },
+    "B": {
+      "label": "Tier B",
+      "score": 52
+    },
+    "C": {
+      "label": "Tier C",
+      "score": 32
+    }
   },
   "tagPatterns": [
     {
+      "tier": "S",
       "match": [
         "card rpg",
         "cardrpg",
@@ -26,10 +39,10 @@
         "loot & scoot",
         "card game",
         "deck"
-      ],
-      "tier": "S"
+      ]
     },
     {
+      "tier": "A",
       "match": [
         "fps",
         "tps",
@@ -57,10 +70,10 @@
         "competitive",
         "gunplay",
         "battle royale game"
-      ],
-      "tier": "A"
+      ]
     },
     {
+      "tier": "B",
       "match": [
         "casual",
         "puzzle",
@@ -72,7 +85,6 @@
         "business sim",
         "management",
         "mmorpg",
-        "rpg",
         "raising sim",
         "party",
         "music",
@@ -82,7 +94,6 @@
         "anime",
         "adventure",
         "exploration",
-        "multiplayer",
         "single player",
         "story",
         "narrative",
@@ -98,10 +109,10 @@
         "idle",
         "collection game",
         "dress up"
-      ],
-      "tier": "B"
+      ]
     },
     {
+      "tier": "C",
       "match": [
         "rts",
         "real-time strategy",
@@ -115,15 +126,13 @@
         "avg",
         "turn-based",
         "turn based",
-        "wuxia",
         "niche",
         "text adventure",
         "war game",
         "warfare",
         "small studio",
         "indie"
-      ],
-      "tier": "C"
+      ]
     }
   ]
 }
