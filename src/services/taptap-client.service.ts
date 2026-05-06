@@ -113,22 +113,31 @@ function looksLikeTapTapAppDetail(obj: unknown): obj is Record<string, unknown> 
 
 /**
  * Phản hồi proxy `/api/full/:id` có thể kèm snapshot app/v4/detail dưới nhiều tên field — gom một object dùng cho extractTags / extractDeveloperPublisher.
+ * `detailRaw` từ proxy luôn tin cậy (không cần looksLike) — tránh từ chối payload hợp lệ.
  */
 export function pickTapTapDetailFromProxyBundle(payload: unknown): Record<string, unknown> | null {
   if (!payload || typeof payload !== "object") return null;
   const root = payload as Record<string, unknown>;
-  const nestedKeys = ["detailRaw", "appDetail", "detail", "app_v4", "taptapDetail", "raw", "fullApp", "app"];
+  const direct = root["detailRaw"];
+  if (direct && typeof direct === "object" && !Array.isArray(direct)) {
+    return direct as Record<string, unknown>;
+  }
+  const nestedKeys = ["appDetail", "detail", "app_v4", "taptapDetail", "raw", "fullApp", "app"];
   for (const k of nestedKeys) {
     const v = root[k];
-    if (looksLikeTapTapAppDetail(v)) return v;
+    if (looksLikeTapTapAppDetail(v)) return v as Record<string, unknown>;
   }
   if (looksLikeTapTapAppDetail(root)) return root;
   const inner: unknown = root["data"];
   if (inner && typeof inner === "object" && !Array.isArray(inner)) {
     const innerObj = inner as Record<string, unknown>;
+    const idir = innerObj["detailRaw"];
+    if (idir && typeof idir === "object" && !Array.isArray(idir)) {
+      return idir as Record<string, unknown>;
+    }
     for (const k of nestedKeys) {
       const v = innerObj[k];
-      if (looksLikeTapTapAppDetail(v)) return v;
+      if (looksLikeTapTapAppDetail(v)) return v as Record<string, unknown>;
     }
   }
   return null;

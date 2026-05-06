@@ -17,6 +17,31 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 
 const TAPTAP_PROXY_URL = process.env.TAPTAP_PROXY_URL || "";
 const TAPTAP_PROXY_KEY = process.env.TAPTAP_PROXY_KEY || "";
 
+/** Khi đã dùng proxy: mặc định không gọi TapTap trực tiếp từ BE (IP datacenter hay bị 403/405). Chỉ thử direct khi = 1/true. */
+function allowDirectTapTapDetailFallback(): boolean {
+  const v = process.env.TAPTAP_DIRECT_DETAIL_FALLBACK ?? "";
+  return v === "1" || v.toLowerCase() === "true";
+}
+
+/** Proxy flush space keep-alive trước JSON — parse an toàn hơn. */
+function parseProxyFullJson(raw: string): { success?: boolean; data?: unknown; error?: string } {
+  const trimmed = raw.trim();
+  try {
+    return JSON.parse(trimmed) as { success?: boolean; data?: unknown; error?: string };
+  } catch {
+    const start = trimmed.indexOf("{");
+    const end = trimmed.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      return JSON.parse(trimmed.slice(start, end + 1)) as {
+        success?: boolean;
+        data?: unknown;
+        error?: string;
+      };
+    }
+    throw new Error("Invalid JSON from TapTap proxy");
+  }
+}
+
 async function fetchViaProxy(appId: number): Promise<{
   appInfo: { title: string; iconUrl: string | null };
   reviews: ExternalReview[];
@@ -29,8 +54,7 @@ async function fetchViaProxy(appId: number): Promise<{
 
   const res = await fetch(url, { headers, signal: AbortSignal.timeout(300_000) });
   const raw = await res.text();
-  const trimmed = raw.trim();
-  const json = JSON.parse(trimmed);
+  const json = parseProxyFullJson(raw);
   if (!json.success) throw new Error(json.error ?? "Proxy request failed");
 
   const data = json.data as {
@@ -121,11 +145,20 @@ router.post("/analyze-external", async (req, res) => {
     }
 
     if (!detailRaw) {
-      detailRaw = await fetchAppDetailRaw(appId);
+      if (useProxy() && !allowDirectTapTapDetailFallback()) {
+        console.warn(
+          `[analyze-external] No app/v4/detail from proxy for appId=${appId} — skipping direct TapTap (server IPs often get 403/405). Update taptap-proxy to return detailRaw in /api/full, or set TAPTAP_DIRECT_DETAIL_FALLBACK=1 to attempt direct fetch.`,
+        );
+      } else {
+        detailRaw = await fetchAppDetailRaw(appId);
+      }
     }
     if (!detailRaw) {
+      const proxyNoDirect = useProxy() && !allowDirectTapTapDetailFallback();
       console.warn(
-        `[analyze-external] No app/v4/detail snapshot for appId=${appId} (proxy bundle empty + direct TapTap failed?) — developer/publisher/tags may be missing in prompt.`,
+        proxyNoDirect
+          ? `[analyze-external] No app/v4/detail for appId=${appId} — analysis continues without TapTap metadata (deploy proxy with detailRaw in /api/full).`
+          : `[analyze-external] No app/v4/detail snapshot for appId=${appId} — developer/publisher/tags may be missing in prompt.`,
       );
     }
 
