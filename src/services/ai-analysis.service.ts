@@ -2,6 +2,12 @@ import { callLLM, getModel } from "../utils/ai-client";
 import { pool } from "../utils/prisma";
 import { prisma } from "../utils/prisma";
 import type { AIAnalysisResult, TapTapRawApp } from "../types";
+import type { ReviewWindow } from "../types/review-window";
+import {
+  filterReviewsByWindow,
+  reviewWindowMeta,
+  reviewWindowSqlBounds,
+} from "../utils/review-window";
 import { buildAnalysisContextFromRaw, type AnalysisContext } from "./analysis-context";
 import { getActiveCriteria, loadRubricManifest } from "./rubric-manifest";
 import {
@@ -20,6 +26,7 @@ import {
 } from "./rubric-merge";
 import fs from "fs";
 import path from "path";
+import { jsonrepair } from "jsonrepair";
 
 const STORE_FILE = path.join(process.cwd(), ".ai-analysis-store.json");
 
@@ -183,8 +190,23 @@ function parseLlmJsonOutput(content: string): Record<string, unknown> {
     }
   }
 
+  const repairBases = [
+    cleaned,
+    escapeControlCharsInJsonStringLiterals(cleaned),
+    removeJsonTrailingCommas(cleaned),
+    removeJsonTrailingCommas(escapeControlCharsInJsonStringLiterals(cleaned)),
+  ];
+  for (const base of repairBases) {
+    try {
+      const repaired = jsonrepair(base);
+      return JSON.parse(repaired) as Record<string, unknown>;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+
   const snippet = cleaned.length > 360 ? `${cleaned.slice(0, 180)} … ${cleaned.slice(-120)}` : cleaned;
-  console.error("[AI Analysis] JSON.parse failed after trailing-comma + control-char repairs:", lastErr);
+  console.error("[AI Analysis] JSON.parse failed after jsonrepair + trailing-comma + control-char repairs:", lastErr);
   console.error("[AI Analysis] Response snippet:", snippet);
   throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
@@ -238,17 +260,32 @@ async function queryReviewBatch(
   appId: number,
   afterId: number,
   limit: number,
+  bounds: { minReviewAt: Date | null; maxReviewAt: Date | null },
 ): Promise<{ id: number; raw: Record<string, unknown>; reviewAt: Date | null }[]> {
   let lastErr: unknown;
   for (let attempt = 0; attempt < 4; attempt++) {
     try {
+      const params: unknown[] = [appId, afterId];
+      let where = `"appId" = $1 AND id > $2 AND raw IS NOT NULL`;
+      let paramIdx = 3;
+      if (bounds.minReviewAt) {
+        where += ` AND "reviewAt" >= $${paramIdx}`;
+        params.push(bounds.minReviewAt);
+        paramIdx++;
+      }
+      if (bounds.maxReviewAt) {
+        where += ` AND "reviewAt" <= $${paramIdx}`;
+        params.push(bounds.maxReviewAt);
+        paramIdx++;
+      }
+      params.push(limit);
       const res = await pool.query<{ id: number; raw: Record<string, unknown>; reviewAt: Date | null }>(
         `SELECT id, raw, "reviewAt"
          FROM "AppReview"
-         WHERE "appId" = $1 AND id > $2 AND raw IS NOT NULL
+         WHERE ${where}
          ORDER BY id ASC
-         LIMIT $3`,
-        [appId, afterId, limit],
+         LIMIT $${paramIdx}`,
+        params,
       );
       return res.rows;
     } catch (err) {
@@ -282,15 +319,19 @@ function parseReviewRow(
   return { text, score, date, bucket: bucketLabel };
 }
 
-async function fetchStratifiedReviews(appId: number): Promise<StratifiedReview[]> {
+async function fetchStratifiedReviews(
+  appId: number,
+  window: ReviewWindow = { mode: "all" },
+): Promise<StratifiedReview[]> {
   const startMs = Date.now();
+  const bounds = reviewWindowSqlBounds(window);
   const rows: { raw: Record<string, unknown>; reviewAt: Date | null }[] = [];
   let afterId = 0;
 
   for (;;) {
     let batch: { id: number; raw: Record<string, unknown>; reviewAt: Date | null }[];
     try {
-      batch = await queryReviewBatch(appId, afterId, AI_REVIEW_FETCH_BATCH);
+      batch = await queryReviewBatch(appId, afterId, AI_REVIEW_FETCH_BATCH, bounds);
     } catch (err) {
       console.error(`[AI Analysis] AppReview batch failed after retries for appId=${appId}:`, err);
       throw err;
@@ -366,7 +407,7 @@ const FINAL_OUTPUT_SPEC = `Trả về một object JSON đúng cấu trúc sau (
 Không trả các trường: strengths, weaknesses (toàn cục), sentimentScore, sentimentBreakdown, topics — các trường đó không còn dùng.
 
 Quy tắc:
-- summaryBullets / recentTrendBullets: mỗi phần tử một ý ngắn.
+- summaryBullets / recentTrendBullets: mỗi phần tử là MỘT string JSON duy nhất (một ý ngắn). Không đặt dấu " chưa escape trong chuỗi; không ghép kiểu text rồi ": \"giá_trị\" trong cùng một phần tử mảng — đó làm vỡ JSON.
 - Red Flag: severity trong redFlagSignals (không chấm điểm); các dòng rubricCriteria có id "red_flag.*" đặt score null — xem spec rubric chi tiết.
 - Với MỖI tiêu chí trong rubricCriteria: strengths và weaknesses là mảng các chuỗi ngắn riêng của tiêu chí đó (1–5 mục mỗi loại nếu có dữ liệu).`;
 
@@ -560,6 +601,7 @@ export class AIAnalysisService {
       source?: "database" | "external" | "csv-upload" | "steam";
       iconUrl?: string | null;
       analysisContext: AnalysisContext;
+      reviewWindow?: ReviewWindow;
     },
   ): Promise<AIAnalysisResult> {
     const bucketCounts = buildBucketCounts(reviews);
@@ -572,8 +614,6 @@ export class AIAnalysisService {
     const finalSpec = appendRubricSpec(FINAL_OUTPUT_SPEC, activeCriteria);
     const contextBlock = formatContextForPrompt(opts.analysisContext);
     const libraryEntries = resolveLibraryScores(opts.analysisContext, manifest);
-    const libraryRequests = buildLibraryRequests(opts.analysisContext, libraryEntries);
-    persistLibraryRequestsToFile(opts.analysisContext, libraryRequests);
     const libraryBlock = formatLibraryScoresForPrompt(libraryEntries);
 
     const model = getModel();
@@ -680,6 +720,9 @@ export class AIAnalysisService {
       inferredPack,
     );
 
+    const libraryRequests = buildLibraryRequests(opts.analysisContext, libraryEntries, rubric);
+    persistLibraryRequestsToFile(opts.analysisContext, libraryRequests);
+
     const mainScore = rubric.aggregate.weightedScore ?? 50;
 
     const redFlagAtAGlance = buildRedFlagAtAGlance(rubric);
@@ -700,6 +743,9 @@ export class AIAnalysisService {
 
     const summary = summaryBullets.join("\n");
     const recentTrend = recentTrendBullets.length > 0 ? recentTrendBullets.join("\n") : "";
+
+    const win = opts.reviewWindow ?? { mode: "all" as const };
+    const winMeta = reviewWindowMeta(win);
 
     const result: AIAnalysisResult = {
       appId,
@@ -722,6 +768,9 @@ export class AIAnalysisService {
       dateRangeStart: dateRange.start,
       dateRangeEnd: dateRange.end,
       analyzedAt: new Date().toISOString(),
+      ...winMeta,
+      developerName: opts.analysisContext.developerName,
+      publisherName: opts.analysisContext.publisherName,
       rubric,
       libraryRequests,
     };
@@ -737,7 +786,10 @@ export class AIAnalysisService {
     return result;
   }
 
-  async analyzeGameReviews(appId: number): Promise<AIAnalysisResult> {
+  async analyzeGameReviews(
+    appId: number,
+    reviewWindow: ReviewWindow = { mode: "all" },
+  ): Promise<AIAnalysisResult> {
     const latestRank = await prisma.appRank.findFirst({
       where: { appId },
       orderBy: { date: "desc" },
@@ -748,7 +800,10 @@ export class AIAnalysisService {
     const iconUrl =
       (latestRank?.raw as TapTapRawApp | null)?.icon?.url ?? null;
 
-    const reviews = await fetchStratifiedReviews(appId);
+    let reviews = await fetchStratifiedReviews(appId, reviewWindow);
+    if (reviewWindow.mode !== "all") {
+      reviews = filterReviewsByWindow(reviews, reviewWindow);
+    }
 
     if (reviews.length === 0) {
       throw new Error(`No reviews found for ${gameName} (appId: ${appId})`);
@@ -765,6 +820,7 @@ export class AIAnalysisService {
       source: "database",
       iconUrl,
       analysisContext,
+      reviewWindow,
     });
   }
 
@@ -775,8 +831,11 @@ export class AIAnalysisService {
     reviews: StratifiedReview[],
     source: "external" | "csv-upload" | "steam" = "external",
     tapTapDetailRaw?: Record<string, unknown> | null,
+    reviewWindow: ReviewWindow = { mode: "all" },
   ): Promise<AIAnalysisResult> {
-    if (reviews.length === 0) {
+    const filtered = filterReviewsByWindow(reviews, reviewWindow);
+
+    if (filtered.length === 0) {
       throw new Error(`No reviews found for ${gameName} (appId: ${appId})`);
     }
 
@@ -787,7 +846,12 @@ export class AIAnalysisService {
       source === "csv-upload" ? null : tapTapDetailRaw ?? null,
     );
 
-    return this.runLLMAnalysis(appId, gameName, reviews, { source, iconUrl, analysisContext });
+    return this.runLLMAnalysis(appId, gameName, filtered, {
+      source,
+      iconUrl,
+      analysisContext,
+      reviewWindow,
+    });
   }
 }
 

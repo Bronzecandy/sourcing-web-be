@@ -331,6 +331,12 @@ export interface AIAnalysisResult {
   dateRangeStart: string | null;
   dateRangeEnd: string | null;
   analyzedAt: string;
+  reviewWindowMode?: "all" | "days" | "range";
+  reviewWindowDays?: 7 | 14 | 30 | 60;
+  reviewFilterFrom?: string;
+  reviewFilterTo?: string;
+  developerName?: string | null;
+  publisherName?: string | null;
   /** Extended rubric + library merge (optional for older stored analyses) */
   rubric?: RubricBlock;
   /** Gợi ý bổ sung thư viện JSON khi thiếu khớp Genre/Developer/... */

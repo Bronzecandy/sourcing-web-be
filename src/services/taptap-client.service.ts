@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { fetchWithLongConnect } from "../utils/fetch-external";
 
 const BASE_URL = "https://www.taptap.cn/webapiv2";
 const USER_AGENT =
@@ -57,8 +58,9 @@ async function taptapGet(path: string, params: Record<string, string | number>):
 
   const url = `${BASE_URL}/${path}?${qs.toString()}`;
 
-  const res = await fetch(url, {
+  const res = await fetchWithLongConnect(url, {
     headers: { "User-Agent": USER_AGENT },
+    signal: AbortSignal.timeout(120_000),
   });
 
   if (!res.ok) {

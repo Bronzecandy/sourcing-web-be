@@ -27,11 +27,13 @@
     "dotenv": "^17.4.1",
     "express": "^5.2.1",
     "google-translate-api-x": "^10.7.2",
+    "jsonrepair": "^3.14.0",
     "multer": "^2.1.1",
     "node-cache": "^5.1.2",
     "node-cron": "^4.2.1",
     "openai": "^6.33.0",
     "pg": "^8.20.0",
+    "undici": "^7.25.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {

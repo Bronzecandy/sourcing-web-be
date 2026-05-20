@@ -1,0 +1,97 @@
+---
+description: Ngữ cảnh monorepo Sourcing — mục đích dự án, cấu trúc be/fe/proxy, quy ước
+alwaysApply: true
+---
+
+# Sourcing — Game Analytics (monorepo)
+
+## Dự án làm gì
+
+**Sourcing** là công cụ **sourcing / phân tích game mobile**, tập trung **TapTap Top 200**. Dữ liệu ranking và review được crawl, lưu snapshot JSON trong PostgreSQL.
+
+Tính năng chính:
+- Dashboard, bảng xếp hạng, chi tiết game (biểu đồ, reviews)
+- **Điểm tiềm năng**: potential, reserve-growth, breakout (`ranking.service.ts`)
+- **Phân tích AI theo rubric**: Có/Không, red flag, roll-up điểm (`ai-analysis.service.ts`)
+- Quản lý **thư viện tier JSON** (`data/libraries/`, UI `/libraries`)
+
+## Monorepo — 3 repo sibling
+
+| Thư mục | Vai trò | Dev |
+|---------|---------|-----|
+| `be` | API Express, Prisma, rubric JSON, OpenAI | `:3001`, `npm run dev` |
+| `fe` | React 19 + Vite 8 + Tailwind 4 | `:5173`, proxy `/api` → BE |
+| `taptap-proxy` | Sidecar gọi TapTap khi IP BE bị chặn | Railway; env `TAPTAP_PROXY_URL` trên BE |
+
+Đường dẫn (máy user): `C:\Users\thanhnam.tran_ctv\Desktop\Sourcing\{be,fe,taptap-proxy}`.
+
+**Workspace Cursor:** Rule nằm trong `be`. Nếu chỉ mở `fe`, rule không load — **Add Folder to Workspace** thêm `be` (hoặc mở cả `Sourcing`).
+
+## Cấu trúc thư mục
+
+### Backend (`be`)
+
+- `src/index.ts` → `app.ts` — mount routes
+- `src/routes/` — `game`, `ranking`, `analysis`, `libraries`, `translate`
+- `src/services/` — logic: `game`, `ranking`, `ai-analysis`, `libraries`, `taptap-client`, `steam-client`
+- `src/precompute.ts` + `src/utils/cache.ts` — cache warmup; cron 10:15 `Asia/Ho_Chi_Minh`
+- `prisma/schema.prisma` — `AppRank`, `AppReview` (field `raw` = JSON TapTap)
+- `data/libraries/*.json` — tier (studio, genre, game-size, community-size, system-requirement, …), `pending-additions.json`
+- `data/rubric/manifest.json` — tiêu chí rubric, trọng số, genre packs
+- `generated/prisma` — Prisma client (gitignore; chạy `prisma generate`)
+- `public/admin/libraries.html` — admin tĩnh lẻ; **không** phải app chính
+
+### Frontend (`fe`) — `../fe/` từ gốc `be`
+
+- `src/pages/` — `/`, `/ranking`, `/game/:id`, `/potential`, `/ai-analysis`, `/libraries`
+- `src/services/api.ts` — Axios; `VITE_API_BASE_URL` hoặc `/api` (dev proxy → `localhost:3001`)
+- `src/components/` — `RubricPanel`, `RedFlagSection`, `layout/Sidebar`
+- `src/types/index.ts` — mirror payload BE
+
+### Proxy (`taptap-proxy`)
+
+- `index.js` — Express; BE gọi `GET {TAPTAP_PROXY_URL}/api/full/:appId` khi env proxy được set
+- FE **không** gọi proxy; chỉ gọi BE
+
+## API & phân tách trách nhiệm
+
+- Prefix `/api/*`; response `{ success: true, data }` hoặc `{ success: false, error }`
+- Routes (`app.ts`): `/api/games`, `/api/ranking`, `/api/analysis`, `/api/libraries`, `/api/translate`, `/api/health`
+- **BE**: tính điểm, LLM, đọc/ghi libraries, lưu analysis
+- **FE**: hiển thị rubric, Có/Không, red flag; i18n VI/EN (`ContentLangProvider`); **không** nhúng logic rubric
+
+## Luồng dữ liệu
+
+1. Ranking/review đã crawl → DB (`AppRank.raw`, `AppReview.raw`)
+2. Phân tích ngoài (URL TapTap/Steam, CSV) → `POST /api/analysis/...` → (env) `taptap-proxy` hoặc `taptap-client` trực tiếp → `AIAnalysisService` + libraries
+3. Steam: BE gọi trực tiếp, không qua proxy
+4. Chỉnh tier: `data/libraries/*.json` hoặc UI `/libraries` → `/api/libraries`
+
+## Dev & env
+
+| Biến | Mục đích |
+|------|----------|
+| `DATABASE_URL` | PostgreSQL |
+| `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL` | LLM rubric |
+| `CORS_ORIGIN` | FE origin (mặc định `http://localhost:5173`) |
+| `TAPTAP_PROXY_URL`, `TAPTAP_PROXY_KEY` | Cặp `API_KEY` trên proxy |
+| `SKIP_WARMUP=1` | Bỏ warmup cache khi dev |
+
+Scripts BE: `npm run dev`, `prisma:*`, `seed`, `smoke:rubric`, `src/inspect-db.ts`.
+
+## Quy tắc khi sửa code
+
+1. **UI / giao diện** → `fe/src/` (và `fe/vite.config.ts` nếu cần). **Không** dùng `be/public` làm app chính.
+2. **API mới** → `be/src/routes/` + `be/src/services/`; cập nhật `fe/src/types/index.ts` + `fe/src/services/api.ts` nếu FE dùng.
+3. **Rubric/tier** → `data/libraries/` + `data/rubric/manifest.json`; chạy `npm run smoke:rubric` nếu đụng pipeline AI.
+4. Routes mỏng, logic trong services; giữ diff nhỏ, khớp convention hiện có.
+5. Không commit `.env`; không force-push `main`/`master`.
+
+## API gần đây
+
+- Phân tích AI nhận `reviewWindow`: `{ mode: "all" }` | `{ mode: "days", days: 7|14|30|60 }` | `{ mode: "range", from, to }` trên `POST /api/analysis/analyze/*`.
+- `GET /api/games/:id` hỗ trợ `days` hoặc `from`+`to` cho lịch sử biểu đồ.
+
+## Trạng thái gần đây (cập nhật khi đổi)
+
+Đang chỉnh tier libraries (`studio-tiers.json`, `system-requirement-tiers.json`) và `src/services/ai-analysis.service.ts`.

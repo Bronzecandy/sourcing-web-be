@@ -9,6 +9,11 @@ import type {
   GameListItem,
   TapTapRawApp,
 } from "../types";
+import { extractDeveloperPublisher } from "./analysis-context";
+
+export type GameDetailRange =
+  | { kind: "days"; days: number }
+  | { kind: "range"; from: string; to: string };
 
 function extractGameInfo(
   raw: unknown,
@@ -247,22 +252,48 @@ export class GameService {
     );
   }
 
-  async getGameDetail(appId: number, days: number = 30, contentLang: "vi" | "en" = "vi") {
-    return getCachedOrFetch(
-      `game-detail-${appId}-${days}-${contentLang}`,
-      async () => {
-        const rankings = await prisma.appRank.findMany({
-          where: { appId },
-          orderBy: { date: "desc" },
-          take: days,
-        });
+  async getGameDetail(
+    appId: number,
+    range: GameDetailRange = { kind: "days", days: 30 },
+    contentLang: "vi" | "en" = "vi",
+  ) {
+    const cacheKey =
+      range.kind === "days"
+        ? `game-detail-${appId}-d${range.days}-${contentLang}`
+        : `game-detail-${appId}-${range.from}_${range.to}-${contentLang}`;
+
+    return getCachedOrFetch(cacheKey, async () => {
+        const rankings =
+          range.kind === "days"
+            ? await prisma.appRank.findMany({
+                where: { appId },
+                orderBy: { date: "desc" },
+                take: range.days,
+              })
+            : await prisma.appRank.findMany({
+                where: {
+                  appId,
+                  date: {
+                    gte: new Date(`${range.from}T00:00:00.000Z`),
+                    lte: new Date(`${range.to}T23:59:59.999Z`),
+                  },
+                },
+                orderBy: { date: "asc" },
+              });
 
         if (rankings.length === 0) return null;
 
-        const latest = rankings[0];
+        const latest =
+          range.kind === "days"
+            ? rankings[0]
+            : rankings[rankings.length - 1];
         const rawApp = latest.raw as TapTapRawApp | null;
+        const { developerName, publisherName } = extractDeveloperPublisher(rawApp);
 
-        const history = rankings.map(
+        const historyRows =
+          range.kind === "days" ? [...rankings].reverse() : rankings;
+
+        const history = historyRows.map(
           (r: { date: Date; androidRank: number | null; iosRank: number | null; raw: unknown }) => {
             const rd = r.raw as TapTapRawApp | null;
             return {
@@ -322,6 +353,8 @@ export class GameService {
           bannerUrl: rawApp?.banner?.url ?? null,
           description,
           developerNote,
+          developerName,
+          publisherName,
           tags: translateTags(rawApp?.tags?.map((t) => t.value) ?? []),
           rating: rawApp?.stat?.rating?.score ?? null,
           latestScore: rawApp?.stat?.rating?.latest_score ?? null,
@@ -383,7 +416,7 @@ export class GameService {
 
   async compareGames(appIds: number[], days: number = 30) {
     const results = await Promise.all(
-      appIds.map((id) => this.getGameDetail(id, days))
+      appIds.map((id) => this.getGameDetail(id, { kind: "days", days }))
     );
     return results.filter(Boolean);
   }

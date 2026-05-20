@@ -309,7 +309,47 @@ export function resolveLibraryScores(ctx: AnalysisContext, _manifest: RubricMani
   return out;
 }
 
-export function buildLibraryRequests(ctx: AnalysisContext, resolved: LibraryResolvedEntry[]): LibraryRequestItem[] {
+/** Rubric criteria used to attach AI-suggested scores to library pending rows. */
+export type RubricScoreSource = {
+  criteria: Array<{ id: string; score?: number | null }>;
+};
+
+const KIND_CRITERION: Record<string, string> = {
+  studio: "overview.developer",
+  game_size: "overview.game_size",
+  update_signal: "liveops.content_update_cycle",
+  community_signal: "socialization.community_size",
+};
+
+export function criterionScoreFromRubric(
+  rubric: RubricScoreSource | undefined,
+  criterionId: string,
+): number | undefined {
+  const row = rubric?.criteria.find((c) => c.id === criterionId);
+  if (row?.score != null && Number.isFinite(row.score)) return row.score;
+  return undefined;
+}
+
+function withSuggestedScore(
+  kind: string,
+  jsonSuggestion: Record<string, unknown>,
+  rubric: RubricScoreSource | undefined,
+  fallback?: number,
+): Record<string, unknown> {
+  const criterionId = KIND_CRITERION[kind];
+  const ai = criterionId ? criterionScoreFromRubric(rubric, criterionId) : undefined;
+  const score = ai ?? fallback;
+  if (score != null && Number.isFinite(score)) {
+    return { ...jsonSuggestion, score: Math.round(score) };
+  }
+  return jsonSuggestion;
+}
+
+export function buildLibraryRequests(
+  ctx: AnalysisContext,
+  resolved: LibraryResolvedEntry[],
+  rubric?: RubricScoreSource,
+): LibraryRequestItem[] {
   const byId = new Map(resolved.map((r) => [r.criterionId, r]));
   const neutralStudio = loadJson<StudioTierFile>("studio-tiers.json").neutralScore;
   const neutralGenre = loadJson<GenreTierFile>("genre-tiers.json").defaultScore;
@@ -332,13 +372,17 @@ export function buildLibraryRequests(ctx: AnalysisContext, resolved: LibraryReso
     req.push({
       kind: "studio",
       label: ctx.developerName,
-      detailEn: `Developer name is not listed in studio-tiers.json. Merge adds an entry; adjust score if needed (example baseline ${neutralStudio}).`,
-      jsonSuggestion: {
-        names: [ctx.developerName],
-        score: neutralStudio,
-        tier: "custom",
-        roles: ["developer"],
-      },
+      detailEn: `Developer name is not listed in studio-tiers.json. Merge adds an entry; score from AI rubric when available (fallback ${neutralStudio}).`,
+      jsonSuggestion: withSuggestedScore(
+        "studio",
+        {
+          names: [ctx.developerName],
+          tier: "custom",
+          roles: ["developer"],
+        },
+        rubric,
+        neutralStudio,
+      ),
     });
   }
 
@@ -353,10 +397,14 @@ export function buildLibraryRequests(ctx: AnalysisContext, resolved: LibraryReso
       kind: "game_size",
       label: `${Math.round(ctx.installSizeMb)} MB`,
       detailEn: `Install size ~${Math.round(ctx.installSizeMb)} MB did not map to any game-size-tiers.json bucket — edit rules (maxMb) or add a tier.`,
-      jsonSuggestion: {
-        hint: "data/libraries/game-size-tiers.json rules[]",
-        maxMb: Math.ceil(ctx.installSizeMb),
-      },
+      jsonSuggestion: withSuggestedScore(
+        "game_size",
+        {
+          hint: "data/libraries/game-size-tiers.json rules[]",
+          maxMb: Math.ceil(ctx.installSizeMb),
+        },
+        rubric,
+      ),
     });
   }
 
@@ -369,10 +417,14 @@ export function buildLibraryRequests(ctx: AnalysisContext, resolved: LibraryReso
       kind: "update_signal",
       label: `~${Math.round(ctx.daysSinceUpdate)} days`,
       detailEn: `About ${Math.round(ctx.daysSinceUpdate)} days since last update did not map into update-cycle-tiers.json — add or adjust maxDaysSinceUpdate rules.`,
-      jsonSuggestion: {
-        hint: "data/libraries/update-cycle-tiers.json",
-        maxDaysSinceUpdate: Math.round(ctx.daysSinceUpdate),
-      },
+      jsonSuggestion: withSuggestedScore(
+        "update_signal",
+        {
+          hint: "data/libraries/update-cycle-tiers.json",
+          maxDaysSinceUpdate: Math.round(ctx.daysSinceUpdate),
+        },
+        rubric,
+      ),
     });
   }
 
@@ -381,7 +433,11 @@ export function buildLibraryRequests(ctx: AnalysisContext, resolved: LibraryReso
       kind: "community_signal",
       label: `fans ${ctx.fansCount}`,
       detailEn: `fans_count=${ctx.fansCount} did not map to community-size-tiers.json (minFans tiers).`,
-      jsonSuggestion: { hint: "data/libraries/community-size-tiers.json fanTierRules", minFans: ctx.fansCount },
+      jsonSuggestion: withSuggestedScore(
+        "community_signal",
+        { hint: "data/libraries/community-size-tiers.json fanTierRules", minFans: ctx.fansCount },
+        rubric,
+      ),
     });
   }
 

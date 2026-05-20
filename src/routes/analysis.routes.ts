@@ -6,10 +6,20 @@ import {
   fetchAppInfo,
   fetchExternalReviews,
   fetchAppDetailRaw,
-  pickTapTapDetailFromProxyBundle,
   type ExternalReview,
 } from "../services/taptap-client.service";
 import { parseCsvBuffer } from "../utils/csv-parser";
+import {
+  parseReviewWindow,
+  filterReviewsByWindow,
+  emptyReviewWindowMessage,
+} from "../utils/review-window";
+import {
+  useTapTapProxy,
+  isTapTapProxyReachable,
+  fetchTapTapViaProxy,
+  formatFetchError,
+} from "../utils/taptap-proxy-fetch";
 import {
   parseSteamAppIdFromInput,
   fetchSteamAppDetails,
@@ -20,64 +30,57 @@ import {
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
-const TAPTAP_PROXY_URL = process.env.TAPTAP_PROXY_URL || "";
-const TAPTAP_PROXY_KEY = process.env.TAPTAP_PROXY_KEY || "";
-
 /** Khi đã dùng proxy: mặc định không gọi TapTap trực tiếp từ BE (IP datacenter hay bị 403/405). Chỉ thử direct khi = 1/true. */
 function allowDirectTapTapDetailFallback(): boolean {
   const v = process.env.TAPTAP_DIRECT_DETAIL_FALLBACK ?? "";
   return v === "1" || v.toLowerCase() === "true";
 }
 
-/** Proxy flush space keep-alive trước JSON — parse an toàn hơn. */
-function parseProxyFullJson(raw: string): { success?: boolean; data?: unknown; error?: string } {
-  const trimmed = raw.trim();
-  try {
-    return JSON.parse(trimmed) as { success?: boolean; data?: unknown; error?: string };
-  } catch {
-    const start = trimmed.indexOf("{");
-    const end = trimmed.lastIndexOf("}");
-    if (start >= 0 && end > start) {
-      return JSON.parse(trimmed.slice(start, end + 1)) as {
-        success?: boolean;
-        data?: unknown;
-        error?: string;
-      };
-    }
-    throw new Error("Invalid JSON from TapTap proxy");
-  }
-}
-
-async function fetchViaProxy(appId: number): Promise<{
+/** Proxy lỗi/timeout/không reach → gọi TapTap trực tiếp. */
+async function fetchTapTapBundle(appId: number): Promise<{
   appInfo: { title: string; iconUrl: string | null };
   reviews: ExternalReview[];
-  /** Snapshot app/v4/detail nếu proxy trả kèm — dùng khi backend không gọi trực tiếp TapTap CN được. */
   detailFromProxy: Record<string, unknown> | null;
+  via: "proxy" | "direct";
 }> {
-  const url = `${TAPTAP_PROXY_URL}/api/full/${appId}`;
-  const headers: Record<string, string> = {};
-  if (TAPTAP_PROXY_KEY) headers["x-api-key"] = TAPTAP_PROXY_KEY;
+  if (useTapTapProxy()) {
+    const reachable = await isTapTapProxyReachable();
+    if (!reachable) {
+      console.warn(
+        `[analyze-external] TapTap proxy not reachable (health check failed) — using direct TapTap for appId=${appId}`,
+      );
+    } else {
+      try {
+        const proxy = await fetchTapTapViaProxy(appId);
+        return { ...proxy, via: "proxy" };
+      } catch (err) {
+        console.warn(
+          `[analyze-external] TapTap proxy failed for appId=${appId} (${formatFetchError(err)}) — falling back to direct TapTap`,
+        );
+      }
+    }
+  } else {
+    console.log(`[analyze-external] Direct TapTap fetch for appId=${appId} (proxy disabled or unset)`);
+  }
 
-  const res = await fetch(url, { headers, signal: AbortSignal.timeout(300_000) });
-  const raw = await res.text();
-  const json = parseProxyFullJson(raw);
-  if (!json.success) throw new Error(json.error ?? "Proxy request failed");
-
-  const data = json.data as {
-    appInfo: { title: string; iconUrl: string | null };
-    reviews: ExternalReview[];
-  };
-  const detailFromProxy = pickTapTapDetailFromProxyBundle(json.data);
-
-  return {
-    appInfo: data.appInfo,
-    reviews: data.reviews,
-    detailFromProxy,
-  };
-}
-
-function useProxy(): boolean {
-  return !!TAPTAP_PROXY_URL;
+  try {
+    const appInfo = await fetchAppInfo(appId);
+    const [reviews, detailRaw] = await Promise.all([
+      fetchExternalReviews(appId),
+      fetchAppDetailRaw(appId),
+    ]);
+    return {
+      appInfo: { title: appInfo.title, iconUrl: appInfo.iconUrl },
+      reviews,
+      detailFromProxy: detailRaw,
+      via: "direct",
+    };
+  } catch (err) {
+    throw new Error(
+      `TapTap direct fetch failed: ${formatFetchError(err)}. ` +
+        "If you are behind a firewall, fix proxy access to Railway or use a VPN.",
+    );
+  }
 }
 
 function hashStringToNumber(str: string): number {
@@ -113,6 +116,7 @@ router.post("/analyze-external", async (req, res) => {
     const input = String(req.body?.input ?? "").trim();
     const platformRaw = String(req.body?.platform ?? "taptap").toLowerCase();
     const platform = platformRaw === "steam" ? "steam" : "taptap";
+    const reviewWindow = parseReviewWindow(req.body?.reviewWindow);
     if (!input) {
       clearInterval(keepAlive);
       res.end(JSON.stringify({ success: false, error: "Missing input (URL or App ID)" }));
@@ -147,12 +151,16 @@ router.post("/analyze-external", async (req, res) => {
         appData && typeof appData.header_image === "string" ? appData.header_image : null;
       const detailRaw = appData ? buildSteamDetailRaw(appData, steamAppId) : null;
 
-      if (reviews.length === 0) {
+      const filteredSteam = filterReviewsByWindow(reviews, reviewWindow);
+      if (filteredSteam.length === 0) {
         clearInterval(keepAlive);
         res.end(
           JSON.stringify({
             success: false,
-            error: `No reviews found for "${gameName}" (Steam appId: ${steamAppId})`,
+            error:
+              reviews.length === 0
+                ? `No reviews found for "${gameName}" (Steam appId: ${steamAppId})`
+                : emptyReviewWindowMessage(reviewWindow),
           }),
         );
         return;
@@ -162,9 +170,10 @@ router.post("/analyze-external", async (req, res) => {
         steamAppId,
         gameName,
         iconUrl,
-        reviews,
+        filteredSteam,
         "steam",
         detailRaw,
+        reviewWindow,
       );
 
       clearInterval(keepAlive);
@@ -179,43 +188,41 @@ router.post("/analyze-external", async (req, res) => {
       return;
     }
 
-    let appTitle: string;
-    let appIcon: string | null;
-    let reviews: ExternalReview[];
-    let detailRaw: Record<string, unknown> | null = null;
-
-    if (useProxy()) {
-      console.log(`[analyze-external] Using TapTap proxy for appId=${appId}`);
-      const proxy = await fetchViaProxy(appId);
-      appTitle = proxy.appInfo.title;
-      appIcon = proxy.appInfo.iconUrl;
-      reviews = proxy.reviews;
-      detailRaw = proxy.detailFromProxy;
-    } else {
-      console.log(`[analyze-external] Direct TapTap fetch for appId=${appId}`);
-      const appInfo = await fetchAppInfo(appId);
-      appTitle = appInfo.title;
-      appIcon = appInfo.iconUrl;
-      reviews = await fetchExternalReviews(appId);
+    const bundle = await fetchTapTapBundle(appId);
+    const appTitle = bundle.appInfo.title;
+    const appIcon = bundle.appInfo.iconUrl;
+    const reviews = bundle.reviews;
+    let detailRaw = bundle.detailFromProxy;
+    if (bundle.via === "proxy") {
+      console.log(`[analyze-external] TapTap data via proxy for appId=${appId}`);
     }
 
-    if (reviews.length === 0) {
+    const filteredTap = filterReviewsByWindow(reviews, reviewWindow);
+    if (filteredTap.length === 0) {
       clearInterval(keepAlive);
-      res.end(JSON.stringify({ success: false, error: `No reviews found for "${appTitle}" (appId: ${appId})` }));
+      res.end(
+        JSON.stringify({
+          success: false,
+          error:
+            reviews.length === 0
+              ? `No reviews found for "${appTitle}" (appId: ${appId})`
+              : emptyReviewWindowMessage(reviewWindow),
+        }),
+      );
       return;
     }
 
-    if (!detailRaw) {
-      if (useProxy() && !allowDirectTapTapDetailFallback()) {
+    if (!detailRaw && bundle.via === "proxy") {
+      if (!allowDirectTapTapDetailFallback()) {
         console.warn(
-          `[analyze-external] No app/v4/detail from proxy for appId=${appId} — skipping direct TapTap (server IPs often get 403/405). Update taptap-proxy to return detailRaw in /api/full, or set TAPTAP_DIRECT_DETAIL_FALLBACK=1 to attempt direct fetch.`,
+          `[analyze-external] No app/v4/detail from proxy for appId=${appId} — set TAPTAP_DIRECT_DETAIL_FALLBACK=1 to retry direct TapTap for metadata.`,
         );
       } else {
         detailRaw = await fetchAppDetailRaw(appId);
       }
     }
     if (!detailRaw) {
-      const proxyNoDirect = useProxy() && !allowDirectTapTapDetailFallback();
+      const proxyNoDirect = bundle.via === "proxy" && !allowDirectTapTapDetailFallback();
       console.warn(
         proxyNoDirect
           ? `[analyze-external] No app/v4/detail for appId=${appId} — analysis continues without TapTap metadata (deploy proxy with detailRaw in /api/full).`
@@ -227,9 +234,10 @@ router.post("/analyze-external", async (req, res) => {
       appId,
       appTitle,
       appIcon,
-      reviews,
+      filteredTap,
       "external",
       detailRaw,
+      reviewWindow,
     );
 
     clearInterval(keepAlive);
@@ -237,7 +245,7 @@ router.post("/analyze-external", async (req, res) => {
   } catch (err) {
     clearInterval(keepAlive);
     console.error("[analysis route] POST analyze-external:", err);
-    const message = err instanceof Error ? err.message : "External analysis failed";
+    const message = formatFetchError(err);
     res.end(JSON.stringify({ success: false, error: message }));
   }
 });
@@ -251,16 +259,36 @@ router.post("/analyze-csv", upload.single("file"), async (req, res) => {
       return;
     }
 
+    const reviewWindow = parseReviewWindow(
+      req.body?.reviewWindow ?? (req.query.reviewWindow as string | undefined),
+    );
     const { reviews, gameName, appId } = parseCsvBuffer(req.file.buffer);
 
     const numericId = /^\d+$/.test(appId) ? Number(appId) : hashStringToNumber(appId);
+
+    const filtered = filterReviewsByWindow(reviews, reviewWindow);
+    if (filtered.length === 0) {
+      clearInterval(keepAlive);
+      res.end(
+        JSON.stringify({
+          success: false,
+          error:
+            reviews.length === 0
+              ? "No valid reviews found in the uploaded file"
+              : emptyReviewWindowMessage(reviewWindow),
+        }),
+      );
+      return;
+    }
 
     const result = await aiAnalysisService.analyzeExternalReviews(
       numericId,
       gameName,
       null,
-      reviews,
+      filtered,
       "csv-upload",
+      null,
+      reviewWindow,
     );
 
     clearInterval(keepAlive);
@@ -277,7 +305,8 @@ router.post("/analyze/:appId", async (req, res) => {
   const keepAlive = startKeepAlive(res);
   try {
     const appId = parseInt(String(req.params.appId));
-    const result = await aiAnalysisService.analyzeGameReviews(appId);
+    const reviewWindow = parseReviewWindow(req.body?.reviewWindow);
+    const result = await aiAnalysisService.analyzeGameReviews(appId, reviewWindow);
     clearInterval(keepAlive);
     res.end(JSON.stringify({ success: true, data: result }));
   } catch (err) {

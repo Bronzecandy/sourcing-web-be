@@ -114,7 +114,7 @@ export async function precomputeAll(): Promise<{ durationMs: number; keys: numbe
         batch.flatMap((appId) => [
           ...DETAIL_DAYS.map((days) => ({
             label: `detail-${appId}-${days}d`,
-            fn: () => gameService.getGameDetail(appId, days),
+            fn: () => gameService.getGameDetail(appId, { kind: "days", days }),
           })),
           ...POTENTIAL_DAYS.map((days) => ({
             label: `pot-detail-${appId}-${days}d`,
