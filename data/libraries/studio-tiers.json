@@ -13,20 +13,10 @@
         "netease games",
         "网易游戏",
         "杭州网易雷火",
-        "netease leihuo"
-      ],
-      "score": 92,
-      "tier": "S",
-      "roles": [
-        "developer",
-        "publisher"
-      ]
-    },
-    {
-      "names": [
+        "netease leihuo",
         "tencent"
       ],
-      "score": 90,
+      "score": 95,
       "tier": "S",
       "roles": [
         "developer",
@@ -99,6 +89,48 @@
       ],
       "score": 93,
       "tier": "S",
+      "roles": [
+        "developer"
+      ]
+    },
+    {
+      "names": [
+        "Larian Studios"
+      ],
+      "score": 95,
+      "tier": "S",
+      "roles": [
+        "developer"
+      ]
+    },
+    {
+      "names": [
+        "MINTROCKET",
+        "Trickjump Games Ltd",
+        "鸿盟工作室"
+      ],
+      "score": 55,
+      "tier": "custom",
+      "roles": [
+        "developer"
+      ]
+    },
+    {
+      "names": [
+        "Hotta  Studio"
+      ],
+      "score": 90,
+      "tier": "S",
+      "roles": [
+        "developer"
+      ]
+    },
+    {
+      "names": [
+        "广州灵犀互动娱乐有限公司"
+      ],
+      "score": 85,
+      "tier": "A",
       "roles": [
         "developer"
       ]
