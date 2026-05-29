@@ -8,13 +8,19 @@ datasource db {
 }
 
 model AppRank {
-  id          Int      @id @default(autoincrement())
-  date        DateTime @db.Date
-  appId       Int
-  androidRank Int?
-  iosRank     Int?
-  raw         Json?    @db.Json
-  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+  id                 Int      @id @default(autoincrement())
+  date               DateTime @db.Date
+  appId              Int
+  reserveAndroidRank Int?   @db.SmallInt
+  reserveIosRank     Int?   @db.SmallInt
+  hotAndroidRank     Int?   @db.SmallInt
+  hotIosRank         Int?   @db.SmallInt
+  popAndroidRank     Int?   @db.SmallInt
+  popIosRank         Int?   @db.SmallInt
+  newAndroidRank     Int?   @db.SmallInt
+  newIosRank         Int?   @db.SmallInt
+  raw                Json?  @db.Json
+  createdAt          DateTime @default(now()) @db.Timestamptz(6)
 
   @@unique([date, appId], map: "apprank_date_appid_unique")
   @@index([appId], map: "apprank_appid_index")

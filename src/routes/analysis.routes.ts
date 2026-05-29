@@ -26,6 +26,11 @@ import {
   fetchSteamReviewsUpTo,
   buildSteamDetailRaw,
 } from "../services/steam-client.service";
+import {
+  wantsAnalysisStream,
+  createAnalysisStreamWriter,
+  streamProgressReporter,
+} from "../utils/analysis-progress-stream";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
@@ -111,12 +116,150 @@ router.get("/all", async (_req, res) => {
 });
 
 router.post("/analyze-external", async (req, res) => {
+  const input = String(req.body?.input ?? "").trim();
+  const platformRaw = String(req.body?.platform ?? "taptap").toLowerCase();
+  const platform = platformRaw === "steam" ? "steam" : "taptap";
+  const reviewWindow = parseReviewWindow(req.body?.reviewWindow);
+  const stream = wantsAnalysisStream(req.body);
+
+  if (stream) {
+    const out = createAnalysisStreamWriter(res);
+    const progress = streamProgressReporter((e) => out.report(e));
+    try {
+      if (!input) {
+        out.fail("Missing input (URL or App ID)");
+        return;
+      }
+      progress({ percent: 2, phase: "start", message: "Bắt đầu phân tích từ nguồn ngoài…" });
+
+      if (platform === "steam") {
+        const steamAppId = parseSteamAppIdFromInput(input);
+        if (!steamAppId || steamAppId <= 0) {
+          out.fail("Invalid Steam URL or App ID");
+          return;
+        }
+        progress({ percent: 5, phase: "fetch", message: "Đang tải thông tin & bình luận Steam…" });
+        const [appData, reviews] = await Promise.all([
+          fetchSteamAppDetails(steamAppId),
+          fetchSteamReviewsUpTo(steamAppId),
+        ]);
+        const gameName =
+          appData && typeof appData.name === "string" && appData.name.trim()
+            ? appData.name.trim()
+            : `Steam App ${steamAppId}`;
+        const iconUrl =
+          appData && typeof appData.header_image === "string" ? appData.header_image : null;
+        const detailRaw = appData ? buildSteamDetailRaw(appData, steamAppId) : null;
+        const filteredSteam = filterReviewsByWindow(reviews, reviewWindow);
+        if (filteredSteam.length === 0) {
+          out.fail(
+            reviews.length === 0
+              ? `No reviews found for "${gameName}"`
+              : emptyReviewWindowMessage(reviewWindow),
+          );
+          return;
+        }
+        progress({
+          percent: 10,
+          phase: "fetch",
+          message: `Đã tải ${filteredSteam.length} bình luận Steam — bắt đầu AI…`,
+        });
+        const result = await aiAnalysisService.analyzeExternalReviews(
+          steamAppId,
+          gameName,
+          iconUrl,
+          filteredSteam,
+          "steam",
+          detailRaw,
+          reviewWindow,
+          progress,
+          10,
+        );
+        out.done(result);
+        return;
+      }
+
+      const appId = parseAppIdFromInput(input);
+      if (!appId || appId <= 0) {
+        out.fail("Invalid TapTap URL or App ID");
+        return;
+      }
+
+      progress({ percent: 3, phase: "db_check", message: "Đang kiểm tra bình luận trong CSDL…" });
+      const dbReviewCount = await aiAnalysisService.countDatabaseReviews(appId);
+      if (dbReviewCount > 0) {
+        progress({
+          percent: 8,
+          phase: "db",
+          message: `Có ${dbReviewCount} bình luận trong CSDL — phân tích nhanh (không qua proxy)…`,
+        });
+        try {
+          const result = await aiAnalysisService.analyzeGameReviews(
+            appId,
+            reviewWindow,
+            progress,
+            8,
+          );
+          out.done(result);
+          return;
+        } catch (dbErr) {
+          console.warn("[analyze-external] DB stream failed, fallback proxy:", dbErr);
+          progress({
+            percent: 8,
+            phase: "fetch",
+            message: "CSDL lỗi — chuyển sang tải TapTap qua proxy…",
+          });
+        }
+      }
+
+      progress({
+        percent: 8,
+        phase: "fetch",
+        message: "Đang tải bình luận TapTap (proxy có thể mất vài phút)…",
+      });
+      const bundle = await fetchTapTapBundle(appId);
+      progress({
+        percent: 12,
+        phase: "fetch",
+        message: `Đã tải ${bundle.reviews.length} bình luận — đang lọc & phân tích…`,
+      });
+
+      const filteredTap = filterReviewsByWindow(bundle.reviews, reviewWindow);
+      if (filteredTap.length === 0) {
+        out.fail(
+          bundle.reviews.length === 0
+            ? `No reviews found for "${bundle.appInfo.title}"`
+            : emptyReviewWindowMessage(reviewWindow),
+        );
+        return;
+      }
+
+      let detailRaw = bundle.detailFromProxy;
+      if (!detailRaw && bundle.via === "proxy" && allowDirectTapTapDetailFallback()) {
+        detailRaw = await fetchAppDetailRaw(appId);
+      }
+
+      const result = await aiAnalysisService.analyzeExternalReviews(
+        appId,
+        bundle.appInfo.title,
+        bundle.appInfo.iconUrl,
+        filteredTap,
+        "external",
+        detailRaw,
+        reviewWindow,
+        progress,
+        12,
+      );
+      out.done(result);
+    } catch (err) {
+      console.error("[analysis route] POST analyze-external (stream):", err);
+      out.fail(formatFetchError(err));
+    }
+    return;
+  }
+
   const keepAlive = startKeepAlive(res);
   try {
-    const input = String(req.body?.input ?? "").trim();
-    const platformRaw = String(req.body?.platform ?? "taptap").toLowerCase();
-    const platform = platformRaw === "steam" ? "steam" : "taptap";
-    const reviewWindow = parseReviewWindow(req.body?.reviewWindow);
     if (!input) {
       clearInterval(keepAlive);
       res.end(JSON.stringify({ success: false, error: "Missing input (URL or App ID)" }));
@@ -188,6 +331,24 @@ router.post("/analyze-external", async (req, res) => {
       return;
     }
 
+    const dbReviewCount = await aiAnalysisService.countDatabaseReviews(appId);
+    if (dbReviewCount > 0) {
+      console.log(
+        `[analyze-external] appId=${appId}: ${dbReviewCount} reviews in DB — skipping TapTap proxy`,
+      );
+      try {
+        const result = await aiAnalysisService.analyzeGameReviews(appId, reviewWindow);
+        clearInterval(keepAlive);
+        res.end(JSON.stringify({ success: true, data: result }));
+        return;
+      } catch (dbErr) {
+        console.warn(
+          `[analyze-external] DB analysis failed for appId=${appId}, falling back to proxy:`,
+          dbErr instanceof Error ? dbErr.message : dbErr,
+        );
+      }
+    }
+
     const bundle = await fetchTapTapBundle(appId);
     const appTitle = bundle.appInfo.title;
     const appIcon = bundle.appInfo.iconUrl;
@@ -251,6 +412,58 @@ router.post("/analyze-external", async (req, res) => {
 });
 
 router.post("/analyze-csv", upload.single("file"), async (req, res) => {
+  const reviewWindow = parseReviewWindow(
+    req.body?.reviewWindow ?? (req.query.reviewWindow as string | undefined),
+  );
+  const stream =
+    req.body?.stream === "true" ||
+    req.body?.stream === true ||
+    wantsAnalysisStream(req.body);
+
+  if (stream) {
+    const out = createAnalysisStreamWriter(res);
+    const progress = streamProgressReporter((e) => out.report(e));
+    try {
+      if (!req.file) {
+        out.fail("No file uploaded");
+        return;
+      }
+      progress({ percent: 2, phase: "parse", message: "Đang đọc file bình luận…" });
+      const { reviews, gameName, appId } = parseCsvBuffer(req.file.buffer);
+      const numericId = /^\d+$/.test(appId) ? Number(appId) : hashStringToNumber(appId);
+      const filtered = filterReviewsByWindow(reviews, reviewWindow);
+      if (filtered.length === 0) {
+        out.fail(
+          reviews.length === 0
+            ? "No valid reviews found in the uploaded file"
+            : emptyReviewWindowMessage(reviewWindow),
+        );
+        return;
+      }
+      progress({
+        percent: 8,
+        phase: "parse",
+        message: `${filtered.length} bình luận hợp lệ — bắt đầu AI…`,
+      });
+      const result = await aiAnalysisService.analyzeExternalReviews(
+        numericId,
+        gameName,
+        null,
+        filtered,
+        "csv-upload",
+        null,
+        reviewWindow,
+        progress,
+        8,
+      );
+      out.done(result);
+    } catch (err) {
+      console.error("[analysis route] POST analyze-csv (stream):", err);
+      out.fail(err instanceof Error ? err.message : "CSV analysis failed");
+    }
+    return;
+  }
+
   const keepAlive = startKeepAlive(res);
   try {
     if (!req.file) {
@@ -259,9 +472,6 @@ router.post("/analyze-csv", upload.single("file"), async (req, res) => {
       return;
     }
 
-    const reviewWindow = parseReviewWindow(
-      req.body?.reviewWindow ?? (req.query.reviewWindow as string | undefined),
-    );
     const { reviews, gameName, appId } = parseCsvBuffer(req.file.buffer);
 
     const numericId = /^\d+$/.test(appId) ? Number(appId) : hashStringToNumber(appId);
@@ -302,10 +512,29 @@ router.post("/analyze-csv", upload.single("file"), async (req, res) => {
 });
 
 router.post("/analyze/:appId", async (req, res) => {
+  const appId = parseInt(String(req.params.appId));
+  const reviewWindow = parseReviewWindow(req.body?.reviewWindow);
+
+  if (wantsAnalysisStream(req.body)) {
+    const out = createAnalysisStreamWriter(res);
+    const progress = streamProgressReporter((e) => out.report(e));
+    try {
+      progress({ percent: 1, phase: "start", message: "Bắt đầu phân tích AI…" });
+      const result = await aiAnalysisService.analyzeGameReviews(
+        appId,
+        reviewWindow,
+        progress,
+      );
+      out.done(result);
+    } catch (err) {
+      console.error("[analysis route] POST analyze (stream):", err);
+      out.fail(err instanceof Error ? err.message : "Analysis failed");
+    }
+    return;
+  }
+
   const keepAlive = startKeepAlive(res);
   try {
-    const appId = parseInt(String(req.params.appId));
-    const reviewWindow = parseReviewWindow(req.body?.reviewWindow);
     const result = await aiAnalysisService.analyzeGameReviews(appId, reviewWindow);
     clearInterval(keepAlive);
     res.end(JSON.stringify({ success: true, data: result }));

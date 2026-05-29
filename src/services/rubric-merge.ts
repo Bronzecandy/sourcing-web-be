@@ -278,6 +278,8 @@ export function mergeRubricFromLlm(
       }
     }
 
+    applySocialCriterionGuards(row, llm);
+
     criteriaOut.push(row);
   }
 
@@ -518,6 +520,7 @@ export function formatContextForPrompt(ctx: AnalysisContext): string {
     `- Dung lượng gói (MB, nếu có trong raw): ${mb}`,
     `- Ngày từ lần cập nhật snapshot (update_time): ${upd}`,
     `- fans_count (snapshot): ${fans}`,
+    `- Tiêu chí socialization.community_size: nếu fans_count là "(không có)" hoặc không khớp thư viện, **bắt buộc** research công khai (Google Trends, Steam reviews/player estimates, Discord/Reddit/sub, forum TapTap, báo chí/benchmark game cùng IP) để ước lượng quy mô cộng đồng và cho điểm 0–100; ghi rõ nguồn suy luận trong reasoning; **không** để score null chỉ vì thiếu snapshot.`,
   ].join("\n");
 }
 
@@ -570,13 +573,50 @@ Quy tắc chấm cho tiêu chí input=page_lib khi ĐÃ LIỆT KÊ ĐIỂM THƯ 
 Khi KHÔNG có điểm thư viện cho một tiêu chí page_lib:
 - overview.genre: chỉ suy ra từ tag/ngữ cảnh đã cho; không bịa thể loại. Tag có thể tiếng Trung — khớp khái niệm. Không chắc thì score null hoặc ~${50} với reasoning rõ "không đủ dữ liệu".
 - overview.developer: Nếu ngữ cảnh có tên Developer hoặc Publisher (snapshot DB — có thể fallback publisher=nhà vận hành): **phải** cho điểm 0–100 và reasoning; đánh giá uy tín studio/nhà phát hành dựa trên kiến thức chung + review (research có chọn lọc). **Không** để score null chỉ vì không khớp studio-tiers.json. Chỉ null khi ngữ cảnh hoàn toàn không có tên dev/publisher và review cũng không nhắc đơn vị rõ ràng.
-- overview.game_size, socialization.community_size, liveops.content_update_cycle: KHÔNG bịa số MB / fans / ngày từ review; nếu ngữ cảnh không có số liệu snapshot thì score null.
+- socialization.community_size: KHÔNG bịa fans_count từ review. Nếu không có fans_count snapshot / không khớp community-size-tiers: **bắt buộc** research (Google Trends, Steam, Discord/Reddit, forum TapTap, so sánh game tương tự) để ước lượng quy mô cộng đồng và **luôn** cho điểm 0–100; ghi nguồn suy luận; **không** để score null chỉ vì thiếu snapshot.
+- overview.game_size, liveops.content_update_cycle: KHÔNG bịa số MB / ngày từ review; nếu ngữ cảnh không có số liệu snapshot thì score null.
 - overview.ip_theme, overview.system_requirement, overview.art_style: ĐƯỢC suy luận có chọn lọc từ tên + tag + đoạn mô tả trong ngữ cảnh và gợn ý từ review (phong cách, IP, cấu hình); không bịa tên IP/tựa cụ thể nếu không xuất hiện trong dữ liệu; ghi rõ mức độ chắc chắn thấp nếu suy đoán.
 `;
 
+const SOCIAL_FEATURES_LLM_RULES = `
+Quy tắc socialization.social_features (input=reviews):
+- Chỉ đánh giá tính năng social **trong game** (guild, party, chat, co-op, leaderboard xã hội, PvP cộng đồng).
+- Review **không nhắc** guild/chat/co-op **không** được coi là bằng chứng chắc chắn là game không có social → mặc định **~45–55** (trung tính), trừ khi mô tả game/tag rõ single-player/offline-only.
+- Chỉ **hạ điểm dưới ~40** khi review **phàn nàn rõ** thiếu social hoặc toxic/ guild bắt buộc gây khó chịu.
+- Chỉ **nâng điểm trên ~65** khi review **khen rõ** tính năng social hoặc cộng đồng trong game.
+`;
+
+function applySocialCriterionGuards(
+  row: RubricCriterionOutput,
+  llm: LlmRubricRow | undefined,
+): void {
+  if (row.id === "socialization.community_size" && row.score == null) {
+    row.score = 55;
+    row.reasoning =
+      [row.reasoning, "Không có fans_count snapshot và LLM chưa chấm — dùng điểm trung tính 55; nên chạy lại phân tích sau khi bổ sung research."]
+        .filter(Boolean)
+        .join(" ")
+        .trim();
+    row.source = row.source === "library" ? "merged" : "llm";
+  }
+
+  if (row.id === "socialization.social_features" && row.score != null) {
+    const mentions = row.mentionCount ?? llm?.mentionCount ?? 0;
+    const silent = mentions <= 1;
+    if (silent && row.score < 45) {
+      row.score = 50;
+      row.reasoning =
+        [row.reasoning, "Review hầu như không nhắc social — điều chỉnh về ~50 (trung tính), không trừ nặng khi thiếu bằng chứng."]
+          .filter(Boolean)
+          .join(" ")
+          .trim();
+    }
+  }
+}
+
 export function appendRubricSpec(baseSpec: string, active: RubricCriterionDef[]): string {
   const list = formatRubricCriteriaForPrompt(active);
-  return `${baseSpec}\n\nDanh sách tiêu chí rubric (bắt buộc trả rubricCriteria đủ id):\n${list}\n${PAGE_LIB_LLM_RULES}\n${RED_FLAG_OUTPUT_SPEC}\n${RUBRIC_JSON_SPEC}`;
+  return `${baseSpec}\n\nDanh sách tiêu chí rubric (bắt buộc trả rubricCriteria đủ id):\n${list}\n${PAGE_LIB_LLM_RULES}\n${SOCIAL_FEATURES_LLM_RULES}\n${RED_FLAG_OUTPUT_SPEC}\n${RUBRIC_JSON_SPEC}`;
 }
 
 export function parseLlmRubricRows(analysis: Record<string, unknown>): LlmRubricRow[] {

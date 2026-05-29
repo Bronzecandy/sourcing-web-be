@@ -2,6 +2,11 @@ import { callLLM, getModel } from "../utils/ai-client";
 import { pool } from "../utils/prisma";
 import { prisma } from "../utils/prisma";
 import type { AIAnalysisResult, TapTapRawApp } from "../types";
+import type { AnalysisProgressReporter } from "../types/analysis-progress";
+import {
+  createProgressStepReporter,
+  runWithLlmHeartbeat,
+} from "../utils/analysis-progress-reporter";
 import type { ReviewWindow } from "../types/review-window";
 import {
   filterReviewsByWindow,
@@ -428,7 +433,7 @@ ${contextBlock}
 
 ${libraryBlock}
 
-Research / external knowledge: When TapTap or stored metadata is incomplete, you may use widely known public facts about "${gameName}" (genre, franchise/IP, typical hardware expectations, art direction) to inform rubric reasoning. Cross-check any inference against the deterministic library scores above when those scores apply.
+Research / external knowledge: When TapTap or stored metadata is incomplete, you may use widely known public facts and external signals about "${gameName}" (genre, franchise/IP, art direction, **community size via Google Trends / Steam / Discord / Reddit / forums**, developer reputation) to inform rubric reasoning. For socialization.community_size you must always output a 0–100 score even without fans_count snapshot. Cross-check any inference against the deterministic library scores above when those scores apply.
 
 Reviews:
 ${reviewBlock}
@@ -602,11 +607,16 @@ export class AIAnalysisService {
       iconUrl?: string | null;
       analysisContext: AnalysisContext;
       reviewWindow?: ReviewWindow;
+      onProgress?: AnalysisProgressReporter;
     },
   ): Promise<AIAnalysisResult> {
+    const { step: report, emit: reportEmit } = createProgressStepReporter(opts.onProgress);
+
     const bucketCounts = buildBucketCounts(reviews);
     const dateRange = getDateRange(reviews);
     const prepared: StratifiedReview[] = reviews.map((r) => withClippedText(r));
+
+    report(15, `Đang chuẩn bị rubric và thư viện chấm điểm (${reviews.length} bình luận)…`, "prepare");
 
     const manifest = loadRubricManifest();
     const inferredPack = inferGenrePack(opts.analysisContext.tagValues);
@@ -628,8 +638,15 @@ export class AIAnalysisService {
         `~${estTokens(oneShot)} prompt tok (cap reviews=${Number.isFinite(AI_REVIEW_MAX_CHARS) ? AI_REVIEW_MAX_CHARS : "unlimited"})`
       );
       try {
-        const response = await callLLM(SYSTEM_PROMPT, oneShot, 16_384);
+        const response = await runWithLlmHeartbeat(
+          reportEmit,
+          28,
+          74,
+          `AI đang phân tích ${reviews.length} bình luận`,
+          () => callLLM(SYSTEM_PROMPT, oneShot, 16_384),
+        );
         content = response.content;
+        report(75, "AI đã xử lý xong bình luận — đang chấm điểm rubric…", "llm");
         console.log(
           `[AI Analysis] ${gameName}: LLM done (${response.inputTokens ?? "?"}in/${response.outputTokens ?? "?"}out tok)`
         );
@@ -650,9 +667,16 @@ export class AIAnalysisService {
       const mapOut: string[] = new Array(mapChunks.length);
       const conc = Math.min(AI_MAP_CONCURRENCY, mapChunks.length);
       const totalBatches = mapChunks.length;
+      let mapCompleted = 0;
       console.log(
         `[AI Analysis] ${gameName}: map-reduce, ${reviews.length} reviews, ${totalBatches} map batches, ` +
         `concurrency=${conc}, model=${model} (single ~${estTokens(oneShot)} chars, threshold ${AI_SINGLE_PROMPT_MAX_CHARS})`
+      );
+
+      report(
+        25,
+        `Nhiều bình luận — AI đang xử lý theo ${totalBatches} lô (0/${totalBatches})…`,
+        "llm_map",
       );
 
       const runMapBatch = async (c: (typeof mapChunks)[0], batchIndex1: number): Promise<string> => {
@@ -671,12 +695,27 @@ export class AIAnalysisService {
 
       for (let w = 0; w < mapChunks.length; w += conc) {
         const end = Math.min(w + conc, mapChunks.length);
+        const batchStart = mapCompleted;
+        const pctStart = 25 + Math.round((batchStart / totalBatches) * 48);
+        const pctEnd = 25 + Math.round((Math.min(batchStart + (end - w), totalBatches) / totalBatches) * 48);
         try {
           const slice = mapChunks.slice(w, end);
-          const wave = await Promise.all(
-            slice.map((chunk, offset) => runMapBatch(chunk, w + offset + 1)),
+          const wave = await runWithLlmHeartbeat(
+            reportEmit,
+            pctStart,
+            Math.max(pctStart + 1, pctEnd),
+            `AI đang xử lý lô ${batchStart + 1}–${Math.min(batchStart + slice.length, totalBatches)}/${totalBatches}`,
+            () =>
+              Promise.all(slice.map((chunk, offset) => runMapBatch(chunk, w + offset + 1))),
           );
           for (let k = 0; k < wave.length; k++) mapOut[w + k] = wave[k]!;
+          mapCompleted += wave.length;
+          const mapPct = 25 + Math.round((mapCompleted / totalBatches) * 48);
+          report(
+            mapPct,
+            `AI đã xong lô ${mapCompleted}/${totalBatches} — tiếp tục…`,
+            "llm_map",
+          );
         } catch (llmErr: unknown) {
           const status = (llmErr as { status?: number }).status;
           const body = (llmErr as { error?: unknown }).error;
@@ -695,7 +734,13 @@ export class AIAnalysisService {
         libraryBlock,
       );
       try {
-        const response = await callLLM(SYSTEM_REDUCE, reducePrompt, 16_384);
+        const response = await runWithLlmHeartbeat(
+          reportEmit,
+          76,
+          81,
+          "AI đang tổng hợp kết quả các lô",
+          () => callLLM(SYSTEM_REDUCE, reducePrompt, 16_384),
+        );
         content = response.content;
         console.log(
           `[AI Analysis] ${gameName}: reduce done (${response.inputTokens ?? "?"}in/${response.outputTokens ?? "?"}out tok)`
@@ -707,6 +752,8 @@ export class AIAnalysisService {
         throw new Error(`LLM request failed (${status ?? "unknown"})`);
       }
     }
+
+    report(82, "Đang gộp điểm rubric và kiểm tra red flag…", "merge");
 
     const analysis = parseLlmJsonOutput(content);
 
@@ -722,6 +769,8 @@ export class AIAnalysisService {
 
     const libraryRequests = buildLibraryRequests(opts.analysisContext, libraryEntries, rubric);
     persistLibraryRequestsToFile(opts.analysisContext, libraryRequests);
+
+    report(92, "Đang lưu kết quả phân tích…", "save");
 
     const mainScore = rubric.aggregate.weightedScore ?? 50;
 
@@ -783,13 +832,32 @@ export class AIAnalysisService {
 
     console.log(`[AI Analysis] ${gameName}: saved to store (${store[key].length} total analyses)`);
 
+    report(100, "Hoàn tất phân tích AI.", "done");
+
     return result;
+  }
+
+  /** Có review trong DB → phân tích nhanh, không cần proxy TapTap. */
+  async countDatabaseReviews(appId: number): Promise<number> {
+    return prisma.appReview.count({ where: { appId } });
   }
 
   async analyzeGameReviews(
     appId: number,
     reviewWindow: ReviewWindow = { mode: "all" },
+    onProgress?: AnalysisProgressReporter,
+    progressFloor = 0,
   ): Promise<AIAnalysisResult> {
+    const { step: report, emit: reportEmit } = createProgressStepReporter(onProgress, progressFloor);
+
+    report(
+      Math.max(4, progressFloor),
+      progressFloor > 4
+        ? "Đang tải bình luận từ CSDL (theo khoảng đã chọn)…"
+        : "Đang tải bình luận từ cơ sở dữ liệu…",
+      "fetch",
+    );
+
     const latestRank = await prisma.appRank.findFirst({
       where: { appId },
       orderBy: { date: "desc" },
@@ -809,6 +877,12 @@ export class AIAnalysisService {
       throw new Error(`No reviews found for ${gameName} (appId: ${appId})`);
     }
 
+    report(
+      Math.max(10, progressFloor + 2),
+      `Đã tải ${reviews.length} bình luận — bắt đầu phân tích AI…`,
+      "fetch",
+    );
+
     const analysisContext = buildAnalysisContextFromRaw(
       appId,
       gameName,
@@ -821,6 +895,7 @@ export class AIAnalysisService {
       iconUrl,
       analysisContext,
       reviewWindow,
+      onProgress: reportEmit,
     });
   }
 
@@ -832,12 +907,28 @@ export class AIAnalysisService {
     source: "external" | "csv-upload" | "steam" = "external",
     tapTapDetailRaw?: Record<string, unknown> | null,
     reviewWindow: ReviewWindow = { mode: "all" },
+    onProgress?: AnalysisProgressReporter,
+    progressFloor = 0,
   ): Promise<AIAnalysisResult> {
+    const { step: report, emit: reportEmit } = createProgressStepReporter(onProgress, progressFloor);
+
+    report(
+      Math.max(12, progressFloor),
+      "Đang lọc bình luận theo khoảng thời gian đã chọn…",
+      "filter",
+    );
+
     const filtered = filterReviewsByWindow(reviews, reviewWindow);
 
     if (filtered.length === 0) {
       throw new Error(`No reviews found for ${gameName} (appId: ${appId})`);
     }
+
+    report(
+      Math.max(14, progressFloor + 1),
+      `${filtered.length} bình luận sau lọc — chuẩn bị AI…`,
+      "filter",
+    );
 
     const analysisContext = buildAnalysisContextFromRaw(
       appId,
@@ -851,6 +942,7 @@ export class AIAnalysisService {
       iconUrl,
       analysisContext,
       reviewWindow,
+      onProgress: reportEmit,
     });
   }
 }

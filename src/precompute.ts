@@ -1,6 +1,7 @@
 import { cache, setForceRefresh } from "./utils/cache";
 import { rankingService } from "./services/ranking.service";
 import { gameService } from "./services/game.service";
+import { prisma } from "./utils/prisma";
 
 const ALL_PLATFORMS = ["combined", "android", "ios"] as const;
 const POTENTIAL_DAYS = [7, 14, 30];
@@ -57,6 +58,66 @@ async function collectTopAppIds(): Promise<number[]> {
   }, "collectTopAppIds");
 }
 
+/** Game mới lên BXH (lần đầu xuất hiện trong N ngày gần đây). */
+async function collectNewChartAppIds(withinDays = 14): Promise<number[]> {
+  return retry(async () => {
+    const cutoff = new Date();
+    cutoff.setUTCHours(0, 0, 0, 0);
+    cutoff.setDate(cutoff.getDate() - withinDays);
+    const rows = await prisma.$queryRaw<{ appId: number }[]>`
+      SELECT "appId"
+      FROM "AppRank"
+      GROUP BY "appId"
+      HAVING MIN("date") >= ${cutoff}
+    `;
+    return rows.map((r) => r.appId);
+  }, "collectNewChartAppIds");
+}
+
+/** Mọi game có mặt trên snapshot BXH mới nhất (bắt game vừa vào top). */
+async function collectLatestSnapshotAppIds(): Promise<number[]> {
+  return retry(async () => {
+    const latest = await prisma.appRank.aggregate({ _max: { date: true } });
+    const d = latest._max.date;
+    if (!d) return [];
+    const rows = await prisma.appRank.findMany({
+      where: { date: d },
+      select: { appId: true },
+      distinct: ["appId"],
+    });
+    return rows.map((r) => r.appId);
+  }, "collectLatestSnapshotAppIds");
+}
+
+async function collectPrecomputeAppIds(): Promise<{ top: number[]; extra: number[] }> {
+  const [top, newest, latestSnap] = await Promise.all([
+    collectTopAppIds(),
+    collectNewChartAppIds(14),
+    collectLatestSnapshotAppIds(),
+  ]);
+  const topSet = new Set(top);
+  const extra = [...new Set([...newest, ...latestSnap])].filter((id) => !topSet.has(id));
+  const maxExtra = Math.max(0, parseInt(process.env.PRECOMPUTE_MAX_EXTRA_APPS ?? "150", 10) || 150);
+  return { top, extra: extra.slice(0, maxExtra) };
+}
+
+function detailTasksForApp(appId: number, daysList: number[]) {
+  return daysList.flatMap((days) => [
+    {
+      label: `detail-${appId}-${days}d`,
+      fn: () => gameService.getGameDetail(appId, { kind: "days", days }),
+    },
+    {
+      label: `pot-detail-${appId}-${days}d`,
+      fn: () => rankingService.getGamePotentialDetail(appId, days, "combined"),
+    },
+    {
+      label: `pot-breakdown-${appId}-${days}d`,
+      fn: () => rankingService.getGamePotentialBreakdown(appId, days, "combined"),
+    },
+  ]);
+}
+
 const BATCH_SIZE = 5;
 const BATCH_DELAY_MS = 200;
 
@@ -71,10 +132,16 @@ export async function precomputeAll(): Promise<{ durationMs: number; keys: numbe
       { label: "dashboard", fn: () => gameService.getDashboardStats() },
       { label: "dates", fn: () => gameService.getAvailableDates() },
       { label: "tags", fn: () => gameService.getTags() },
-      ...ALL_PLATFORMS.map((platform) => ({
-        label: `rankings-${platform}`,
-        fn: () => gameService.getRankings({ platform, page: "1", limit: "1" }),
-      })),
+      ...ALL_PLATFORMS.flatMap((platform) => [
+        {
+          label: `rankings-${platform}-reserve`,
+          fn: () => gameService.getRankings({ platform, page: "1", limit: "1", segment: "reserve" }),
+        },
+        {
+          label: `rankings-${platform}-launched`,
+          fn: () => gameService.getRankings({ platform, page: "1", limit: "1", segment: "launched" }),
+        },
+      ]),
     ]);
     console.log(`[precompute] Phase 1 done (${((Date.now() - start) / 1000).toFixed(1)}s)`);
 
@@ -84,14 +151,26 @@ export async function precomputeAll(): Promise<{ durationMs: number; keys: numbe
       console.log(`[precompute]   platform=${platform}...`);
       await runBatch(
         [
-          ...POTENTIAL_DAYS.map((days) => ({
-            label: `potential-${platform}-${days}`,
-            fn: () => rankingService.calculatePotentialScores(days, platform),
-          })),
-          ...POTENTIAL_DAYS.map((days) => ({
-            label: `breakout-${platform}-${days}`,
-            fn: () => rankingService.detectBreakoutGames(days, 10, platform),
-          })),
+          ...POTENTIAL_DAYS.flatMap((days) => [
+            {
+              label: `potential-reserve-${platform}-${days}`,
+              fn: () => rankingService.calculatePotentialScores(days, platform, "reserve"),
+            },
+            {
+              label: `potential-launched-${platform}-${days}`,
+              fn: () => rankingService.calculatePotentialScores(days, platform, "launched"),
+            },
+          ]),
+          ...POTENTIAL_DAYS.flatMap((days) => [
+            {
+              label: `breakout-reserve-${platform}-${days}`,
+              fn: () => rankingService.detectBreakoutGames(days, 10, platform, "reserve"),
+            },
+            {
+              label: `breakout-launched-${platform}-${days}`,
+              fn: () => rankingService.detectBreakoutGames(days, 10, platform, "launched"),
+            },
+          ]),
           ...POTENTIAL_DAYS.map((days) => ({
             label: `reserve-${platform}-${days}`,
             fn: () => rankingService.getTopReserveGrowth(days, platform),
@@ -101,33 +180,31 @@ export async function precomputeAll(): Promise<{ durationMs: number; keys: numbe
     }
     console.log(`[precompute] Phase 2 done (${((Date.now() - start) / 1000).toFixed(1)}s)`);
 
-    // Phase 3: Game details + potential details for top 200
-    console.log("[precompute] Phase 3: Game details + potential details (top 200)...");
-    const appIds = await collectTopAppIds();
-    console.log(`[precompute] Pre-building for ${appIds.length} games (batch=${BATCH_SIZE})...`);
+    // Phase 3: Top 200 — full detail + potential + breakdown
+    const { top: topIds, extra: extraIds } = await collectPrecomputeAppIds();
+    console.log(
+      `[precompute] Phase 3: top ${topIds.length} + extra (new/latest) ${extraIds.length} games...`,
+    );
 
-    for (let i = 0; i < appIds.length; i += BATCH_SIZE) {
-      const batch = appIds.slice(i, i + BATCH_SIZE);
-      const progress = `[${i + 1}-${Math.min(i + BATCH_SIZE, appIds.length)}/${appIds.length}]`;
+    const runAppBatches = async (
+      ids: number[],
+      daysList: number[],
+      label: string,
+    ) => {
+      if (ids.length === 0) return;
+      for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+        const batch = ids.slice(i, i + BATCH_SIZE);
+        const progress = `${label} [${i + 1}-${Math.min(i + BATCH_SIZE, ids.length)}/${ids.length}]`;
+        await runBatch(batch.flatMap((appId) => detailTasksForApp(appId, daysList)));
+        const elapsed = ((Date.now() - start) / 1000).toFixed(0);
+        console.log(`[precompute] ${progress} done (${elapsed}s elapsed)`);
+        if (i + BATCH_SIZE < ids.length) await sleep(BATCH_DELAY_MS);
+      }
+    };
 
-      await runBatch(
-        batch.flatMap((appId) => [
-          ...DETAIL_DAYS.map((days) => ({
-            label: `detail-${appId}-${days}d`,
-            fn: () => gameService.getGameDetail(appId, { kind: "days", days }),
-          })),
-          ...POTENTIAL_DAYS.map((days) => ({
-            label: `pot-detail-${appId}-${days}d`,
-            fn: () => rankingService.getGamePotentialDetail(appId, days, "combined"),
-          })),
-        ])
-      );
-
-      const elapsed = ((Date.now() - start) / 1000).toFixed(0);
-      console.log(`[precompute] ${progress} done (${elapsed}s elapsed)`);
-
-      if (i + BATCH_SIZE < appIds.length) await sleep(BATCH_DELAY_MS);
-    }
+    await runAppBatches(topIds, DETAIL_DAYS, "top");
+    // Game mới / snapshot mới nhất: chỉ warm 7+14 ngày (tiết kiệm thời gian & cache)
+    await runAppBatches(extraIds, [7, 14], "extra");
 
     const duration = Date.now() - start;
     console.log(`[precompute] All done in ${(duration / 1000).toFixed(1)}s (${cache.keys().length} keys cached)`);

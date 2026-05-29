@@ -47,6 +47,17 @@ async function main() {
   console.log("\ndeveloper:", JSON.stringify(r.developer));
   console.log("publisher:", JSON.stringify(r.publisher));
   console.log("developers:", JSON.stringify(r.developers)?.slice(0, 500));
+
+  const stat = (r.stat && typeof r.stat === "object" ? r.stat : null) as Record<string, unknown> | null;
+  if (stat) {
+    console.log("\nstat keys:", Object.keys(stat).join(", "));
+    console.log("hits_total:", stat.hits_total);
+    console.log("download_count:", stat.download_count);
+    console.log("reserve_count:", stat.reserve_count);
+  }
+  for (const k of ["release_date", "released_time", "publish_time", "online_time"]) {
+    if (r[k] != null) console.log(`${k}:`, r[k]);
+  }
 }
 
 main()

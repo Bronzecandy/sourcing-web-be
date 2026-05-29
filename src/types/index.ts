@@ -3,6 +3,8 @@ export interface PaginationQuery {
   limit?: string;
 }
 
+export type RankingSegment = "reserve" | "launched";
+
 export interface RankingQuery extends PaginationQuery {
   date?: string;
   sort?: string;
@@ -10,6 +12,7 @@ export interface RankingQuery extends PaginationQuery {
   search?: string;
   tag?: string;
   platform?: "combined" | "android" | "ios";
+  segment?: RankingSegment;
 }
 
 export interface TapTapRawApp {
@@ -92,6 +95,18 @@ export interface GameListItem {
   tags: string[];
   isExclusive: boolean;
   editorChoice: boolean;
+  /** Set when segment=launched */
+  primaryLaunchBoard?: "pop" | "hot" | "new" | null;
+  launchCategory?: "new_launch" | "established_launch" | null;
+  hotAndroidRank?: number | null;
+  hotIosRank?: number | null;
+  popAndroidRank?: number | null;
+  popIosRank?: number | null;
+  newAndroidRank?: number | null;
+  newIosRank?: number | null;
+  downloadCount?: number | null;
+  releaseDate?: string | null;
+  launchBoardTags?: Array<{ board: "pop" | "hot" | "new"; rank: number | null }>;
 }
 
 export interface DashboardStats {
@@ -107,6 +122,9 @@ export interface DashboardStats {
   tagDistribution: Array<{ tag: string; count: number }>;
 }
 
+export type PotentialSegment = "reserve" | "launched";
+export type LaunchCategory = "new_launch" | "established_launch";
+
 export interface PotentialScoreResult {
   appId: number;
   title: string;
@@ -117,11 +135,110 @@ export interface PotentialScoreResult {
   dataConfidence: number;
   compositeScore: number;
   currentRank: number | null;
+  /** Reserve board ranks (legacy UI field names). */
   androidRank: number | null;
   iosRank: number | null;
+  hotAndroidRank?: number | null;
+  hotIosRank?: number | null;
+  popAndroidRank?: number | null;
+  popIosRank?: number | null;
+  newAndroidRank?: number | null;
+  newIosRank?: number | null;
   rating: string | null;
   fansCount: number | null;
   trend: "up" | "down" | "stable";
+  segment?: PotentialSegment;
+  launchCategory?: LaunchCategory;
+  releaseDate?: string | null;
+  primaryLaunchBoard?: "pop" | "hot" | "new" | null;
+  launchBoardTags?: Array<{ board: "pop" | "hot" | "new"; rank: number | null }>;
+  downloadCount?: number | null;
+}
+
+export interface PotentialLifecycleMeta {
+  firstLaunchDate: string | null;
+  firstLaunchIndex: number;
+  hasReservePhase: boolean;
+  hasLaunchPhase: boolean;
+  preLaunchDayCount: number;
+  postLaunchDayCount: number;
+  transitioned: boolean;
+  reserveWindowEnd?: string | null;
+  reserveWindowDays?: number;
+}
+
+export interface GamePotentialDetail {
+  momentum: {
+    score: number;
+    positionScore: number;
+    avgRecentRank: number;
+    rankChangeScore: number;
+    absoluteScore: number;
+    relativeScore: number;
+    peakScore: number;
+    bestRank: number;
+    rankStart: number;
+    rankEnd: number;
+    change: number;
+  };
+  engagement: {
+    score: number;
+    ratingStart: number | null;
+    ratingEnd: number | null;
+    ratingDelta: number;
+    ratingBaseScore: number | null;
+    ratingChangeScore: number | null;
+    ratingScore: number | null;
+    fansStart: number | null;
+    fansEnd: number | null;
+    fansGrowth: number;
+    fansRate: number | null;
+    fansRateScore: number | null;
+    fansAbsScore: number | null;
+    fansScore: number | null;
+    resStart: number | null;
+    resEnd: number | null;
+    resGrowth: number;
+    resRate: number | null;
+    resRateScore: number | null;
+    resAbsScore: number | null;
+    resScore: number | null;
+    dlStart?: number | null;
+    dlEnd?: number | null;
+    dlGrowth?: number;
+    dlRate?: number | null;
+    dlRateScore?: number | null;
+    dlAbsScore?: number | null;
+    dlScore?: number | null;
+    subsCount: number;
+    absThreshold: number;
+  };
+  stability: {
+    score: number;
+    presenceScore: number;
+    volatilityScore: number;
+    streakScore: number;
+    daysInTop: number;
+    stdDev: number;
+    maxStreak: number;
+    analysisDays: number;
+  };
+  confidence: {
+    coverage: number;
+    multiplier: number;
+    dataPoints: number;
+    analysisDays: number;
+  };
+  compositeScore: number;
+  rawComposite: number;
+  segment?: PotentialSegment;
+  preLaunchBonus?: number;
+}
+
+export interface PotentialBreakdown {
+  lifecycle: PotentialLifecycleMeta;
+  reserve: GamePotentialDetail | null;
+  launched: GamePotentialDetail | null;
 }
 
 export interface BreakoutGame {

@@ -10,28 +10,71 @@ import type {
   TapTapRawApp,
 } from "../types";
 import { extractDeveloperPublisher } from "./analysis-context";
+import type { RankingSegment } from "../types";
+import {
+  activeLaunchBoards,
+  classifyLaunchCategory,
+  hasLaunchedRank,
+  launchedPriorityRank,
+  primaryLaunchBoard,
+  type AppRankRow,
+} from "../utils/app-rank";
+import {
+  downloadCountFromRaw,
+  releaseDateIsoFromRaw,
+} from "../utils/taptap-raw-extract";
 
 export type GameDetailRange =
   | { kind: "days"; days: number }
   | { kind: "range"; from: string; to: string };
 
+function prismaRowToAppRankRow(r: {
+  appId: number;
+  date: Date;
+  reserveAndroidRank: number | null;
+  reserveIosRank: number | null;
+  hotAndroidRank: number | null;
+  hotIosRank: number | null;
+  popAndroidRank: number | null;
+  popIosRank: number | null;
+  newAndroidRank: number | null;
+  newIosRank: number | null;
+  raw?: unknown;
+}): AppRankRow {
+  return {
+    appId: r.appId,
+    date: r.date,
+    reserveAndroidRank: r.reserveAndroidRank,
+    reserveIosRank: r.reserveIosRank,
+    hotAndroidRank: r.hotAndroidRank,
+    hotIosRank: r.hotIosRank,
+    popAndroidRank: r.popAndroidRank,
+    popIosRank: r.popIosRank,
+    newAndroidRank: r.newAndroidRank,
+    newIosRank: r.newIosRank,
+    raw: r.raw,
+  };
+}
+
 function extractGameInfo(
   raw: unknown,
-  androidRank: number | null,
-  iosRank: number | null,
-  appId: number
+  reserveAndroidRank: number | null,
+  reserveIosRank: number | null,
+  appId: number,
 ): GameListItem {
   const r = raw as TapTapRawApp | null;
   return {
     appId,
     title: r?.title ?? `App #${appId}`,
     iconUrl: r?.icon?.url ?? null,
-    androidRank,
-    iosRank,
+    androidRank: reserveAndroidRank,
+    iosRank: reserveIosRank,
     rating: r?.stat?.rating?.score ?? null,
     reviewCount: r?.stat?.review_count ?? null,
     fansCount: r?.stat?.fans_count ?? null,
     reserveCount: r?.stat?.reserve_count ?? null,
+    downloadCount: downloadCountFromRaw(raw),
+    releaseDate: releaseDateIsoFromRaw(raw),
     tags: translateTags(r?.tags?.map((t) => t.value) ?? []),
     isExclusive: r?.is_exclusive ?? false,
     editorChoice: r?.editor_choice ?? false,
@@ -79,16 +122,16 @@ export class GameService {
           const moversSQL = `
             SELECT
               c."appId",
-              c."androidRank" AS "currentRank",
-              p."androidRank" AS "prevRank",
-              p."androidRank" - c."androidRank" AS change,
+              c."reserveAndroidRank" AS "currentRank",
+              p."reserveAndroidRank" AS "prevRank",
+              p."reserveAndroidRank" - c."reserveAndroidRank" AS change,
               c.raw->>'title' AS title,
               c.raw->'icon'->>'url' AS "iconUrl"
             FROM "AppRank" c
             JOIN "AppRank" p ON c."appId" = p."appId" AND p."date" = $2
             WHERE c."date" = $1
-              AND c."androidRank" IS NOT NULL
-              AND p."androidRank" IS NOT NULL
+              AND c."reserveAndroidRank" IS NOT NULL
+              AND p."reserveAndroidRank" IS NOT NULL
             ORDER BY change DESC
           `;
           const { rows: moverRows } = await pool.query(moversSQL, [latest, previous]);
@@ -112,7 +155,7 @@ export class GameService {
           const tagSQL = `
             SELECT t.value->>'value' AS tag, COUNT(*)::int AS count
             FROM "AppRank",
-                 json_array_elements(raw->'tags') AS t(value)
+                 jsonb_array_elements(raw->'tags') AS t(value)
             WHERE "date" = $1
               AND raw IS NOT NULL
               AND raw->'tags' IS NOT NULL
@@ -140,8 +183,12 @@ export class GameService {
     );
   }
 
-  private async getFullRankingList(platform: string, dateOverride?: string) {
-    const cacheKey = `ranking-full-${platform}-${dateOverride ?? "latest"}`;
+  private async getFullRankingList(
+    platform: string,
+    dateOverride?: string,
+    segment: RankingSegment = "reserve",
+  ) {
+    const cacheKey = `ranking-full-${segment}-${platform}-${dateOverride ?? "latest"}`;
     return getCachedOrFetch(cacheKey, async () => {
       const dateFilter = dateOverride
         ? new Date(dateOverride)
@@ -154,42 +201,80 @@ export class GameService {
 
       if (!dateFilter) return { rows: [] as GameListItem[], date: null as string | null };
 
+      const plat = platform as "combined" | "android" | "ios";
       const where: Record<string, unknown> = { date: dateFilter };
-      if (platform === "android") {
-        where.androidRank = { not: null };
+
+      if (segment === "launched") {
+        where.OR = [
+          { hotAndroidRank: { not: null } },
+          { hotIosRank: { not: null } },
+          { popAndroidRank: { not: null } },
+          { popIosRank: { not: null } },
+          { newAndroidRank: { not: null } },
+          { newIosRank: { not: null } },
+        ];
+      } else if (platform === "android") {
+        where.reserveAndroidRank = { not: null };
       } else if (platform === "ios") {
-        where.iosRank = { not: null };
+        where.reserveIosRank = { not: null };
       } else {
         where.OR = [
-          { androidRank: { not: null } },
-          { iosRank: { not: null } },
+          { reserveAndroidRank: { not: null } },
+          { reserveIosRank: { not: null } },
         ];
       }
 
       const allRows = await prisma.appRank.findMany({ where });
-      let mappedRows = allRows.map(
-        (r: { appId: number; androidRank: number | null; iosRank: number | null; raw: unknown }) =>
-          extractGameInfo(r.raw, r.androidRank, r.iosRank, r.appId)
-      );
 
-      if (platform === "combined") {
-        mappedRows.sort((a, b) => {
-          const bestA = Math.min(a.androidRank ?? 99999, a.iosRank ?? 99999);
-          const bestB = Math.min(b.androidRank ?? 99999, b.iosRank ?? 99999);
-          if (bestA !== bestB) return bestA - bestB;
-          const aFromAndroid = a.androidRank != null && (a.iosRank == null || a.androidRank <= a.iosRank);
-          const bFromAndroid = b.androidRank != null && (b.iosRank == null || b.androidRank <= b.iosRank);
+      let mappedRows: GameListItem[];
+      if (segment === "launched") {
+        mappedRows = allRows
+          .filter((r) => hasLaunchedRank(r))
+          .map((r) => {
+            const rowForMeta = prismaRowToAppRankRow(r);
+            const base = extractGameInfo(r.raw, null, null, r.appId);
+            return {
+              ...base,
+              androidRank: launchedPriorityRank(rowForMeta, "android"),
+              iosRank: launchedPriorityRank(rowForMeta, "ios"),
+              primaryLaunchBoard: primaryLaunchBoard(rowForMeta, plat),
+              launchBoardTags: activeLaunchBoards(rowForMeta, plat),
+              launchCategory: classifyLaunchCategory(rowForMeta),
+              hotAndroidRank: r.hotAndroidRank,
+              hotIosRank: r.hotIosRank,
+              popAndroidRank: r.popAndroidRank,
+              popIosRank: r.popIosRank,
+              newAndroidRank: r.newAndroidRank,
+              newIosRank: r.newIosRank,
+            };
+          });
+      } else {
+        mappedRows = allRows.map((r) =>
+          extractGameInfo(r.raw, r.reserveAndroidRank, r.reserveIosRank, r.appId),
+        );
+      }
+
+      const sortRank = (g: GameListItem) => {
+        if (platform === "combined") {
+          return Math.min(g.androidRank ?? 99999, g.iosRank ?? 99999);
+        }
+        return (platform === "android" ? g.androidRank : g.iosRank) ?? 99999;
+      };
+
+      mappedRows.sort((a, b) => {
+        const bestA = sortRank(a);
+        const bestB = sortRank(b);
+        if (bestA !== bestB) return bestA - bestB;
+        if (platform === "combined") {
+          const aFromAndroid =
+            a.androidRank != null && (a.iosRank == null || a.androidRank <= a.iosRank);
+          const bFromAndroid =
+            b.androidRank != null && (b.iosRank == null || b.androidRank <= b.iosRank);
           if (aFromAndroid && !bFromAndroid) return -1;
           if (!aFromAndroid && bFromAndroid) return 1;
-          return 0;
-        });
-      } else {
-        mappedRows.sort((a, b) => {
-          const va = (platform === "android" ? a.androidRank : a.iosRank) ?? 99999;
-          const vb = (platform === "android" ? b.androidRank : b.iosRank) ?? 99999;
-          return va - vb;
-        });
-      }
+        }
+        return 0;
+      });
 
       return { rows: mappedRows, date: dateFilter.toISOString().split("T")[0] };
     });
@@ -200,8 +285,9 @@ export class GameService {
     const limit = Math.min(200, Math.max(1, parseInt(query.limit || "50")));
     const skip = (page - 1) * limit;
     const platform = query.platform || "combined";
+    const segment: RankingSegment = query.segment === "launched" ? "launched" : "reserve";
 
-    const full = await this.getFullRankingList(platform, query.date);
+    const full = await this.getFullRankingList(platform, query.date, segment);
 
     if (!full.date) {
       return { data: [], total: 0, page, limit, totalPages: 0, date: null };
@@ -294,12 +380,17 @@ export class GameService {
           range.kind === "days" ? [...rankings].reverse() : rankings;
 
         const history = historyRows.map(
-          (r: { date: Date; androidRank: number | null; iosRank: number | null; raw: unknown }) => {
+          (r: {
+            date: Date;
+            reserveAndroidRank: number | null;
+            reserveIosRank: number | null;
+            raw: unknown;
+          }) => {
             const rd = r.raw as TapTapRawApp | null;
             return {
               date: r.date.toISOString().split("T")[0],
-              androidRank: r.androidRank,
-              iosRank: r.iosRank,
+              androidRank: r.reserveAndroidRank,
+              iosRank: r.reserveIosRank,
               rating: rd?.stat?.rating?.score ?? null,
               reviewCount: rd?.stat?.review_count ?? null,
               fansCount: rd?.stat?.fans_count ?? null,
@@ -363,12 +454,13 @@ export class GameService {
           fansCount: rawApp?.stat?.fans_count ?? null,
           reserveCount: rawApp?.stat?.reserve_count ?? null,
           hitsTotal: rawApp?.stat?.hits_total ?? null,
+          releaseDate: releaseDateIsoFromRaw(rawApp),
           isExclusive: rawApp?.is_exclusive ?? false,
           editorChoice: rawApp?.editor_choice ?? false,
           screenshots: rawApp?.screenshots?.map((s) => s.url) ?? [],
           platforms: rawApp?.supported_platforms?.map((p) => p.key) ?? [],
-          androidRank: latest.androidRank,
-          iosRank: latest.iosRank,
+          androidRank: latest.reserveAndroidRank,
+          iosRank: latest.reserveIosRank,
           actualReviewCount,
           reviewDistribution,
           history,
@@ -439,7 +531,7 @@ export class GameService {
         const tagSQL = `
           SELECT t.value->>'value' AS name, COUNT(*)::int AS count
           FROM "AppRank",
-               json_array_elements(raw->'tags') AS t(value)
+               jsonb_array_elements(raw->'tags') AS t(value)
           WHERE "date" = $1
             AND raw IS NOT NULL
             AND raw->'tags' IS NOT NULL

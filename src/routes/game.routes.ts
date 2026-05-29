@@ -19,6 +19,8 @@ router.get("/rankings", async (req, res) => {
     search: String(req.query.search ?? ""),
     tag: String(req.query.tag ?? ""),
     platform: (req.query.platform as "android" | "ios") || undefined,
+    segment:
+      String(req.query.segment ?? "reserve").toLowerCase() === "launched" ? "launched" : "reserve",
   };
   const result = await gameService.getRankings(query);
   res.json({ success: true, ...result });
