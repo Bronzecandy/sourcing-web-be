@@ -25,32 +25,19 @@ import {
   resolveLibraryScores,
   inferGenrePack,
   buildLibraryRequests,
-  persistLibraryRequestsToFile,
+  persistLibraryRequests,
   buildRedFlagAtAGlance,
   buildRedFlagsChecklist,
 } from "./rubric-merge";
-import fs from "fs";
-import path from "path";
 import { jsonrepair } from "jsonrepair";
-
-const STORE_FILE = path.join(process.cwd(), ".ai-analysis-store.json");
-
-function loadStore(): Record<string, AIAnalysisResult[]> {
-  try {
-    if (fs.existsSync(STORE_FILE)) {
-      return JSON.parse(fs.readFileSync(STORE_FILE, "utf-8"));
-    }
-  } catch { /* ignore corrupt file */ }
-  return {};
-}
-
-function saveStore(store: Record<string, AIAnalysisResult[]>) {
-  try {
-    fs.writeFileSync(STORE_FILE, JSON.stringify(store), "utf-8");
-  } catch (err) {
-    console.error("[ai-store] Failed to save:", err);
-  }
-}
+import {
+  deleteAllAnalysesForUser,
+  deleteAnalysisForUser,
+  getAnalysisHistoryForUser,
+  getLatestAnalysisForUser,
+  listAnalysesForUser,
+  saveAnalysisForUser,
+} from "./ai-analysis-store";
 
 const RATING_BUCKETS = [
   { label: "Very Negative", min: 1, max: 1 },
@@ -553,52 +540,28 @@ function bulletsFromLegacyParagraph(text: string): string[] {
 }
 
 export class AIAnalysisService {
-  getAllAnalyses(): AIAnalysisResult[] {
-    const store = loadStore();
-    const all: AIAnalysisResult[] = [];
-    for (const list of Object.values(store)) {
-      for (const item of list) all.push(item);
-    }
-    all.sort((a, b) => (b.analyzedAt ?? "").localeCompare(a.analyzedAt ?? ""));
-    return all;
+  async getAllAnalyses(userId: string): Promise<AIAnalysisResult[]> {
+    return listAnalysesForUser(userId);
   }
 
-  getLatestAnalysis(appId: number): AIAnalysisResult | null {
-    const store = loadStore();
-    const history = store[String(appId)];
-    if (!history || history.length === 0) return null;
-    return history[history.length - 1];
+  async getLatestAnalysis(userId: string, appId: number): Promise<AIAnalysisResult | null> {
+    return getLatestAnalysisForUser(userId, appId);
   }
 
-  getAnalysisHistory(appId: number): AIAnalysisResult[] {
-    const store = loadStore();
-    return (store[String(appId)] ?? []).slice().reverse();
+  async getAnalysisHistory(userId: string, appId: number): Promise<AIAnalysisResult[]> {
+    return getAnalysisHistoryForUser(userId, appId);
   }
 
-  deleteAnalysis(appId: number, analyzedAt: string): boolean {
-    const store = loadStore();
-    const key = String(appId);
-    const list = store[key];
-    if (!list) return false;
-    const before = list.length;
-    store[key] = list.filter((a) => a.analyzedAt !== analyzedAt);
-    if (store[key].length === before) return false;
-    if (store[key].length === 0) delete store[key];
-    saveStore(store);
-    return true;
+  async deleteAnalysis(userId: string, appId: number, analyzedAt: string): Promise<boolean> {
+    return deleteAnalysisForUser(userId, appId, analyzedAt);
   }
 
-  deleteAllAnalyses(appId: number): number {
-    const store = loadStore();
-    const key = String(appId);
-    const count = store[key]?.length ?? 0;
-    if (count === 0) return 0;
-    delete store[key];
-    saveStore(store);
-    return count;
+  async deleteAllAnalyses(userId: string, appId: number): Promise<number> {
+    return deleteAllAnalysesForUser(userId, appId);
   }
 
   private async runLLMAnalysis(
+    userId: string,
     appId: number,
     gameName: string,
     reviews: StratifiedReview[],
@@ -768,7 +731,7 @@ export class AIAnalysisService {
     );
 
     const libraryRequests = buildLibraryRequests(opts.analysisContext, libraryEntries, rubric);
-    persistLibraryRequestsToFile(opts.analysisContext, libraryRequests);
+    await persistLibraryRequests(opts.analysisContext, libraryRequests);
 
     report(92, "Đang lưu kết quả phân tích…", "save");
 
@@ -824,13 +787,9 @@ export class AIAnalysisService {
       libraryRequests,
     };
 
-    const store = loadStore();
-    const key = String(appId);
-    if (!store[key]) store[key] = [];
-    store[key].push(result);
-    saveStore(store);
+    await saveAnalysisForUser(userId, result);
 
-    console.log(`[AI Analysis] ${gameName}: saved to store (${store[key].length} total analyses)`);
+    console.log(`[AI Analysis] ${gameName}: saved for user ${userId}`);
 
     report(100, "Hoàn tất phân tích AI.", "done");
 
@@ -843,6 +802,7 @@ export class AIAnalysisService {
   }
 
   async analyzeGameReviews(
+    userId: string,
     appId: number,
     reviewWindow: ReviewWindow = { mode: "all" },
     onProgress?: AnalysisProgressReporter,
@@ -890,7 +850,7 @@ export class AIAnalysisService {
       (latestRank?.raw ?? null) as TapTapRawApp | Record<string, unknown> | null,
     );
 
-    return this.runLLMAnalysis(appId, gameName, reviews, {
+    return this.runLLMAnalysis(userId, appId, gameName, reviews, {
       source: "database",
       iconUrl,
       analysisContext,
@@ -900,6 +860,7 @@ export class AIAnalysisService {
   }
 
   async analyzeExternalReviews(
+    userId: string,
     appId: number,
     gameName: string,
     iconUrl: string | null,
@@ -937,7 +898,7 @@ export class AIAnalysisService {
       source === "csv-upload" ? null : tapTapDetailRaw ?? null,
     );
 
-    return this.runLLMAnalysis(appId, gameName, filtered, {
+    return this.runLLMAnalysis(userId, appId, gameName, filtered, {
       source,
       iconUrl,
       analysisContext,

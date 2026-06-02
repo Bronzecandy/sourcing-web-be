@@ -31,8 +31,19 @@ import {
   createAnalysisStreamWriter,
   streamProgressReporter,
 } from "../utils/analysis-progress-stream";
+import type { AuthedRequest } from "../middleware/auth";
+import type { Response } from "express";
 
 const router = Router();
+
+function actorUserId(req: AuthedRequest, res: Response): string | null {
+  const id = req.authUser?.id;
+  if (!id) {
+    res.status(401).json({ success: false, error: "Unauthorized", code: "UNAUTHORIZED" });
+    return null;
+  }
+  return id;
+}
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
 /** Khi đã dùng proxy: mặc định không gọi TapTap trực tiếp từ BE (IP datacenter hay bị 403/405). Chỉ thử direct khi = 1/true. */
@@ -105,9 +116,11 @@ function startKeepAlive(res: import("express").Response): NodeJS.Timeout {
   }, 10_000);
 }
 
-router.get("/all", async (_req, res) => {
+router.get("/all", async (req: AuthedRequest, res) => {
   try {
-    const all = aiAnalysisService.getAllAnalyses();
+    const userId = actorUserId(req, res);
+    if (!userId) return;
+    const all = await aiAnalysisService.getAllAnalyses(userId);
     res.json({ success: true, data: all });
   } catch (err) {
     console.error("[analysis route] GET all:", err);
@@ -115,7 +128,9 @@ router.get("/all", async (_req, res) => {
   }
 });
 
-router.post("/analyze-external", async (req, res) => {
+router.post("/analyze-external", async (req: AuthedRequest, res) => {
+  const userId = actorUserId(req, res);
+  if (!userId) return;
   const input = String(req.body?.input ?? "").trim();
   const platformRaw = String(req.body?.platform ?? "taptap").toLowerCase();
   const platform = platformRaw === "steam" ? "steam" : "taptap";
@@ -165,6 +180,7 @@ router.post("/analyze-external", async (req, res) => {
           message: `Đã tải ${filteredSteam.length} bình luận Steam — bắt đầu AI…`,
         });
         const result = await aiAnalysisService.analyzeExternalReviews(
+          userId,
           steamAppId,
           gameName,
           iconUrl,
@@ -195,6 +211,7 @@ router.post("/analyze-external", async (req, res) => {
         });
         try {
           const result = await aiAnalysisService.analyzeGameReviews(
+            userId,
             appId,
             reviewWindow,
             progress,
@@ -240,6 +257,7 @@ router.post("/analyze-external", async (req, res) => {
       }
 
       const result = await aiAnalysisService.analyzeExternalReviews(
+        userId,
         appId,
         bundle.appInfo.title,
         bundle.appInfo.iconUrl,
@@ -310,6 +328,7 @@ router.post("/analyze-external", async (req, res) => {
       }
 
       const result = await aiAnalysisService.analyzeExternalReviews(
+        userId,
         steamAppId,
         gameName,
         iconUrl,
@@ -337,7 +356,7 @@ router.post("/analyze-external", async (req, res) => {
         `[analyze-external] appId=${appId}: ${dbReviewCount} reviews in DB — skipping TapTap proxy`,
       );
       try {
-        const result = await aiAnalysisService.analyzeGameReviews(appId, reviewWindow);
+        const result = await aiAnalysisService.analyzeGameReviews(userId, appId, reviewWindow);
         clearInterval(keepAlive);
         res.end(JSON.stringify({ success: true, data: result }));
         return;
@@ -392,6 +411,7 @@ router.post("/analyze-external", async (req, res) => {
     }
 
     const result = await aiAnalysisService.analyzeExternalReviews(
+      userId,
       appId,
       appTitle,
       appIcon,
@@ -411,7 +431,9 @@ router.post("/analyze-external", async (req, res) => {
   }
 });
 
-router.post("/analyze-csv", upload.single("file"), async (req, res) => {
+router.post("/analyze-csv", upload.single("file"), async (req: AuthedRequest, res) => {
+  const userId = actorUserId(req, res);
+  if (!userId) return;
   const reviewWindow = parseReviewWindow(
     req.body?.reviewWindow ?? (req.query.reviewWindow as string | undefined),
   );
@@ -446,6 +468,7 @@ router.post("/analyze-csv", upload.single("file"), async (req, res) => {
         message: `${filtered.length} bình luận hợp lệ — bắt đầu AI…`,
       });
       const result = await aiAnalysisService.analyzeExternalReviews(
+        userId,
         numericId,
         gameName,
         null,
@@ -492,6 +515,7 @@ router.post("/analyze-csv", upload.single("file"), async (req, res) => {
     }
 
     const result = await aiAnalysisService.analyzeExternalReviews(
+      userId,
       numericId,
       gameName,
       null,
@@ -511,7 +535,9 @@ router.post("/analyze-csv", upload.single("file"), async (req, res) => {
   }
 });
 
-router.post("/analyze/:appId", async (req, res) => {
+router.post("/analyze/:appId", async (req: AuthedRequest, res) => {
+  const userId = actorUserId(req, res);
+  if (!userId) return;
   const appId = parseInt(String(req.params.appId));
   const reviewWindow = parseReviewWindow(req.body?.reviewWindow);
 
@@ -521,6 +547,7 @@ router.post("/analyze/:appId", async (req, res) => {
     try {
       progress({ percent: 1, phase: "start", message: "Bắt đầu phân tích AI…" });
       const result = await aiAnalysisService.analyzeGameReviews(
+        userId,
         appId,
         reviewWindow,
         progress,
@@ -535,7 +562,7 @@ router.post("/analyze/:appId", async (req, res) => {
 
   const keepAlive = startKeepAlive(res);
   try {
-    const result = await aiAnalysisService.analyzeGameReviews(appId, reviewWindow);
+    const result = await aiAnalysisService.analyzeGameReviews(userId, appId, reviewWindow);
     clearInterval(keepAlive);
     res.end(JSON.stringify({ success: true, data: result }));
   } catch (err) {
@@ -546,10 +573,12 @@ router.post("/analyze/:appId", async (req, res) => {
   }
 });
 
-router.get("/:appId", async (req, res) => {
+router.get("/:appId", async (req: AuthedRequest, res) => {
   try {
+    const userId = actorUserId(req, res);
+    if (!userId) return;
     const appId = parseInt(String(req.params.appId));
-    const result = aiAnalysisService.getLatestAnalysis(appId);
+    const result = await aiAnalysisService.getLatestAnalysis(userId, appId);
     res.json({ success: true, data: result });
   } catch (err) {
     console.error("[analysis route] GET latest:", err);
@@ -557,10 +586,12 @@ router.get("/:appId", async (req, res) => {
   }
 });
 
-router.get("/:appId/history", async (req, res) => {
+router.get("/:appId/history", async (req: AuthedRequest, res) => {
   try {
+    const userId = actorUserId(req, res);
+    if (!userId) return;
     const appId = parseInt(String(req.params.appId));
-    const history = aiAnalysisService.getAnalysisHistory(appId);
+    const history = await aiAnalysisService.getAnalysisHistory(userId, appId);
     res.json({ success: true, data: history });
   } catch (err) {
     console.error("[analysis route] GET history:", err);
@@ -568,15 +599,17 @@ router.get("/:appId/history", async (req, res) => {
   }
 });
 
-router.delete("/:appId", async (req, res) => {
+router.delete("/:appId", async (req: AuthedRequest, res) => {
   try {
+    const userId = actorUserId(req, res);
+    if (!userId) return;
     const appId = parseInt(String(req.params.appId));
     const analyzedAt = String(req.query.analyzedAt ?? "");
     if (analyzedAt) {
-      const ok = aiAnalysisService.deleteAnalysis(appId, analyzedAt);
+      const ok = await aiAnalysisService.deleteAnalysis(userId, appId, analyzedAt);
       res.json({ success: true, deleted: ok ? 1 : 0 });
     } else {
-      const count = aiAnalysisService.deleteAllAnalyses(appId);
+      const count = await aiAnalysisService.deleteAllAnalyses(userId, appId);
       res.json({ success: true, deleted: count });
     }
   } catch (err) {

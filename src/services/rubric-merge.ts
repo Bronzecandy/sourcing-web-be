@@ -69,7 +69,7 @@ export function resolveGenrePackForWeights(
   return inferredPack ?? manifest.genrePackDefault ?? "base";
 }
 
-export { resolveLibraryScores, normalizeName, scoreGenreFromTags, matchStudioName, inferGenrePack, buildLibraryRequests, persistLibraryRequestsToFile } from "./library-resolve";
+export { resolveLibraryScores, normalizeName, scoreGenreFromTags, matchStudioName, inferGenrePack, buildLibraryRequests, persistLibraryRequests } from "./library-resolve";
 
 export interface LlmRubricRow {
   id: string;

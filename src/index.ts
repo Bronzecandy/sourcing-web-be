@@ -2,8 +2,22 @@ import "./load-env";
 import cron from "node-cron";
 import app from "./app";
 import { precomputeAll } from "./precompute";
+import { warmLibraryCache } from "./services/library-store";
 
 const PORT = parseInt(process.env.PORT || "3001");
+
+async function warmAppDb(): Promise<void> {
+  if (!process.env.DATABASE_URL_APP) {
+    console.warn("[app-db] DATABASE_URL_APP not set — libraries/auth use app DB");
+    return;
+  }
+  try {
+    await warmLibraryCache();
+    console.log("[app-db] Library + rubric cache warmed");
+  } catch (err) {
+    console.warn("[app-db] Cache warm failed (run seed:app?):", (err as Error).message);
+  }
+}
 
 async function runPrecompute(label: string) {
   console.log(`[${label}] Pre-computing all data...`);
@@ -19,7 +33,8 @@ cron.schedule("15 10 * * *", () => runPrecompute("cron"), {
   timezone: "Asia/Ho_Chi_Minh",
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
+  await warmAppDb();
   console.log(`Server running on http://localhost:${PORT}`);
   console.log(`Health check: http://localhost:${PORT}/api/health`);
   console.log(`Library admin UI: http://localhost:${PORT}/admin/libraries`);

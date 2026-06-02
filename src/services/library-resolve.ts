@@ -1,6 +1,5 @@
-import fs from "fs";
-import path from "path";
 import type { AnalysisContext } from "./analysis-context";
+import { getLibraryDocumentSync } from "./library-store";
 import type { RubricManifest } from "./rubric-manifest";
 import type { LibraryResolvedEntry, LibraryRequestItem } from "../types";
 import { appendPendingBatch } from "./libraries.service";
@@ -12,13 +11,8 @@ function keywordHaystack(ctx: AnalysisContext): string {
   return [base, enTags].filter(Boolean).join(" \n ");
 }
 
-function dataPath(...segs: string[]): string {
-  return path.join(process.cwd(), "data", ...segs);
-}
-
 function loadJson<T>(name: string): T {
-  const p = dataPath("libraries", name);
-  return JSON.parse(fs.readFileSync(p, "utf-8")) as T;
+  return getLibraryDocumentSync(name) as T;
 }
 
 export function normalizeName(s: string): string {
@@ -444,8 +438,11 @@ export function buildLibraryRequests(
   return req;
 }
 
-/** Ghi toàn bộ yêu cầu vào pending-additions.json (trùng type+label sẽ bỏ qua). */
-export function persistLibraryRequestsToFile(ctx: AnalysisContext, requests: LibraryRequestItem[]): void {
+/** Ghi toàn bộ yêu cầu vào bảng LibraryPending (trùng type+label sẽ bỏ qua). */
+export async function persistLibraryRequests(
+  ctx: AnalysisContext,
+  requests: LibraryRequestItem[],
+): Promise<void> {
   if (requests.length === 0) return;
   const batch = requests.map((r) => ({
     type: r.kind,
@@ -455,5 +452,5 @@ export function persistLibraryRequestsToFile(ctx: AnalysisContext, requests: Lib
     appId: ctx.appId,
     gameName: ctx.gameName,
   }));
-  appendPendingBatch(batch);
+  await appendPendingBatch(batch);
 }

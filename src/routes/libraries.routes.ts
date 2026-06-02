@@ -1,5 +1,7 @@
 import { Router } from "express";
+import type { AuthedRequest } from "../middleware/auth";
 import {
+  appendLibraryEntry,
   appendStudioTierEntry,
   deletePending,
   getLibraryJson,
@@ -23,19 +25,20 @@ router.get("/files", (_req, res) => {
   }
 });
 
-router.get("/pending", (_req, res) => {
+router.get("/pending", async (_req, res) => {
   try {
-    res.json({ success: true, data: listPending() });
+    const data = await listPending();
+    res.json({ success: true, data });
   } catch (err) {
     console.error("[libraries] list pending:", err);
     res.status(500).json({ success: false, error: "Failed to list pending" });
   }
 });
 
-router.post("/pending/:id/merge", (req, res) => {
+router.post("/pending/:id/merge", async (req: AuthedRequest, res) => {
   try {
     const id = String(req.params.id ?? "");
-    mergePendingIntoLibrary(id, (req.body ?? {}) as MergePendingBody);
+    await mergePendingIntoLibrary(id, (req.body ?? {}) as MergePendingBody, req.authUser?.id);
     res.json({ success: true });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Merge failed";
@@ -44,10 +47,10 @@ router.post("/pending/:id/merge", (req, res) => {
   }
 });
 
-router.post("/pending/:id/resolve", (req, res) => {
+router.post("/pending/:id/resolve", async (req, res) => {
   try {
     const id = String(req.params.id ?? "");
-    const ok = resolvePending(id);
+    const ok = await resolvePending(id);
     if (!ok) return res.status(404).json({ success: false, error: "Pending id not found" });
     res.json({ success: true });
   } catch (err) {
@@ -56,10 +59,10 @@ router.post("/pending/:id/resolve", (req, res) => {
   }
 });
 
-router.delete("/pending/:id", (req, res) => {
+router.delete("/pending/:id", async (req, res) => {
   try {
     const id = String(req.params.id ?? "");
-    const ok = deletePending(id);
+    const ok = await deletePending(id);
     if (!ok) return res.status(404).json({ success: false, error: "Pending id not found" });
     res.json({ success: true });
   } catch (err) {
@@ -68,7 +71,7 @@ router.delete("/pending/:id", (req, res) => {
   }
 });
 
-router.post("/studio", (req, res) => {
+router.post("/studio", async (req: AuthedRequest, res) => {
   try {
     const names = req.body?.names;
     const score = req.body?.score;
@@ -76,7 +79,11 @@ router.post("/studio", (req, res) => {
     if (!Array.isArray(names) || typeof score !== "number") {
       return res.status(400).json({ success: false, error: "Body requires names: string[] and score: number" });
     }
-    appendStudioTierEntry({ names: names.map(String), score, tier: typeof tier === "string" ? tier : undefined });
+    await appendStudioTierEntry({
+      names: names.map(String),
+      score,
+      tier: typeof tier === "string" ? tier : undefined,
+    });
     res.json({ success: true });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to append studio";
@@ -85,13 +92,28 @@ router.post("/studio", (req, res) => {
   }
 });
 
-router.get("/:id", (req, res) => {
+router.post("/:id/entries", async (req: AuthedRequest, res) => {
   try {
     const id = String(req.params.id ?? "");
     if (!isLibraryFileId(id)) {
       return res.status(400).json({ success: false, error: "Unknown library id" });
     }
-    const data = getLibraryJson(id);
+    await appendLibraryEntry(id, (req.body ?? {}) as Record<string, unknown>, req.authUser?.id);
+    res.json({ success: true });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to append entry";
+    console.error("[libraries] append entry:", err);
+    res.status(400).json({ success: false, error: msg });
+  }
+});
+
+router.get("/:id", async (req, res) => {
+  try {
+    const id = String(req.params.id ?? "");
+    if (!isLibraryFileId(id)) {
+      return res.status(400).json({ success: false, error: "Unknown library id" });
+    }
+    const data = await getLibraryJson(id);
     res.json({ success: true, data });
   } catch (err) {
     console.error("[libraries] get:", err);
@@ -99,13 +121,13 @@ router.get("/:id", (req, res) => {
   }
 });
 
-router.put("/:id", (req, res) => {
+router.put("/:id", async (req: AuthedRequest, res) => {
   try {
     const id = String(req.params.id ?? "");
     if (!isLibraryFileId(id)) {
       return res.status(400).json({ success: false, error: "Unknown library id" });
     }
-    putLibraryJson(id, req.body);
+    await putLibraryJson(id, req.body, req.authUser?.id);
     res.json({ success: true });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to write library";

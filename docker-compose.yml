@@ -1,0 +1,19 @@
+services:
+  postgres-app:
+    image: postgres:16-alpine
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: sourcing
+      POSTGRES_PASSWORD: sourcing_dev
+      POSTGRES_DB: sourcing_app_local
+    volumes:
+      - sourcing_app_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sourcing -d sourcing_app_local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  sourcing_app_pg:

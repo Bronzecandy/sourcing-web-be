@@ -1,14 +1,18 @@
 import express from "express";
 import path from "path";
 import cors from "cors";
+import cookieParser from "cookie-parser";
 import gameRoutes from "./routes/game.routes";
 import translateRoutes from "./routes/translate.routes";
 import rankingRoutes from "./routes/ranking.routes";
 import analysisRoutes from "./routes/analysis.routes";
 import librariesRoutes from "./routes/libraries.routes";
+import authRoutes from "./routes/auth.routes";
+import adminRoutes from "./routes/admin.routes";
 import { errorHandler } from "./middleware/error-handler";
 import { precomputeAll } from "./precompute";
 import { cache } from "./utils/cache";
+import { attachAuth, apiPermissionGuard } from "./middleware/auth";
 
 const app = express();
 
@@ -27,8 +31,9 @@ app.use(
   cors({
     origin: resolveCorsOrigin(),
     credentials: true,
-  })
+  }),
 );
+app.use(cookieParser());
 app.use(express.json());
 
 app.use("/api", (_req, res, next) => {
@@ -49,6 +54,11 @@ app.post("/api/admin/refresh-cache", async (_req, res) => {
   const { durationMs, keys } = await precomputeAll();
   res.json({ success: true, durationMs, cacheKeys: keys });
 });
+
+app.use("/api/auth", authRoutes);
+app.use("/api/admin", attachAuth, adminRoutes);
+
+app.use("/api", attachAuth, apiPermissionGuard);
 
 app.use("/api/translate", translateRoutes);
 app.use("/api/games", gameRoutes);

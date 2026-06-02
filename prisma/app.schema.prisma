@@ -1,0 +1,85 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma-app"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserStatus {
+  PENDING
+  ACTIVE
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  STAFF
+  USER
+}
+
+model User {
+  id          String           @id @default(cuid())
+  googleSub   String           @unique
+  email       String           @unique
+  name        String?
+  avatarUrl   String?
+  status      UserStatus       @default(PENDING)
+  role        UserRole         @default(USER)
+  createdAt   DateTime         @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime         @updatedAt @db.Timestamptz(6)
+  permissions  UserPermission[]
+  aiAnalyses   UserAiAnalysis[]
+}
+
+model UserPermission {
+  userId        String
+  permissionKey String
+  granted       Boolean @default(false)
+  user          User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, permissionKey])
+}
+
+model LibraryDocument {
+  slug      String   @id
+  content   Json
+  version   Int      @default(1)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+  updatedBy String?
+}
+
+model LibraryPending {
+  id             String   @id
+  type           String
+  label          String
+  detailVi       String
+  jsonSuggestion Json
+  appId          Int
+  gameName       String
+  status         String   @default("pending")
+  createdAt      DateTime @default(now()) @db.Timestamptz(6)
+}
+
+model RubricManifest {
+  id        Int      @id @default(1)
+  content   Json
+  version   Int      @default(1)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+}
+
+/// Per-user AI review analysis results (not shared across users).
+model UserAiAnalysis {
+  id         String   @id @default(cuid())
+  userId     String
+  appId      Int
+  analyzedAt DateTime @db.Timestamptz(6)
+  payload    Json
+  createdAt  DateTime @default(now()) @db.Timestamptz(6)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, appId, analyzedAt])
+  @@index([userId])
+  @@index([userId, appId])
+}

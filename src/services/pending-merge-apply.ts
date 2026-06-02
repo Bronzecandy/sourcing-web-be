@@ -1,17 +1,16 @@
 /**
- * Apply a pending library suggestion into data/libraries/*.json, then mark the row merged.
+ * Apply a pending library suggestion into app DB library documents.
  */
 
-import { libraryFilePath, type LibraryFileId } from "./library-registry";
-import fs from "fs";
+import { type LibraryFileId } from "./library-registry";
+import { getLibraryDocumentSync, putLibraryDocument } from "./library-store";
 
 function readRaw(id: string): unknown {
-  const text = fs.readFileSync(libraryFilePath(id), "utf-8");
-  return JSON.parse(text) as unknown;
+  return getLibraryDocumentSync(id);
 }
 
-function writeRaw(id: string, data: unknown): void {
-  fs.writeFileSync(libraryFilePath(id), `${JSON.stringify(data, null, 2)}\n`, "utf-8");
+async function writeRaw(id: string, data: unknown, updatedBy?: string): Promise<void> {
+  await putLibraryDocument(id, data, updatedBy);
 }
 
 function readGenreTierScores(): Record<string, number> {
@@ -31,7 +30,10 @@ function splitKeywords(s: string): string[] {
     .filter(Boolean);
 }
 
-function appendStudioTierEntryLocal(input: { names: string[]; score: number; tier?: string }): void {
+export async function appendStudioTierEntryLocal(
+  input: { names: string[]; score: number; tier?: string; roles?: string[] },
+  updatedBy?: string,
+): Promise<void> {
   const names = input.names.map((n) => n.trim()).filter(Boolean);
   if (names.length === 0) throw new Error("names required");
   const data = readRaw("studio-tiers.json") as {
@@ -42,12 +44,12 @@ function appendStudioTierEntryLocal(input: { names: string[]; score: number; tie
     names,
     score: input.score,
     tier: input.tier ?? "custom",
-    roles: ["developer"],
+    roles: input.roles?.length ? input.roles : ["developer"],
   });
-  writeRaw("studio-tiers.json", data);
+  await writeRaw("studio-tiers.json", data, updatedBy);
 }
 
-export function appendGenreTagKeywords(match: string[], tier: string): void {
+export async function appendGenreTagKeywords(match: string[], tier: string, updatedBy?: string): Promise<void> {
   const data = readRaw("genre-tiers.json") as {
     tagPatterns?: Array<{ match: string[]; tier: string }>;
   };
@@ -66,10 +68,15 @@ export function appendGenreTagKeywords(match: string[], tier: string): void {
     }
   }
   data.tagPatterns = patterns;
-  writeRaw("genre-tiers.json", data);
+  await writeRaw("genre-tiers.json", data, updatedBy);
 }
 
-export function appendKeywordPatternLib(id: LibraryFileId, match: string[], score: number): void {
+export async function appendKeywordPatternLib(
+  id: LibraryFileId,
+  match: string[],
+  score: number,
+  updatedBy?: string,
+): Promise<void> {
   const data = readRaw(id) as { keywordPatterns?: Array<{ match: string[]; score: number }> };
   const patterns = data.keywordPatterns ?? [];
   let row = patterns.find((p) => p.score === score);
@@ -86,45 +93,53 @@ export function appendKeywordPatternLib(id: LibraryFileId, match: string[], scor
     }
   }
   data.keywordPatterns = patterns;
-  writeRaw(id, data);
+  await writeRaw(id, data, updatedBy);
 }
 
-export function appendGameSizeRule(maxMb: number, score: number, label: string): void {
+export async function appendGameSizeRule(
+  maxMb: number,
+  score: number,
+  label: string,
+  updatedBy?: string,
+): Promise<void> {
   const data = readRaw("game-size-tiers.json") as {
     rules?: Array<{ maxMb: number; score: number; label: string }>;
   };
   const rules = data.rules ?? [];
   rules.push({ maxMb, score, label: label || `≤${maxMb} MB` });
   data.rules = rules;
-  writeRaw("game-size-tiers.json", data);
+  await writeRaw("game-size-tiers.json", data, updatedBy);
 }
 
-export function appendUpdateCycleRule(maxDaysSinceUpdate: number, score: number, label: string): void {
+export async function appendUpdateCycleRule(
+  maxDaysSinceUpdate: number,
+  score: number,
+  label: string,
+  updatedBy?: string,
+): Promise<void> {
   const data = readRaw("update-cycle-tiers.json") as {
     rules?: Array<{ maxDaysSinceUpdate: number; score: number; label: string }>;
   };
   const rules = data.rules ?? [];
   rules.push({ maxDaysSinceUpdate, score, label: label || `≤${maxDaysSinceUpdate}d` });
   data.rules = rules;
-  writeRaw("update-cycle-tiers.json", data);
+  await writeRaw("update-cycle-tiers.json", data, updatedBy);
 }
 
-export function appendCommunityFanRule(minFans: number, score: number): void {
+export async function appendCommunityFanRule(minFans: number, score: number, updatedBy?: string): Promise<void> {
   const data = readRaw("community-size-tiers.json") as {
     fanTierRules?: Array<{ minFans: number; score: number }>;
   };
   const fanTierRules = data.fanTierRules ?? [];
   fanTierRules.push({ minFans, score });
   data.fanTierRules = fanTierRules;
-  writeRaw("community-size-tiers.json", data);
+  await writeRaw("community-size-tiers.json", data, updatedBy);
 }
 
 export type MergePendingBody = {
   score?: number;
   tier?: string;
-  /** Comma-separated English keywords for genre / IP / system / art merges */
   keywordsEn?: string;
-  /** For game_size / update_cycle / community: numeric threshold fields */
   maxMb?: number;
   maxDaysSinceUpdate?: number;
   minFans?: number;
@@ -137,7 +152,6 @@ export type PendingItemShape = {
   jsonSuggestion: Record<string, unknown>;
 };
 
-/** Resolve a numeric score from body, jsonSuggestion, or tier → genre tier table. */
 export function resolveMergeScore(
   itemType: string,
   j: Record<string, unknown>,
@@ -156,10 +170,11 @@ export function resolveMergeScore(
   return null;
 }
 
-/**
- * Mutates the appropriate library JSON for this pending row. Caller marks pending merged after success.
- */
-export function applyPendingToLibraryFiles(item: PendingItemShape, body: MergePendingBody): void {
+export async function applyPendingToLibraryFiles(
+  item: PendingItemShape,
+  body: MergePendingBody,
+  updatedBy?: string,
+): Promise<void> {
   const j = item.jsonSuggestion ?? {};
   const tierScores = readGenreTierScores();
   const t = item.type;
@@ -169,7 +184,7 @@ export function applyPendingToLibraryFiles(item: PendingItemShape, body: MergePe
     const score = resolveMergeScore(t, j, body, tierScores);
     if (score == null) throw new Error("score or tier required");
     const tier = typeof body.tier === "string" ? body.tier : typeof j.tier === "string" ? j.tier : "custom";
-    appendStudioTierEntryLocal({ names, score, tier });
+    await appendStudioTierEntryLocal({ names, score, tier }, updatedBy);
     return;
   }
 
@@ -177,7 +192,7 @@ export function applyPendingToLibraryFiles(item: PendingItemShape, body: MergePe
     const tier = body.tier ?? (j.exampleRow as { tier?: string } | undefined)?.tier ?? "B";
     const kw = splitKeywords(body.keywordsEn ?? "");
     if (kw.length === 0) throw new Error("keywordsEn is required (comma-separated English keywords / patterns)");
-    appendGenreTagKeywords(kw, String(tier));
+    await appendGenreTagKeywords(kw, String(tier), updatedBy);
     return;
   }
 
@@ -192,7 +207,7 @@ export function applyPendingToLibraryFiles(item: PendingItemShape, body: MergePe
     if (kw.length === 0) throw new Error("keywordsEn is required");
     const score = resolveMergeScore(t, j, body, tierScores);
     if (score == null) throw new Error("score is required when the suggestion has no score");
-    appendKeywordPatternLib(fileId, kw, score);
+    await appendKeywordPatternLib(fileId, kw, score, updatedBy);
     return;
   }
 
@@ -201,7 +216,7 @@ export function applyPendingToLibraryFiles(item: PendingItemShape, body: MergePe
     const score = resolveMergeScore(t, j, body, tierScores);
     if (maxMb == null || !Number.isFinite(maxMb)) throw new Error("maxMb required");
     if (score == null) throw new Error("score required");
-    appendGameSizeRule(maxMb, score, body.ruleLabel ?? String(j.label ?? `≤${maxMb} MB`));
+    await appendGameSizeRule(maxMb, score, body.ruleLabel ?? String(j.label ?? `≤${maxMb} MB`), updatedBy);
     return;
   }
 
@@ -215,7 +230,7 @@ export function applyPendingToLibraryFiles(item: PendingItemShape, body: MergePe
     const score = resolveMergeScore(t, j, body, tierScores);
     if (maxDays == null || !Number.isFinite(maxDays)) throw new Error("maxDaysSinceUpdate required");
     if (score == null) throw new Error("score required");
-    appendUpdateCycleRule(maxDays, score, body.ruleLabel ?? "");
+    await appendUpdateCycleRule(maxDays, score, body.ruleLabel ?? "", updatedBy);
     return;
   }
 
@@ -225,7 +240,7 @@ export function applyPendingToLibraryFiles(item: PendingItemShape, body: MergePe
     const score = resolveMergeScore(t, j, body, tierScores);
     if (minFans == null || !Number.isFinite(minFans)) throw new Error("minFans required");
     if (score == null) throw new Error("score required");
-    appendCommunityFanRule(minFans, score);
+    await appendCommunityFanRule(minFans, score, updatedBy);
     return;
   }
 

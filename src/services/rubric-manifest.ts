@@ -1,5 +1,4 @@
-import fs from "fs";
-import path from "path";
+import { getRubricManifest, getRubricManifestSync } from "./library-store";
 
 export interface RubricManifestPart {
   id: string;
@@ -24,17 +23,12 @@ export interface RubricManifest {
   criteria: RubricCriterionDef[];
 }
 
-let cached: RubricManifest | null = null;
-
-function manifestPath(): string {
-  return path.join(process.cwd(), "data", "rubric", "manifest.json");
+export function loadRubricManifest(): RubricManifest {
+  return getRubricManifestSync();
 }
 
-export function loadRubricManifest(): RubricManifest {
-  if (cached) return cached;
-  const p = manifestPath();
-  cached = JSON.parse(fs.readFileSync(p, "utf-8")) as RubricManifest;
-  return cached;
+export async function loadRubricManifestAsync(): Promise<RubricManifest> {
+  return getRubricManifest();
 }
 
 export function getActiveCriteria(manifest: RubricManifest, genrePack: string | null): RubricCriterionDef[] {

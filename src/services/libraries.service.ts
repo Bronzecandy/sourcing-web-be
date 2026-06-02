@@ -1,36 +1,48 @@
-import fs from "fs";
 import crypto from "crypto";
-import { LIBRARY_FILES, libraryFilePath, type LibraryFileId } from "./library-registry";
-import { applyPendingToLibraryFiles, type MergePendingBody } from "./pending-merge-apply";
-function readStudioForAppend(): { version: number; neutralScore: number; entries: Array<{ names: string[]; score: number; tier?: string; roles?: string[] }> } {
-  return readRaw("studio-tiers.json") as {
+import { LIBRARY_FILES, type LibraryFileId } from "./library-registry";
+import {
+  applyPendingToLibraryFiles,
+  appendCommunityFanRule,
+  appendGameSizeRule,
+  appendGenreTagKeywords,
+  appendKeywordPatternLib,
+  appendStudioTierEntryLocal,
+  appendUpdateCycleRule,
+  type MergePendingBody,
+} from "./pending-merge-apply";
+import { getLibraryDocument, getLibraryDocumentSync, putLibraryDocument } from "./library-store";
+import { prismaApp } from "../utils/prisma-app";
+
+function readStudioForAppend(): {
+  version: number;
+  neutralScore: number;
+  entries: Array<{ names: string[]; score: number; tier?: string; roles?: string[] }>;
+} {
+  return getLibraryDocumentSync("studio-tiers.json") as {
     version: number;
     neutralScore: number;
     entries: Array<{ names: string[]; score: number; tier?: string; roles?: string[] }>;
   };
 }
 
-function readRaw(id: string): unknown {
-  const text = fs.readFileSync(libraryFilePath(id), "utf-8");
-  return JSON.parse(text) as unknown;
-}
-
-function writeRaw(id: string, data: unknown): void {
-  const p = libraryFilePath(id);
-  fs.writeFileSync(p, `${JSON.stringify(data, null, 2)}\n`, "utf-8");
-}
-
 export function listLibraryFiles(): typeof LIBRARY_FILES {
   return [...LIBRARY_FILES];
 }
 
-export function getLibraryJson(id: string): unknown {
-  return readRaw(id);
+export async function getLibraryJson(id: string): Promise<unknown> {
+  if (id === "pending-additions.json") {
+    const items = await listPending();
+    return { version: 1, items };
+  }
+  return getLibraryDocument(id);
 }
 
-export function putLibraryJson(id: string, body: unknown): void {
+export async function putLibraryJson(id: string, body: unknown, updatedBy?: string): Promise<void> {
   if (typeof body !== "object" || body === null) throw new Error("Body must be a JSON object");
-  writeRaw(id, body);
+  if (id === "pending-additions.json") {
+    throw new Error("Use pending API instead of writing pending-additions.json");
+  }
+  await putLibraryDocument(id, body, updatedBy);
 }
 
 export interface PendingItem {
@@ -45,90 +57,209 @@ export interface PendingItem {
   status: "pending" | "merged";
 }
 
-interface PendingFile {
-  version: number;
-  items: PendingItem[];
-}
-
-function readPendingFile(): PendingFile {
-  const raw = readRaw("pending-additions.json") as PendingFile;
-  if (!raw.items) raw.items = [];
-  return raw;
-}
-
-/** Append pending rows (dedupe by type+normalized label). */
-export function appendPendingBatch(items: Omit<PendingItem, "id" | "createdAt" | "status">[]): void {
-  if (items.length === 0) return;
-  const file = readPendingFile();
-  const seen = new Set(file.items.filter((x) => x.status === "pending").map((x) => `${x.type}:${norm(x.label)}`));
-  for (const it of items) {
-    const key = `${it.type}:${norm(it.label)}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    file.items.push({
-      ...it,
-      id: crypto.randomUUID(),
-      createdAt: new Date().toISOString(),
-      status: "pending",
-    });
-  }
-  writeRaw("pending-additions.json", file);
-}
-
 function norm(s: string): string {
   return s.toLowerCase().normalize("NFKD").replace(/\s+/g, " ").trim();
 }
 
-export function listPending(): PendingItem[] {
-  return readPendingFile().items.filter((x) => x.status === "pending");
+export async function appendPendingBatch(
+  items: Omit<PendingItem, "id" | "createdAt" | "status">[],
+): Promise<void> {
+  if (items.length === 0) return;
+  const pending = await prismaApp.libraryPending.findMany({ where: { status: "pending" } });
+  const seen = new Set(pending.map((x) => `${x.type}:${norm(x.label)}`));
+  for (const it of items) {
+    const key = `${it.type}:${norm(it.label)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    await prismaApp.libraryPending.create({
+      data: {
+        id: crypto.randomUUID(),
+        type: it.type,
+        label: it.label,
+        detailVi: it.detailVi,
+        jsonSuggestion: it.jsonSuggestion as object,
+        appId: it.appId,
+        gameName: it.gameName,
+        status: "pending",
+      },
+    });
+  }
 }
 
-export function resolvePending(id: string): boolean {
-  const file = readPendingFile();
-  const idx = file.items.findIndex((x) => x.id === id);
-  if (idx < 0) return false;
-  file.items[idx]!.status = "merged";
-  writeRaw("pending-additions.json", file);
+export async function listPending(): Promise<PendingItem[]> {
+  const rows = await prismaApp.libraryPending.findMany({
+    where: { status: "pending" },
+    orderBy: { createdAt: "desc" },
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    type: r.type,
+    label: r.label,
+    detailVi: r.detailVi,
+    jsonSuggestion: r.jsonSuggestion as Record<string, unknown>,
+    appId: r.appId,
+    gameName: r.gameName,
+    createdAt: r.createdAt.toISOString(),
+    status: r.status as "pending" | "merged",
+  }));
+}
+
+export async function resolvePending(id: string): Promise<boolean> {
+  const row = await prismaApp.libraryPending.findUnique({ where: { id } });
+  if (!row) return false;
+  await prismaApp.libraryPending.update({ where: { id }, data: { status: "merged" } });
   return true;
 }
 
-export function deletePending(id: string): boolean {
-  const file = readPendingFile();
-  const before = file.items.length;
-  file.items = file.items.filter((x) => x.id !== id);
-  if (file.items.length === before) return false;
-  writeRaw("pending-additions.json", file);
-  return true;
+export async function deletePending(id: string): Promise<boolean> {
+  try {
+    await prismaApp.libraryPending.delete({ where: { id } });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-/** Thêm entry developer/publisher vào studio-tiers.json (chỉ cần chỉnh score sau). */
-export function appendStudioTierEntry(input: { names: string[]; score: number; tier?: string }): void {
+export async function appendStudioTierEntry(
+  input: { names: string[]; score: number; tier?: string; roles?: string[] },
+  updatedBy?: string,
+): Promise<void> {
   const names = input.names.map((n) => n.trim()).filter(Boolean);
   if (names.length === 0) throw new Error("names required");
-  const data = readStudioForAppend();
-  if (!data.entries) data.entries = [];
-  data.entries.push({
-    names,
-    score: input.score,
-    tier: input.tier ?? "custom",
-    roles: ["developer"],
-  });
-  writeRaw("studio-tiers.json", data);
+  if (!Number.isFinite(input.score)) throw new Error("score must be a number");
+  await appendStudioTierEntryLocal(
+    {
+      names,
+      score: input.score,
+      tier: input.tier,
+    },
+    updatedBy,
+  );
+}
+
+function splitKeywords(s: string): string[] {
+  return s
+    .split(/[,，、]/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+/** Append one row via API — persists immediately without full-document PUT. */
+export async function appendLibraryEntry(
+  fileId: LibraryFileId,
+  body: Record<string, unknown>,
+  updatedBy?: string,
+): Promise<void> {
+  if (fileId === "pending-additions.json") {
+    throw new Error("Use pending API for pending additions");
+  }
+
+  switch (fileId) {
+    case "studio-tiers.json": {
+      const rawNames = body.names;
+      const names = Array.isArray(rawNames)
+        ? rawNames.map(String)
+        : typeof body.name === "string"
+          ? [body.name]
+          : [];
+      const score = typeof body.score === "number" ? body.score : Number(body.score);
+      if (!Number.isFinite(score)) throw new Error("score is required");
+      const roles =
+        typeof body.roles === "string"
+          ? body.roles.split(/[,，、]/).map((r) => r.trim()).filter(Boolean)
+          : Array.isArray(body.roles)
+            ? body.roles.map(String)
+            : undefined;
+      await appendStudioTierEntryLocal(
+        {
+          names,
+          score,
+          tier: typeof body.tier === "string" ? body.tier : undefined,
+          roles,
+        },
+        updatedBy,
+      );
+      return;
+    }
+    case "genre-tiers.json": {
+      const tier = typeof body.tier === "string" ? body.tier.trim() : "";
+      if (!tier) throw new Error("tier is required");
+      const kw = splitKeywords(
+        typeof body.keywords === "string"
+          ? body.keywords
+          : typeof body.keyword === "string"
+            ? body.keyword
+            : "",
+      );
+      if (kw.length === 0) throw new Error("keyword or keywords is required");
+      await appendGenreTagKeywords(kw, tier, updatedBy);
+      return;
+    }
+    case "ip-theme-tiers.json":
+    case "system-requirement-tiers.json":
+    case "art-style-keywords.json": {
+      const score = typeof body.score === "number" ? body.score : Number(body.score);
+      if (!Number.isFinite(score)) throw new Error("score is required");
+      const kw = splitKeywords(
+        typeof body.keywords === "string"
+          ? body.keywords
+          : typeof body.keyword === "string"
+            ? body.keyword
+            : "",
+      );
+      if (kw.length === 0) throw new Error("keyword or keywords is required");
+      await appendKeywordPatternLib(fileId, kw, score, updatedBy);
+      return;
+    }
+    case "game-size-tiers.json": {
+      const maxMb = typeof body.maxMb === "number" ? body.maxMb : Number(body.maxMb);
+      const score = typeof body.score === "number" ? body.score : Number(body.score);
+      if (!Number.isFinite(maxMb)) throw new Error("maxMb is required");
+      if (!Number.isFinite(score)) throw new Error("score is required");
+      const label = typeof body.label === "string" ? body.label : `≤${maxMb} MB`;
+      await appendGameSizeRule(maxMb, score, label, updatedBy);
+      return;
+    }
+    case "update-cycle-tiers.json": {
+      const maxDays =
+        typeof body.maxDaysSinceUpdate === "number"
+          ? body.maxDaysSinceUpdate
+          : Number(body.maxDaysSinceUpdate);
+      const score = typeof body.score === "number" ? body.score : Number(body.score);
+      if (!Number.isFinite(maxDays)) throw new Error("maxDaysSinceUpdate is required");
+      if (!Number.isFinite(score)) throw new Error("score is required");
+      const label = typeof body.label === "string" ? body.label : `≤${maxDays}d`;
+      await appendUpdateCycleRule(maxDays, score, label, updatedBy);
+      return;
+    }
+    case "community-size-tiers.json": {
+      const minFans = typeof body.minFans === "number" ? body.minFans : Number(body.minFans);
+      const score = typeof body.score === "number" ? body.score : Number(body.score);
+      if (!Number.isFinite(minFans)) throw new Error("minFans is required");
+      if (!Number.isFinite(score)) throw new Error("score is required");
+      await appendCommunityFanRule(minFans, score, updatedBy);
+      return;
+    }
+    default:
+      throw new Error(`Append not supported for ${fileId}`);
+  }
 }
 
 export function isLibraryFileId(id: string): id is LibraryFileId {
   return (LIBRARY_FILES as readonly string[]).includes(id);
 }
 
-export function mergePendingIntoLibrary(id: string, body: MergePendingBody): void {
-  const file = readPendingFile();
-  const idx = file.items.findIndex((x) => x.id === id && x.status === "pending");
-  if (idx < 0) throw new Error("Pending not found or already merged");
-  const item = file.items[idx]!;
-  applyPendingToLibraryFiles(
-    { type: item.type, label: item.label, jsonSuggestion: item.jsonSuggestion as Record<string, unknown> },
+export async function mergePendingIntoLibrary(
+  id: string,
+  body: MergePendingBody,
+  updatedBy?: string,
+): Promise<void> {
+  const row = await prismaApp.libraryPending.findUnique({ where: { id } });
+  if (!row || row.status !== "pending") throw new Error("Pending not found or already merged");
+  await applyPendingToLibraryFiles(
+    { type: row.type, label: row.label, jsonSuggestion: row.jsonSuggestion as Record<string, unknown> },
     body,
+    updatedBy,
   );
-  file.items[idx]!.status = "merged";
-  writeRaw("pending-additions.json", file);
+  await prismaApp.libraryPending.update({ where: { id }, data: { status: "merged" } });
 }
