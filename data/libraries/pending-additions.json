@@ -1,0 +1,498 @@
+{
+  "version": 1,
+  "items": [
+    {
+      "type": "genre_tags",
+      "label": "休闲",
+      "detailVi": "Chưa khớp tag/genre trong genre-tiers.json. Thêm pattern vào \"tagPatterns\" hoặc để mặc định LLM (điểm gốc ~50).",
+      "jsonSuggestion": {
+        "hint": "Thêm một object vào tagPatterns trong genre-tiers.json",
+        "example": {
+          "match": [
+            "休闲"
+          ],
+          "tier": "B"
+        }
+      },
+      "appId": 845749,
+      "gameName": "纸嫁衣9",
+      "id": "53bf1cc3-8f26-4b80-8ec7-977c9d113b87",
+      "createdAt": "2026-05-04T06:46:51.663Z",
+      "status": "merged"
+    },
+    {
+      "type": "studio",
+      "label": "西木木",
+      "detailVi": "Developer \"西木木\" chưa có trong studio-tiers.json. Thêm entry và chỉnh score (ví dụ 55).",
+      "jsonSuggestion": {
+        "names": [
+          "西木木"
+        ],
+        "score": 55,
+        "tier": "custom",
+        "roles": [
+          "developer"
+        ]
+      },
+      "appId": 813133,
+      "gameName": "善良都市",
+      "id": "d5059897-f5c8-4e1e-b935-fcbdd9015ad2",
+      "createdAt": "2026-05-04T10:06:27.388Z",
+      "status": "merged"
+    },
+    {
+      "type": "studio",
+      "label": "西木木",
+      "detailVi": "Developer name is not listed in studio-tiers.json. Merge adds an entry; adjust score if needed (example baseline 55).",
+      "jsonSuggestion": {
+        "names": [
+          "西木木"
+        ],
+        "score": 55,
+        "tier": "custom",
+        "roles": [
+          "developer"
+        ]
+      },
+      "appId": 813133,
+      "gameName": "善良都市",
+      "id": "5ac31e54-9eda-4987-8f08-5458754d8294",
+      "createdAt": "2026-05-04T10:42:25.767Z",
+      "status": "merged"
+    },
+    {
+      "type": "studio",
+      "label": "火联社",
+      "detailVi": "Developer name is not listed in studio-tiers.json. Merge adds an entry; adjust score if needed (example baseline 55).",
+      "jsonSuggestion": {
+        "names": [
+          "火联社"
+        ],
+        "score": 55,
+        "tier": "custom",
+        "roles": [
+          "developer"
+        ]
+      },
+      "appId": 218283,
+      "gameName": "火柴人联盟3",
+      "id": "1bc21d78-3b47-49fb-ba61-c52a08281928",
+      "createdAt": "2026-05-05T03:29:03.109Z",
+      "status": "merged"
+    },
+    {
+      "type": "studio",
+      "label": "鸿盟工作室",
+      "detailVi": "Developer name is not listed in studio-tiers.json. Merge adds an entry; adjust score if needed (example baseline 55).",
+      "jsonSuggestion": {
+        "names": [
+          "鸿盟工作室"
+        ],
+        "score": 55,
+        "tier": "custom",
+        "roles": [
+          "developer"
+        ]
+      },
+      "appId": 833986,
+      "gameName": "吞噬星空",
+      "id": "b24d779e-9ecf-4c47-b45f-66ce6f24980c",
+      "createdAt": "2026-05-05T07:01:35.269Z",
+      "status": "merged"
+    },
+    {
+      "type": "studio",
+      "label": "黑洞游戏工作室",
+      "detailVi": "Developer name is not listed in studio-tiers.json. Merge adds an entry; adjust score if needed (example baseline 55).",
+      "jsonSuggestion": {
+        "names": [
+          "黑洞游戏工作室"
+        ],
+        "score": 55,
+        "tier": "custom",
+        "roles": [
+          "developer"
+        ]
+      },
+      "appId": 835980,
+      "gameName": "来自黑洞的旅人",
+      "id": "26527cd2-3557-4dd0-abcc-3cd2d52fbb26",
+      "createdAt": "2026-05-05T07:43:46.345Z",
+      "status": "pending"
+    },
+    {
+      "type": "studio",
+      "label": "冬日煮米游戏制作组",
+      "detailVi": "Developer name is not listed in studio-tiers.json. Merge adds an entry; adjust score if needed (example baseline 55).",
+      "jsonSuggestion": {
+        "names": [
+          "冬日煮米游戏制作组"
+        ],
+        "score": 55,
+        "tier": "custom",
+        "roles": [
+          "developer"
+        ]
+      },
+      "appId": 833213,
+      "gameName": "纤维",
+      "id": "5759fd1c-d0e6-427a-b596-d6349f6963fd",
+      "createdAt": "2026-05-05T07:56:12.947Z",
+      "status": "pending"
+    },
+    {
+      "type": "studio",
+      "label": "巨人网络",
+      "detailVi": "Developer name is not listed in studio-tiers.json. Merge adds an entry; adjust score if needed (example baseline 55).",
+      "jsonSuggestion": {
+        "names": [
+          "巨人网络"
+        ],
+        "score": 55,
+        "tier": "custom",
+        "roles": [
+          "developer"
+        ]
+      },
+      "appId": 714123,
+      "gameName": "超自然行动组",
+      "id": "831af77b-ee1d-433f-8143-b57da665bff2",
+      "createdAt": "2026-05-06T03:36:03.090Z",
+      "status": "pending"
+    },
+    {
+      "type": "studio",
+      "label": "新闻消息",
+      "detailVi": "Developer name is not listed in studio-tiers.json. Merge adds an entry; adjust score if needed (example baseline 55).",
+      "jsonSuggestion": {
+        "names": [
+          "新闻消息"
+        ],
+        "score": 55,
+        "tier": "custom",
+        "roles": [
+          "developer"
+        ]
+      },
+      "appId": 789815,
+      "gameName": "荒野大镖客：救赎",
+      "id": "56869771-eb68-433d-9cd7-0c5ef8d063d9",
+      "createdAt": "2026-05-06T04:29:24.608Z",
+      "status": "pending"
+    },
+    {
+      "type": "studio",
+      "label": "Trickjump Games Ltd",
+      "detailVi": "Developer name is not listed in studio-tiers.json. Merge adds an entry; adjust score if needed (example baseline 55).",
+      "jsonSuggestion": {
+        "names": [
+          "Trickjump Games Ltd"
+        ],
+        "score": 55,
+        "tier": "custom",
+        "roles": [
+          "developer"
+        ]
+      },
+      "appId": 3242950,
+      "gameName": "Outworld Station",
+      "id": "7fe33439-6b77-4c23-ac77-9c30380a20a5",
+      "createdAt": "2026-05-06T10:22:08.724Z",
+      "status": "merged"
+    },
+    {
+      "type": "studio",
+      "label": "MINTROCKET",
+      "detailVi": "Developer name is not listed in studio-tiers.json. Merge adds an entry; adjust score if needed (example baseline 55).",
+      "jsonSuggestion": {
+        "names": [
+          "MINTROCKET"
+        ],
+        "score": 55,
+        "tier": "custom",
+        "roles": [
+          "developer"
+        ]
+      },
+      "appId": 1868140,
+      "gameName": "DAVE THE DIVER",
+      "id": "7ad63efd-8d52-4ede-a3b4-e7516c752ee2",
+      "createdAt": "2026-05-06T10:25:24.596Z",
+      "status": "merged"
+    },
+    {
+      "type": "studio",
+      "label": "玛奇阿朵互娱科技",
+      "detailVi": "Developer name is not listed in studio-tiers.json. Merge adds an entry; adjust score if needed (example baseline 55).",
+      "jsonSuggestion": {
+        "names": [
+          "玛奇阿朵互娱科技"
+        ],
+        "score": 55,
+        "tier": "custom",
+        "roles": [
+          "developer"
+        ]
+      },
+      "appId": 3412900,
+      "gameName": "The Three Kingdoms: Rebirth",
+      "id": "e7dc05cd-0424-4f71-a0e0-f2854d700093",
+      "createdAt": "2026-05-06T10:28:22.575Z",
+      "status": "pending"
+    },
+    {
+      "type": "studio",
+      "label": "Pearl Abyss",
+      "detailVi": "Developer name is not listed in studio-tiers.json. Merge adds an entry; adjust score if needed (example baseline 55).",
+      "jsonSuggestion": {
+        "names": [
+          "Pearl Abyss"
+        ],
+        "score": 55,
+        "tier": "custom",
+        "roles": [
+          "developer"
+        ]
+      },
+      "appId": 3321460,
+      "gameName": "Crimson Desert",
+      "id": "71852fc8-cc29-482c-9422-bd6f6d64e7ac",
+      "createdAt": "2026-05-06T11:04:33.488Z",
+      "status": "pending"
+    },
+    {
+      "type": "studio",
+      "label": "Larian Studios",
+      "detailVi": "Developer name is not listed in studio-tiers.json. Merge adds an entry; adjust score if needed (example baseline 55).",
+      "jsonSuggestion": {
+        "names": [
+          "Larian Studios"
+        ],
+        "score": 55,
+        "tier": "custom",
+        "roles": [
+          "developer"
+        ]
+      },
+      "appId": 1086940,
+      "gameName": "Baldur's Gate 3",
+      "id": "d051d713-1266-4531-9a2b-6a759206940b",
+      "createdAt": "2026-05-06T11:10:26.080Z",
+      "status": "merged"
+    },
+    {
+      "type": "studio",
+      "label": "Hypnohead",
+      "detailVi": "Developer name is not listed in studio-tiers.json. Merge adds an entry; adjust score if needed (example baseline 55).",
+      "jsonSuggestion": {
+        "names": [
+          "Hypnohead"
+        ],
+        "score": 55,
+        "tier": "custom",
+        "roles": [
+          "developer"
+        ]
+      },
+      "appId": 2753900,
+      "gameName": "The King is Watching",
+      "id": "ec241448-5688-406d-971b-b00b63d05904",
+      "createdAt": "2026-05-06T11:19:49.967Z",
+      "status": "pending"
+    },
+    {
+      "type": "studio",
+      "label": "百奥游戏",
+      "detailVi": "Developer name is not listed in studio-tiers.json. Merge adds an entry; adjust score if needed (example baseline 55).",
+      "jsonSuggestion": {
+        "names": [
+          "百奥游戏"
+        ],
+        "score": 55,
+        "tier": "custom",
+        "roles": [
+          "developer"
+        ]
+      },
+      "appId": 748842,
+      "gameName": "乱涂彩世界",
+      "id": "2d283170-a1a7-4170-b67d-6129db4d4472",
+      "createdAt": "2026-05-06T11:31:30.795Z",
+      "status": "pending"
+    },
+    {
+      "type": "studio",
+      "label": "Hotta  Studio",
+      "detailVi": "Developer name is not listed in studio-tiers.json. Merge adds an entry; adjust score if needed (example baseline 55).",
+      "jsonSuggestion": {
+        "names": [
+          "Hotta  Studio"
+        ],
+        "score": 55,
+        "tier": "custom",
+        "roles": [
+          "developer"
+        ]
+      },
+      "appId": 714119,
+      "gameName": "异环",
+      "id": "08be336e-7637-4fb5-83e7-ae46122a7d53",
+      "createdAt": "2026-05-07T09:23:38.898Z",
+      "status": "merged"
+    },
+    {
+      "type": "studio",
+      "label": "Com2uS",
+      "detailVi": "Developer name is not listed in studio-tiers.json. Merge adds an entry; adjust score if needed (example baseline 55).",
+      "jsonSuggestion": {
+        "names": [
+          "Com2uS"
+        ],
+        "score": 55,
+        "tier": "custom",
+        "roles": [
+          "developer"
+        ]
+      },
+      "appId": 2426960,
+      "gameName": "Summoners War",
+      "id": "020b634b-681f-45c2-bda0-b9dfce46547b",
+      "createdAt": "2026-05-13T03:19:36.587Z",
+      "status": "pending"
+    },
+    {
+      "type": "studio",
+      "label": "广州灵犀互动娱乐有限公司",
+      "detailVi": "Developer name is not listed in studio-tiers.json. Merge adds an entry; adjust score if needed (example baseline 55).",
+      "jsonSuggestion": {
+        "names": [
+          "广州灵犀互动娱乐有限公司"
+        ],
+        "score": 55,
+        "tier": "custom",
+        "roles": [
+          "developer"
+        ]
+      },
+      "appId": 774700,
+      "gameName": "宗师之上",
+      "id": "e8aed668-b757-41e9-8c69-8190e476cea6",
+      "createdAt": "2026-05-13T03:28:03.693Z",
+      "status": "merged"
+    },
+    {
+      "type": "studio",
+      "label": "宇宙发条",
+      "detailVi": "Developer name is not listed in studio-tiers.json. Merge adds an entry; adjust score if needed (example baseline 55).",
+      "jsonSuggestion": {
+        "names": [
+          "宇宙发条"
+        ],
+        "score": 55,
+        "tier": "custom",
+        "roles": [
+          "developer"
+        ]
+      },
+      "appId": 732739,
+      "gameName": "海兽餐厅",
+      "id": "5a1a3eab-447f-43bb-abe6-b9e4c67c44f2",
+      "createdAt": "2026-05-14T11:09:28.680Z",
+      "status": "pending"
+    },
+    {
+      "type": "studio",
+      "label": "心动",
+      "detailVi": "Developer name is not listed in studio-tiers.json. Merge adds an entry; adjust score if needed (example baseline 55).",
+      "jsonSuggestion": {
+        "names": [
+          "心动"
+        ],
+        "score": 55,
+        "tier": "custom",
+        "roles": [
+          "developer"
+        ]
+      },
+      "appId": 720041,
+      "gameName": "潜水员戴夫",
+      "id": "9662e96d-d735-43b1-8149-ac45a3914bce",
+      "createdAt": "2026-05-14T11:59:56.922Z",
+      "status": "pending"
+    },
+    {
+      "type": "studio",
+      "label": "超神网络",
+      "detailVi": "Developer name is not listed in studio-tiers.json. Merge adds an entry; adjust score if needed (example baseline 55).",
+      "jsonSuggestion": {
+        "names": [
+          "超神网络"
+        ],
+        "score": 55,
+        "tier": "custom",
+        "roles": [
+          "developer"
+        ]
+      },
+      "appId": 833694,
+      "gameName": "修仙宗门搜打撤",
+      "id": "2afd724f-b7ac-4356-9779-cba0070e5c5d",
+      "createdAt": "2026-05-15T04:13:48.995Z",
+      "status": "pending"
+    },
+    {
+      "type": "studio",
+      "label": "乐元素",
+      "detailVi": "Developer name is not listed in studio-tiers.json. Merge adds an entry; adjust score if needed (example baseline 55).",
+      "jsonSuggestion": {
+        "names": [
+          "乐元素"
+        ],
+        "score": 55,
+        "tier": "custom",
+        "roles": [
+          "developer"
+        ]
+      },
+      "appId": 754910,
+      "gameName": "白银之城",
+      "id": "cf4da639-716f-441c-8aed-102eaf85c749",
+      "createdAt": "2026-05-20T07:29:14.345Z",
+      "status": "pending"
+    },
+    {
+      "type": "studio",
+      "label": "大千互娱",
+      "detailVi": "Developer name is not listed in studio-tiers.json. Merge adds an entry; adjust score if needed (example baseline 55).",
+      "jsonSuggestion": {
+        "names": [
+          "大千互娱"
+        ],
+        "score": 55,
+        "tier": "custom",
+        "roles": [
+          "developer"
+        ]
+      },
+      "appId": 825161,
+      "gameName": "飘流幻境新世界",
+      "id": "731002bc-6183-4c7a-a770-61c6ae0982a3",
+      "createdAt": "2026-05-21T04:23:09.497Z",
+      "status": "pending"
+    },
+    {
+      "type": "community_signal",
+      "label": "fans 7171",
+      "detailVi": "fans_count=7171 did not map to community-size-tiers.json (minFans tiers).",
+      "jsonSuggestion": {
+        "hint": "data/libraries/community-size-tiers.json fanTierRules",
+        "minFans": 7171
+      },
+      "appId": 825161,
+      "gameName": "飘流幻境新世界",
+      "id": "9a77b579-b523-4a8e-a387-46e3f9d85101",
+      "createdAt": "2026-05-21T04:23:09.497Z",
+      "status": "pending"
+    }
+  ]
+}

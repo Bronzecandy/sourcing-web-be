@@ -1,0 +1,583 @@
+{
+  "version": 7,
+  "genrePackDefault": "base",
+  "parts": [
+    { "id": "overview", "labelVi": "Tổng quan", "weight": 0.2 },
+    { "id": "gameplay", "labelVi": "Gameplay", "weight": 0.24 },
+    { "id": "presentation", "labelVi": "Hình ảnh & nội dung", "weight": 0.12 },
+    { "id": "monetization", "labelVi": "Monetization & Event", "weight": 0.1 },
+    { "id": "socialization", "labelVi": "Social & cộng đồng", "weight": 0.1 },
+    { "id": "liveops", "labelVi": "LiveOps & hiệu năng", "weight": 0.1 },
+    { "id": "genre_specific", "labelVi": "Theo thể loại", "weight": 0.14 },
+    { "id": "red_flag", "labelVi": "Red Flag", "weight": 0 }
+  ],
+  "criteria": [
+    {
+      "id": "overview.genre",
+      "partId": "overview",
+      "elementVi": "Thể loại / tag",
+      "input": "page_lib",
+      "weightInPart": 0.185,
+      "genrePack": null,
+      "promptHint": "Genre tier từ genre-tiers.json (match tiếng Anh); tag DB map sang EN qua tag-translator."
+    },
+    {
+      "id": "overview.developer",
+      "partId": "overview",
+      "elementVi": "Developer",
+      "input": "page_lib",
+      "weightInPart": 0.185,
+      "genrePack": null,
+      "promptHint": "Tên dev/publisher từ snapshot DB (raw TapTap); khi không khớp studio-tiers vẫn phải cho điểm uy tín/research có kiểm soát — không để trống chỉ vì không có trong lib."
+    },
+    {
+      "id": "overview.game_size",
+      "partId": "overview",
+      "elementVi": "Dung lượng cài (MB)",
+      "input": "page_lib",
+      "weightInPart": 0.13,
+      "genrePack": null,
+      "promptHint": "Ô ước lượng MB từ snapshot package size / lib."
+    },
+    {
+      "id": "overview.ip_theme",
+      "partId": "overview",
+      "elementVi": "IP / theme",
+      "input": "page_lib",
+      "weightInPart": 0.185,
+      "genrePack": null,
+      "promptHint": "Keyword IP / chủ đề từ title, tag, mô tả trong snapshot — có thể thêm khớp trong ip-theme-tiers.json."
+    },
+    {
+      "id": "overview.system_requirement",
+      "partId": "overview",
+      "elementVi": "Yêu cầu thiết bị / min-spec",
+      "input": "page_lib",
+      "weightInPart": 0.185,
+      "genrePack": null,
+      "promptHint": "Keyword cấu hình trong snapshot — hoặc lib system-requirement-tiers.json."
+    },
+    {
+      "id": "overview.art_style",
+      "partId": "overview",
+      "elementVi": "Phong cách đồ họa",
+      "input": "page_lib",
+      "weightInPart": 0.13,
+      "genrePack": null,
+      "promptHint": "2D/3D/pixel v.v. từ mô tả snapshot — lib art-style-keywords."
+    },
+    {
+      "id": "gameplay.core_sentiment",
+      "partId": "gameplay",
+      "elementVi": "Lõi gameplay & cảm nhận chung",
+      "input": "reviews",
+      "weightInPart": 0.19231,
+      "genrePack": null,
+      "promptHint": "Cuốn/chán, hay/nhạt, vòng lặp cốt lõi."
+    },
+    {
+      "id": "gameplay.onboarding",
+      "partId": "gameplay",
+      "elementVi": "Onboarding / vào game",
+      "input": "reviews",
+      "weightInPart": 0.134615,
+      "genrePack": null,
+      "promptHint": "Tutorial, dễ hiểu, vào game nhanh hay khó."
+    },
+    {
+      "id": "gameplay.late_game",
+      "partId": "gameplay",
+      "elementVi": "Late game / endgame & giữ chân",
+      "input": "reviews",
+      "weightInPart": 0.134615,
+      "genrePack": null,
+      "promptHint": "Nội dung cuối game có hấp dẫn, có giữ chân lâu không — tách với progression sớm."
+    },
+    {
+      "id": "gameplay.difficulty",
+      "partId": "gameplay",
+      "elementVi": "Độ khó & cân bằng",
+      "input": "reviews",
+      "weightInPart": 0.134615,
+      "genrePack": null,
+      "promptHint": "Quá dễ/quá khó, độ khó cảm nhận."
+    },
+    {
+      "id": "gameplay.progression",
+      "partId": "gameplay",
+      "elementVi": "Tiến trình / tiến độ",
+      "input": "reviews",
+      "weightInPart": 0.134615,
+      "genrePack": null,
+      "promptHint": "Kẹt tiến độ, grind, cảm giác tiến triển."
+    },
+    {
+      "id": "gameplay.combat_loop",
+      "partId": "gameplay",
+      "elementVi": "Combat / loop chính (theo thể loại)",
+      "input": "reviews",
+      "weightInPart": 0.134615,
+      "genrePack": null,
+      "promptHint": "Chiến đấu, skill, nhịp trận đấu hoặc hoạt động cốt lõi của thể loại."
+    },
+    {
+      "id": "presentation.graphics",
+      "partId": "presentation",
+      "elementVi": "Đồ họa / chất lượng hình ảnh",
+      "input": "reviews",
+      "weightInPart": 0.25,
+      "genrePack": null,
+      "promptHint": "Art, model, hiệu ứng, tối ưu đồ họa."
+    },
+    {
+      "id": "presentation.story",
+      "partId": "presentation",
+      "elementVi": "Cốt truyện / lore trong review",
+      "input": "reviews",
+      "weightInPart": 0.25,
+      "genrePack": null,
+      "promptHint": "Chữ, lore, mạch truyện theo cảm nhận người chơi."
+    },
+    {
+      "id": "presentation.audio",
+      "partId": "presentation",
+      "elementVi": "Âm thanh / nhạc / voice",
+      "input": "reviews",
+      "weightInPart": 0.25,
+      "genrePack": null,
+      "promptHint": "OST, SE, lồng tiếng."
+    },
+    {
+      "id": "presentation.ux_ui",
+      "partId": "presentation",
+      "elementVi": "UX / UI",
+      "input": "reviews",
+      "weightInPart": 0.25,
+      "genrePack": null,
+      "promptHint": "Giao diện, tiện dụng, rối/mượt."
+    },
+    {
+      "id": "monetization.sentiment",
+      "partId": "monetization",
+      "elementVi": "Cảm nhận monetization (P2W, giá)",
+      "input": "reviews",
+      "weightInPart": 0.588,
+      "genrePack": null,
+      "promptHint": "Nạp, P2W, giá trị mua."
+    },
+    {
+      "id": "monetization.event",
+      "partId": "monetization",
+      "elementVi": "Sự kiện & hoạt động",
+      "input": "reviews",
+      "weightInPart": 0.412,
+      "genrePack": null,
+      "promptHint": "Sự kiện hay/chán, mật độ."
+    },
+    {
+      "id": "socialization.community_size",
+      "partId": "socialization",
+      "elementVi": "Quy mô fan / cộng đồng",
+      "input": "page_lib",
+      "weightInPart": 0.417,
+      "genrePack": null,
+      "promptHint": "fans_count từ snapshot (lib community-size-tiers) — tách với tính năng social trong game."
+    },
+    {
+      "id": "socialization.social_features",
+      "partId": "socialization",
+      "elementVi": "Tính năng social trong game",
+      "input": "reviews",
+      "weightInPart": 0.583,
+      "genrePack": null,
+      "promptHint": "Guild, party, chat, co-op — chỉ tính năng trong game."
+    },
+    {
+      "id": "liveops.content_update_cycle",
+      "partId": "liveops",
+      "elementVi": "Chu kỳ cập nhật nội dung",
+      "input": "page_lib",
+      "weightInPart": 0.294,
+      "genrePack": null,
+      "promptHint": "Theo update_time trong snapshot so với lib update-cycle-tiers."
+    },
+    {
+      "id": "liveops.activeness",
+      "partId": "liveops",
+      "elementVi": "LiveOps / bản vá / CS (cảm nhận review)",
+      "input": "reviews",
+      "weightInPart": 0.294,
+      "genrePack": null,
+      "promptHint": "Cập nhật, phản hồi, lắng nghe."
+    },
+    {
+      "id": "liveops.hack",
+      "partId": "liveops",
+      "elementVi": "Hack / cheat",
+      "input": "reviews",
+      "weightInPart": 0.206,
+      "genrePack": null,
+      "promptHint": "Phàn nàn hack, cheat."
+    },
+    {
+      "id": "liveops.performance",
+      "partId": "liveops",
+      "elementVi": "Hiệu năng thiết bị",
+      "input": "reviews",
+      "weightInPart": 0.206,
+      "genrePack": null,
+      "promptHint": "Giật, lag, crash, nóng máy."
+    },
+    {
+      "id": "other.content_depth",
+      "partId": "gameplay",
+      "elementVi": "Độ sâu nội dung / Endgame",
+      "input": "reviews",
+      "weightInPart": 0.134615,
+      "genrePack": null,
+      "promptHint": "Nội dung dài hơi, endgame, lặp lại."
+    },
+    {
+      "id": "genre_specific.base_placeholder",
+      "partId": "genre_specific",
+      "elementVi": "Tiêu chí đặc thù (gói mặc định)",
+      "input": "reviews",
+      "weightInPart": 1,
+      "genrePack": "base",
+      "promptHint": "Khi chưa suy ra pack thể loại; tổng hợp cảm nhận theo thể loại từ review."
+    },
+    {
+      "id": "genre_specific.card_rpg_pay_pressure",
+      "partId": "genre_specific",
+      "elementVi": "Áp lực nạp / pay & banner (Card RPG)",
+      "input": "reviews",
+      "weightInPart": 0.20833,
+      "genrePack": "cardRpg",
+      "promptHint": "Gói nạp, P2W, áp lực quay banner, dân cày vs nạp — sentiment từ review."
+    },
+    {
+      "id": "genre_specific.card_rpg_tactics",
+      "partId": "genre_specific",
+      "elementVi": "Tính chiến thuật & cân bằng thẻ/đội hình (Card RPG)",
+      "input": "reviews",
+      "weightInPart": 0.20833,
+      "genrePack": "cardRpg",
+      "promptHint": "Synergy, meta, đa dạng đội hình, depth chiến thuật; không sót deck build nếu review nhắc."
+    },
+    {
+      "id": "genre_specific.card_rpg_gacha",
+      "partId": "genre_specific",
+      "elementVi": "Gacha rate & pity (Card RPG)",
+      "input": "reviews",
+      "weightInPart": 0.14584,
+      "genrePack": "cardRpg",
+      "promptHint": "Rate, pity, cảm giác công bằng roll — trích từ review."
+    },
+    {
+      "id": "genre_specific.card_rpg_sweep_qol",
+      "partId": "genre_specific",
+      "elementVi": "Sweep / auto / QoL tiến độ (Card RPG)",
+      "input": "reviews",
+      "weightInPart": 0.14584,
+      "genrePack": "cardRpg",
+      "promptHint": "Quét ải, skip, tiện daily — tiết kiệm thời gian hay phiền."
+    },
+    {
+      "id": "genre_specific.card_rpg_grind_wall",
+      "partId": "genre_specific",
+      "elementVi": "Grind wall & nạp ẩn (Card RPG)",
+      "input": "reviews",
+      "weightInPart": 0.14584,
+      "genrePack": "cardRpg",
+      "promptHint": "Cày quá nặng, tường grind, paywall cảm nhận."
+    },
+    {
+      "id": "genre_specific.card_rpg_secondary_loop",
+      "partId": "genre_specific",
+      "elementVi": "Secondary loop / nội dung ngoài loop chính (Card RPG)",
+      "input": "reviews",
+      "weightInPart": 0.14582,
+      "genrePack": "cardRpg",
+      "promptHint": "Hoạt động phụ, side content, mini-game — có hay không theo review."
+    },
+    {
+      "id": "genre_specific.shooter_rank_matchmaking",
+      "partId": "genre_specific",
+      "elementVi": "Rank & matchmaking (Shooter)",
+      "input": "reviews",
+      "weightInPart": 0.163,
+      "genrePack": "shooter",
+      "promptHint": "Công bằng rank, chờ trận, cân team — sentiment review."
+    },
+    {
+      "id": "genre_specific.shooter_gun_feeling",
+      "partId": "genre_specific",
+      "elementVi": "Gun feeling / gunplay (Shooter)",
+      "input": "reviews",
+      "weightInPart": 0.163,
+      "genrePack": "shooter",
+      "promptHint": "Độ nặng súng, recoil, hit feedback, netcode cảm nhận."
+    },
+    {
+      "id": "genre_specific.shooter_rules_depth",
+      "partId": "genre_specific",
+      "elementVi": "Luật chơi & chiều sâu chiến thuật (Shooter)",
+      "input": "reviews",
+      "weightInPart": 0.163,
+      "genrePack": "shooter",
+      "promptHint": "Mode, objective, depth ngoài ‘chỉ bắn’."
+    },
+    {
+      "id": "genre_specific.shooter_control",
+      "partId": "genre_specific",
+      "elementVi": "Điều khiển / control (Shooter)",
+      "input": "reviews",
+      "weightInPart": 0.163,
+      "genrePack": "shooter",
+      "promptHint": "Cảm giác điều khiển, nhạy, hỗ trợ aim (không thay thế red flag gore)."
+    },
+    {
+      "id": "genre_specific.shooter_modes_maps",
+      "partId": "genre_specific",
+      "elementVi": "Đa dạng map / chế độ (Shooter)",
+      "input": "reviews",
+      "weightInPart": 0.114,
+      "genrePack": "shooter",
+      "promptHint": "Số map, chất lượng mode — so với kỳ vọng thể loại."
+    },
+    {
+      "id": "genre_specific.shooter_weapon_system",
+      "partId": "genre_specific",
+      "elementVi": "Hệ thống vũ khí & meta (Shooter)",
+      "input": "reviews",
+      "weightInPart": 0.114,
+      "genrePack": "shooter",
+      "promptHint": "Đa dạng súng, custom, cân bằng vũ khí."
+    },
+    {
+      "id": "genre_specific.shooter_auto_aim_info",
+      "partId": "genre_specific",
+      "elementVi": "Auto-aim (tham chiếu, Shooter)",
+      "input": "reviews",
+      "weightInPart": 0.024,
+      "genrePack": "shooter",
+      "promptHint": "Chỉ mô tả mức assist theo review — score mang tính thông tin, không ưu tiên như tiêu chí chính."
+    },
+    {
+      "id": "genre_specific.shooter_perspective_info",
+      "partId": "genre_specific",
+      "elementVi": "Góc nhìn FPS/TPS (tham chiếu, Shooter)",
+      "input": "reviews",
+      "weightInPart": 0.024,
+      "genrePack": "shooter",
+      "promptHint": "FPS/TPS/top-down nếu review hoặc ngữ cảnh đề cập."
+    },
+    {
+      "id": "genre_specific.shooter_ttk_info",
+      "partId": "genre_specific",
+      "elementVi": "Time-to-kill (tham chiếu, Shooter)",
+      "input": "reviews",
+      "weightInPart": 0.024,
+      "genrePack": "shooter",
+      "promptHint": "TTK cảm nhận: quá nhanh/chậm theo review."
+    },
+    {
+      "id": "genre_specific.shooter_skill_impact_info",
+      "partId": "genre_specific",
+      "elementVi": "Character/skill impact (tham chiếu, Shooter)",
+      "input": "reviews",
+      "weightInPart": 0.024,
+      "genrePack": "shooter",
+      "promptHint": "Skill/hero ảnh hưởng meta trận đấu — mức độ theo review."
+    },
+    {
+      "id": "genre_specific.shooter_match_duration_info",
+      "partId": "genre_specific",
+      "elementVi": "Thời lượng trận (tham chiếu, Shooter)",
+      "input": "reviews",
+      "weightInPart": 0.024,
+      "genrePack": "shooter",
+      "promptHint": "Độ dài trận trung bình nếu review nhắc."
+    },
+    {
+      "id": "genre_specific.moba_roster",
+      "partId": "genre_specific",
+      "elementVi": "Đa dạng tướng & tần suất ra tướng (MOBA)",
+      "input": "reviews",
+      "weightInPart": 0.16491,
+      "genrePack": "moba",
+      "promptHint": "Số tướng (nếu snapshot/review có), tốc độ meta mới — dùng ngữ cảnh + review."
+    },
+    {
+      "id": "genre_specific.moba_balance",
+      "partId": "genre_specific",
+      "elementVi": "Cân bằng tướng (MOBA)",
+      "input": "reviews",
+      "weightInPart": 0.16491,
+      "genrePack": "moba",
+      "promptHint": "OP/UP, patch, độ công bằng theo sentiment review."
+    },
+    {
+      "id": "genre_specific.moba_tactical_depth",
+      "partId": "genre_specific",
+      "elementVi": "Chiều sâu chiến thuật — trang bị/ngọc/phép (MOBA)",
+      "input": "reviews",
+      "weightInPart": 0.16491,
+      "genrePack": "moba",
+      "promptHint": "Build, item, talent — depth ngoài combat mặt đất."
+    },
+    {
+      "id": "genre_specific.moba_control",
+      "partId": "genre_specific",
+      "elementVi": "Điều khiển / maneuver (MOBA)",
+      "input": "reviews",
+      "weightInPart": 0.16491,
+      "genrePack": "moba",
+      "promptHint": "Skill shot, joystick, độ mượt."
+    },
+    {
+      "id": "genre_specific.moba_rank_matchmaking",
+      "partId": "genre_specific",
+      "elementVi": "Rank & matchmaking (MOBA)",
+      "input": "reviews",
+      "weightInPart": 0.16491,
+      "genrePack": "moba",
+      "promptHint": "Fair rank, queue time, cân đội."
+    },
+    {
+      "id": "genre_specific.moba_mode_diversity",
+      "partId": "genre_specific",
+      "elementVi": "Đa dạng mode (MOBA)",
+      "input": "reviews",
+      "weightInPart": 0.11544,
+      "genrePack": "moba",
+      "promptHint": "Ngoài mode chính còn mode phụ / rotating — sentiment review."
+    },
+    {
+      "id": "genre_specific.moba_match_duration_info",
+      "partId": "genre_specific",
+      "elementVi": "Thời lượng trận (tham chiếu, MOBA)",
+      "input": "reviews",
+      "weightInPart": 0.06,
+      "genrePack": "moba",
+      "promptHint": "Độ dài trận nếu có trong review — thông tin tham chiếu."
+    },
+    {
+      "id": "genre_specific.extraction_economy",
+      "partId": "genre_specific",
+      "elementVi": "Kinh tế in-raid / earning & spending (Extraction)",
+      "input": "reviews",
+      "weightInPart": 0.15385,
+      "genrePack": "extraction",
+      "promptHint": "Inflation, grind tiền, phế liệu, market — theo review."
+    },
+    {
+      "id": "genre_specific.extraction_loot",
+      "partId": "genre_specific",
+      "elementVi": "Loot & tier đồ (Extraction)",
+      "input": "reviews",
+      "weightInPart": 0.15385,
+      "genrePack": "extraction",
+      "promptHint": "Cảm giác loot, fairness team, đa dạng đồ."
+    },
+    {
+      "id": "genre_specific.extraction_emotion",
+      "partId": "genre_specific",
+      "elementVi": "Căng thẳng / emotion run (Extraction)",
+      "input": "reviews",
+      "weightInPart": 0.15384,
+      "genrePack": "extraction",
+      "promptHint": "Hồi hộp, sợ mất đồ, high stakes — không nhầm với gore red flag."
+    },
+    {
+      "id": "genre_specific.extraction_pvp",
+      "partId": "genre_specific",
+      "elementVi": "PvP & công bằng encounter (Extraction)",
+      "input": "reviews",
+      "weightInPart": 0.10769,
+      "genrePack": "extraction",
+      "promptHint": "Third-party, exit camp, fairness PvP."
+    },
+    {
+      "id": "genre_specific.extraction_pve",
+      "partId": "genre_specific",
+      "elementVi": "PvE / boss / AI (Extraction)",
+      "input": "reviews",
+      "weightInPart": 0.10769,
+      "genrePack": "extraction",
+      "promptHint": "Đa dạng PvE, boss, độ khó AI."
+    },
+    {
+      "id": "genre_specific.extraction_rank_matchmaking",
+      "partId": "genre_specific",
+      "elementVi": "Rank & matchmaking (Extraction)",
+      "input": "reviews",
+      "weightInPart": 0.10769,
+      "genrePack": "extraction",
+      "promptHint": "Bracket, MMR, chờ trận — nếu game có."
+    },
+    {
+      "id": "genre_specific.extraction_maps_modes",
+      "partId": "genre_specific",
+      "elementVi": "Map & mode extract (Extraction)",
+      "input": "reviews",
+      "weightInPart": 0.10769,
+      "genrePack": "extraction",
+      "promptHint": "Đa dạng map, điểm evac, mode raid."
+    },
+    {
+      "id": "genre_specific.extraction_secondary_loop",
+      "partId": "genre_specific",
+      "elementVi": "Secondary loop / meta ngoài raid (Extraction)",
+      "input": "reviews",
+      "weightInPart": 0.10769,
+      "genrePack": "extraction",
+      "promptHint": "Hideout, crafting ngoài raid, progression ngoài trận."
+    },
+    {
+      "id": "red_flag.politics",
+      "partId": "red_flag",
+      "elementVi": "Chính trị / chủ quyền / bản đồ nhạy cảm",
+      "input": "reviews",
+      "weightInPart": 0,
+      "genrePack": null,
+      "promptHint": "Boolean trong redFlagSignals.politics — ô điểm chỉ hiển thị Có/Không; không chấm điểm số."
+    },
+    {
+      "id": "red_flag.religion",
+      "partId": "red_flag",
+      "elementVi": "Tôn giáo nhạy cảm / cực đoan",
+      "input": "reviews",
+      "weightInPart": 0,
+      "genrePack": null,
+      "promptHint": "Boolean religionSensitive trong redFlagSignals — Có/Không."
+    },
+    {
+      "id": "red_flag.casino",
+      "partId": "red_flag",
+      "elementVi": "Cờ bạc đổi thưởng / casino",
+      "input": "reviews",
+      "weightInPart": 0,
+      "genrePack": null,
+      "promptHint": "Boolean casino trong redFlagSignals — hard gate khi true."
+    },
+    {
+      "id": "red_flag.violence",
+      "partId": "red_flag",
+      "elementVi": "Bạo lực (mang rợ, máu me, kinh dị thể chất — không tính combat hành động thuần túy)",
+      "input": "reviews",
+      "weightInPart": 0,
+      "genrePack": null,
+      "promptHint": "violenceSeverity trong redFlagSignals; ô điểm FE hiển thị Có/Không (có rủi ro khi không phải none)."
+    },
+    {
+      "id": "red_flag.sexual",
+      "partId": "red_flag",
+      "elementVi": "Nội dung tình dục / gợi dục (mức rủi ro thị trường VN)",
+      "input": "reviews",
+      "weightInPart": 0,
+      "genrePack": null,
+      "promptHint": "sexualSeverity trong redFlagSignals; ô điểm FE hiển thị Có/Không."
+    }
+  ]
+}

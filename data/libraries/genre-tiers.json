@@ -1,0 +1,138 @@
+{
+  "version": 3,
+  "defaultScore": 50,
+  "notesEditor": "All entries in match[] are ENGLISH keywords/phrases. Chinese TapTap tags are mapped via src/utils/tag-translator.ts (TAG_MAP) before matching; extend TAG_MAP for new ZH tags. Optional: long-form text cache lives in .translation-cache.json (API translations), unrelated to tag tier matching.",
+  "tiers": {
+    "S": {
+      "label": "Tier S",
+      "score": 90
+    },
+    "A": {
+      "label": "Tier A",
+      "score": 72
+    },
+    "B": {
+      "label": "Tier B",
+      "score": 52
+    },
+    "C": {
+      "label": "Tier C",
+      "score": 32
+    }
+  },
+  "tagPatterns": [
+    {
+      "tier": "S",
+      "match": [
+        "card rpg",
+        "cardrpg",
+        "trading card",
+        "ccg",
+        "tcg",
+        "deck builder",
+        "gacha rpg",
+        "idle rpg",
+        "extraction",
+        "loot extraction",
+        "looter shooter",
+        "tarkov-like",
+        "loot & scoot",
+        "card game",
+        "deck"
+      ]
+    },
+    {
+      "tier": "A",
+      "match": [
+        "fps",
+        "tps",
+        "shooter",
+        "shoot 'em up",
+        "shoot em up",
+        "battle royale",
+        "br",
+        "moba",
+        "arena",
+        "action",
+        "action rpg",
+        "arpg",
+        "open world",
+        "sandbox",
+        "auto chess",
+        "autobattle",
+        "roguelike",
+        "rogue-lite",
+        "sci-fi",
+        "science fiction",
+        "survival",
+        "pvp",
+        "pve",
+        "competitive",
+        "gunplay",
+        "battle royale game"
+      ]
+    },
+    {
+      "tier": "B",
+      "match": [
+        "casual",
+        "puzzle",
+        "brain teaser",
+        "hypercasual",
+        "simulation",
+        "sim",
+        "simulator",
+        "business sim",
+        "management",
+        "mmorpg",
+        "raising sim",
+        "party",
+        "music",
+        "rhythm",
+        "sports",
+        "racing",
+        "anime",
+        "adventure",
+        "exploration",
+        "single player",
+        "story",
+        "narrative",
+        "otome",
+        "dating sim",
+        "female oriented",
+        "chinese style",
+        "tower defense",
+        "farming",
+        "pixel art",
+        "cute",
+        "collection",
+        "idle",
+        "collection game",
+        "dress up"
+      ]
+    },
+    {
+      "tier": "C",
+      "match": [
+        "rts",
+        "real-time strategy",
+        "strategy",
+        "slg",
+        "grand strategy",
+        "tactical rpg",
+        "srpg",
+        "visual novel",
+        "vn",
+        "avg",
+        "turn-based",
+        "turn based",
+        "niche",
+        "text adventure",
+        "war game",
+        "warfare",
+        "small studio",
+        "indie"
+      ]
+    }
+  ]
+}

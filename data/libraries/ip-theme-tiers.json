@@ -1,0 +1,74 @@
+{
+  "version": 2,
+  "neutralScore": 55,
+  "keywordPatterns": [
+    {
+      "score": 88,
+      "match": [
+        "major ip",
+        "big ip",
+        "anime",
+        "manga",
+        "marvel",
+        "dc comic",
+        "naruto",
+        "one piece",
+        "genshin",
+        "star wars",
+        "blockbuster ip",
+        "three kingdoms"
+      ]
+    },
+    {
+      "score": 78,
+      "match": [
+        "novel",
+        "light novel",
+        "novel adaptation",
+        "licensed",
+        "franchise"
+      ]
+    },
+    {
+      "score": 68,
+      "match": [
+        "original ip",
+        "new ip",
+        "indie story",
+        "original world",
+        "western"
+      ]
+    },
+    {
+      "score": 72,
+      "match": [
+        "samurai"
+      ]
+    },
+    {
+      "score": 92,
+      "match": [
+        "onmioji"
+      ]
+    },
+    {
+      "score": 80,
+      "match": [
+        "japan"
+      ]
+    },
+    {
+      "score": 82,
+      "match": [
+        "wuxia"
+      ]
+    },
+    {
+      "score": 85,
+      "match": [
+        "xianxia"
+      ]
+    }
+  ],
+  "notes": "English keywords only. Chinese title/tag text is still searched in raw haystack; tag names are also appended in English via translateTag() for matching."
+}
