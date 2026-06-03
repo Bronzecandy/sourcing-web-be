@@ -49,6 +49,8 @@ app.listen(PORT, async () => {
   logDiag("server-listening", {
     port: PORT,
     skipWarmup: process.env.SKIP_WARMUP === "1",
+    pgPoolMax: process.env.PG_POOL_MAX ?? "25",
+    precomputeDbConcurrency: process.env.PRECOMPUTE_DB_CONCURRENCY ?? "8",
     nodeEnv: process.env.NODE_ENV ?? "(unset)",
   });
   if (process.env.SKIP_WARMUP === "1") {

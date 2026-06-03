@@ -15,9 +15,14 @@ export function wantsAnalysisStream(body: unknown): boolean {
 }
 
 const STREAM_HEARTBEAT_MS = Math.max(
-  5_000,
-  parseInt(process.env.ANALYSIS_STREAM_HEARTBEAT_MS ?? "12000", 10) || 12_000,
+  3_000,
+  parseInt(process.env.ANALYSIS_STREAM_HEARTBEAT_MS ?? "5000", 10) || 5_000,
 );
+
+function flushResponse(res: Response): void {
+  const r = res as Response & { flush?: () => void };
+  if (typeof r.flush === "function") r.flush();
+}
 
 /** NDJSON stream: gửi heartbeat định kỳ để nginx/proxy không cắt khi fetch DB/LLM lâu không có chunk. */
 export function createAnalysisStreamWriter(res: Response) {
@@ -29,6 +34,7 @@ export function createAnalysisStreamWriter(res: Response) {
 
   const writeLine = (obj: unknown) => {
     res.write(`${JSON.stringify(obj)}\n`);
+    flushResponse(res);
   };
 
   let last: AnalysisProgressEvent = {
@@ -36,6 +42,13 @@ export function createAnalysisStreamWriter(res: Response) {
     phase: "start",
     message: "Đang xử lý…",
   };
+
+  writeLine({
+    type: "progress",
+    percent: 1,
+    phase: "connected",
+    message: "Đã kết nối — đang xử lý…",
+  });
 
   const heartbeat = setInterval(() => {
     writeLine({
@@ -47,6 +60,10 @@ export function createAnalysisStreamWriter(res: Response) {
   }, STREAM_HEARTBEAT_MS);
 
   const stop = () => clearInterval(heartbeat);
+
+  res.on("close", () => {
+    if (!res.writableEnded) stop();
+  });
 
   return {
     report(event: AnalysisProgressEvent) {

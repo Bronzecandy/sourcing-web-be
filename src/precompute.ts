@@ -1,6 +1,8 @@
 import { cache, setForceRefresh } from "./utils/cache";
+import { waitForPrecomputeSlot } from "./utils/analysis-active-guard";
 import { withDbRetry } from "./utils/db-retry";
 import { logDiag } from "./utils/process-diagnostics";
+import { runWithConcurrency } from "./utils/run-with-concurrency";
 import { rankingService } from "./services/ranking.service";
 import { gameService } from "./services/game.service";
 import { prisma } from "./utils/prisma";
@@ -21,9 +23,15 @@ async function runSequential(tasks: Array<{ label: string; fn: () => Promise<unk
   }
 }
 
+const PRECOMPUTE_DB_CONCURRENCY = Math.max(
+  1,
+  parseInt(process.env.PRECOMPUTE_DB_CONCURRENCY ?? "8", 10) || 8,
+);
+
 async function runBatch(tasks: Array<{ label: string; fn: () => Promise<unknown> }>) {
-  await Promise.all(
-    tasks.map((t) => retry(t.fn, t.label))
+  await runWithConcurrency(
+    tasks.map((t) => () => retry(t.fn, t.label)),
+    PRECOMPUTE_DB_CONCURRENCY,
   );
 }
 
@@ -171,6 +179,7 @@ export async function precomputeAll(): Promise<{ durationMs: number; keys: numbe
     ) => {
       if (ids.length === 0) return;
       for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+        await waitForPrecomputeSlot();
         const batch = ids.slice(i, i + BATCH_SIZE);
         const progress = `${label} [${i + 1}-${Math.min(i + BATCH_SIZE, ids.length)}/${ids.length}]`;
         await runBatch(batch.flatMap((appId) => detailTasksForApp(appId, daysList)));

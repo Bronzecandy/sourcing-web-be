@@ -33,6 +33,7 @@ import {
 } from "../utils/analysis-progress-stream";
 import type { AuthedRequest } from "../middleware/auth";
 import type { Response } from "express";
+import { beginAnalysisStream, endAnalysisStream } from "../utils/analysis-active-guard";
 import { logDiag, logDiagError } from "../utils/process-diagnostics";
 
 const router = Router();
@@ -139,6 +140,7 @@ router.post("/analyze-external", async (req: AuthedRequest, res) => {
   const stream = wantsAnalysisStream(req.body);
 
   if (stream) {
+    beginAnalysisStream("analyze-external");
     const out = createAnalysisStreamWriter(res);
     const progress = streamProgressReporter((e) => out.report(e));
     try {
@@ -273,6 +275,8 @@ router.post("/analyze-external", async (req: AuthedRequest, res) => {
     } catch (err) {
       console.error("[analysis route] POST analyze-external (stream):", err);
       out.fail(formatFetchError(err));
+    } finally {
+      endAnalysisStream("analyze-external");
     }
     return;
   }
@@ -444,6 +448,7 @@ router.post("/analyze-csv", upload.single("file"), async (req: AuthedRequest, re
     wantsAnalysisStream(req.body);
 
   if (stream) {
+    beginAnalysisStream("analyze-csv");
     const out = createAnalysisStreamWriter(res);
     const progress = streamProgressReporter((e) => out.report(e));
     try {
@@ -484,6 +489,8 @@ router.post("/analyze-csv", upload.single("file"), async (req: AuthedRequest, re
     } catch (err) {
       console.error("[analysis route] POST analyze-csv (stream):", err);
       out.fail(err instanceof Error ? err.message : "CSV analysis failed");
+    } finally {
+      endAnalysisStream("analyze-csv");
     }
     return;
   }
@@ -544,6 +551,7 @@ router.post("/analyze/:appId", async (req: AuthedRequest, res) => {
   logDiag("api-ai-analyze", { appId, stream: wantsAnalysisStream(req.body) });
 
   if (wantsAnalysisStream(req.body)) {
+    beginAnalysisStream(`analyze-${appId}`);
     const out = createAnalysisStreamWriter(res);
     const progress = streamProgressReporter((e) => out.report(e));
     try {
@@ -559,6 +567,8 @@ router.post("/analyze/:appId", async (req: AuthedRequest, res) => {
       console.error("[analysis route] POST analyze (stream):", err);
       logDiagError("api-ai-analyze-failed", err, { appId, stream: true });
       out.fail(err instanceof Error ? err.message : "Analysis failed");
+    } finally {
+      endAnalysisStream(`analyze-${appId}`);
     }
     return;
   }
