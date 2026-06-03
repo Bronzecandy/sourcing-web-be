@@ -94,8 +94,8 @@ function detailTasksForApp(appId: number, daysList: number[]) {
   ]);
 }
 
-const BATCH_SIZE = 5;
-const BATCH_DELAY_MS = 200;
+const BATCH_SIZE = Math.max(1, parseInt(process.env.PRECOMPUTE_BATCH_SIZE ?? "20", 10) || 20);
+const BATCH_DELAY_MS = Math.max(0, parseInt(process.env.PRECOMPUTE_BATCH_DELAY_MS ?? "50", 10) || 50);
 
 export async function precomputeAll(): Promise<{ durationMs: number; keys: number }> {
   const start = Date.now();

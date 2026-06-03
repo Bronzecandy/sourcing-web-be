@@ -364,9 +364,12 @@ function parseReviewRow(
   return { text, score, date, bucket: bucketLabel };
 }
 
+type ReviewFetchBatchProgress = (info: { batchIndex: number; totalRows: number }) => void;
+
 async function fetchStratifiedReviews(
   appId: number,
   window: ReviewWindow = { mode: "all" },
+  onBatchProgress?: ReviewFetchBatchProgress,
 ): Promise<StratifiedReview[]> {
   const startMs = Date.now();
   const bounds = reviewWindowSqlBounds(window);
@@ -403,6 +406,7 @@ async function fetchStratifiedReviews(
       rows.push({ raw: row.raw, reviewAt: row.reviewAt });
       afterId = row.id;
     }
+    onBatchProgress?.({ batchIndex, totalRows: rows.length });
     if (batch.length < AI_REVIEW_FETCH_BATCH) break;
   }
 
@@ -926,7 +930,14 @@ export class AIAnalysisService {
     const iconUrl =
       (latestRank?.raw as TapTapRawApp | null)?.icon?.url ?? null;
 
-    let reviews = await fetchStratifiedReviews(appId, reviewWindow);
+    let reviews = await fetchStratifiedReviews(appId, reviewWindow, ({ batchIndex, totalRows }) => {
+      const pct = Math.min(9, 4 + Math.min(5, batchIndex));
+      report(
+        pct,
+        `Đang tải bình luận từ CSDL (lô ${batchIndex}, ${totalRows.toLocaleString("vi-VN")} dòng)…`,
+        "fetch",
+      );
+    });
     if (reviewWindow.mode !== "all") {
       reviews = filterReviewsByWindow(reviews, reviewWindow);
     }

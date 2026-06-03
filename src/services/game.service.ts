@@ -422,13 +422,15 @@ export class GameService {
               pool.query<{ star: number; cnt: number }>(
                 `SELECT star, COUNT(*)::int AS cnt
              FROM (
-               SELECT LEAST(5, GREATEST(1, ROUND((raw->'review'->>'score')::numeric)))::int AS star
+               SELECT LEAST(5, GREATEST(1,
+                 ROUND((regexp_match(raw::text, '"score"\\s*:\\s*([0-9]+(?:\\.[0-9]+)?)'))[1]::numeric)
+               ))::int AS star
                FROM "AppReview"
                WHERE "appId" = $1
                  AND raw IS NOT NULL
-                 AND (raw->'review'->>'score') IS NOT NULL
-                 AND (raw->'review'->>'score') ~ '^[0-9]+(\\.[0-9]+)?$'
+                 AND raw::text ~ '"score"\\s*:\\s*[0-9]'
              ) s
+             WHERE star BETWEEN 1 AND 5
              GROUP BY star
              ORDER BY star`,
                 [appId],
