@@ -39,7 +39,9 @@ import {
   saveAnalysisForUser,
 } from "./ai-analysis-store";
 import { isRetryableDbError, withDbRetry } from "../utils/db-retry";
-import { logDiag, logDiagError } from "../utils/process-diagnostics";
+import { runDbQuery } from "../utils/db-diagnostics";
+import { classifyPgError, serializePgError } from "../utils/pg-error";
+import { logDiag, logDbError } from "../utils/process-diagnostics";
 
 const RATING_BUCKETS = [
   { label: "Very Negative", min: 1, max: 1 },
@@ -249,44 +251,90 @@ async function queryReviewBatch(
   afterId: number,
   limit: number,
   bounds: { minReviewAt: Date | null; maxReviewAt: Date | null },
+  batchIndex: number,
 ): Promise<{ id: number; raw: Record<string, unknown>; reviewAt: Date | null }[]> {
+  const label = `ai-AppReview-batch-${appId}`;
+  const windowTag =
+    bounds.minReviewAt && bounds.maxReviewAt
+      ? `${bounds.minReviewAt.toISOString().slice(0, 10)}..${bounds.maxReviewAt.toISOString().slice(0, 10)}`
+      : bounds.minReviewAt
+        ? `from-${bounds.minReviewAt.toISOString().slice(0, 10)}`
+        : bounds.maxReviewAt
+          ? `to-${bounds.maxReviewAt.toISOString().slice(0, 10)}`
+          : "all";
+
   let lastErr: unknown;
   for (let attempt = 0; attempt < 4; attempt++) {
     try {
-      const params: unknown[] = [appId, afterId];
-      let where = `"appId" = $1 AND id > $2 AND raw IS NOT NULL`;
-      let paramIdx = 3;
-      if (bounds.minReviewAt) {
-        where += ` AND "reviewAt" >= $${paramIdx}`;
-        params.push(bounds.minReviewAt);
-        paramIdx++;
-      }
-      if (bounds.maxReviewAt) {
-        where += ` AND "reviewAt" <= $${paramIdx}`;
-        params.push(bounds.maxReviewAt);
-        paramIdx++;
-      }
-      params.push(limit);
-      const res = await pool.query<{ id: number; raw: Record<string, unknown>; reviewAt: Date | null }>(
-        `SELECT id, raw, "reviewAt"
+      const rows = await runDbQuery(
+        label,
+        async () => {
+          const params: unknown[] = [appId, afterId];
+          let where = `"appId" = $1 AND id > $2 AND raw IS NOT NULL`;
+          let paramIdx = 3;
+          if (bounds.minReviewAt) {
+            where += ` AND "reviewAt" >= $${paramIdx}`;
+            params.push(bounds.minReviewAt);
+            paramIdx++;
+          }
+          if (bounds.maxReviewAt) {
+            where += ` AND "reviewAt" <= $${paramIdx}`;
+            params.push(bounds.maxReviewAt);
+            paramIdx++;
+          }
+          params.push(limit);
+          const res = await pool.query<{ id: number; raw: Record<string, unknown>; reviewAt: Date | null }>(
+            `SELECT id, raw, "reviewAt"
          FROM "AppReview"
          WHERE ${where}
          ORDER BY id ASC
          LIMIT $${paramIdx}`,
-        params,
+            params,
+          );
+          return res.rows;
+        },
+        {
+          appId,
+          afterId,
+          batchIndex,
+          batchLimit: limit,
+          reviewWindow: windowTag,
+          dbAttempt: attempt + 1,
+        },
+        { maxAttempts: 1, delayMs: 0 },
       );
-      return res.rows;
+
+      if (rows.length > 0 || batchIndex === 1) {
+        logDiag("ai-review-batch-ok", {
+          appId,
+          batchIndex,
+          rowCount: rows.length,
+          afterId,
+          lastId: rows.length > 0 ? rows[rows.length - 1]!.id : afterId,
+          reviewWindow: windowTag,
+        });
+      }
+      return rows;
     } catch (err) {
       lastErr = err;
       if (!isRetryableDbError(err) || attempt === 3) {
-        logDiagError("ai-review-batch-failed", err, { appId, afterId, attempt: attempt + 1 });
+        logDbError("ai-review-batch-failed", err, {
+          appId,
+          afterId,
+          batchIndex,
+          attempt: attempt + 1,
+          reviewWindow: windowTag,
+        });
         throw err;
       }
       logDiag("ai-review-batch-retry", {
         appId,
         afterId,
+        batchIndex,
         attempt: attempt + 1,
-        message: (err as Error).message?.slice(0, 200),
+        reviewWindow: windowTag,
+        dbKind: classifyPgError(err),
+        ...serializePgError(err),
       });
       console.warn(`[AI Analysis] AppReview batch retry ${attempt + 1}/3:`, (err as Error).message);
       await sleep(250 * (attempt + 1));
@@ -324,13 +372,30 @@ async function fetchStratifiedReviews(
   const bounds = reviewWindowSqlBounds(window);
   const rows: { raw: Record<string, unknown>; reviewAt: Date | null }[] = [];
   let afterId = 0;
+  let batchIndex = 0;
+
+  logDiag("ai-fetch-reviews-start", {
+    appId,
+    reviewWindowMode: window.mode,
+    reviewWindowDays: window.mode === "days" ? window.days : undefined,
+    minReviewAt: bounds.minReviewAt?.toISOString() ?? null,
+    maxReviewAt: bounds.maxReviewAt?.toISOString() ?? null,
+    batchSize: AI_REVIEW_FETCH_BATCH,
+  });
 
   for (;;) {
+    batchIndex++;
     let batch: { id: number; raw: Record<string, unknown>; reviewAt: Date | null }[];
     try {
-      batch = await queryReviewBatch(appId, afterId, AI_REVIEW_FETCH_BATCH, bounds);
+      batch = await queryReviewBatch(appId, afterId, AI_REVIEW_FETCH_BATCH, bounds, batchIndex);
     } catch (err) {
       console.error(`[AI Analysis] AppReview batch failed after retries for appId=${appId}:`, err);
+      logDbError("ai-fetch-reviews-aborted", err, {
+        appId,
+        batchesCompleted: batchIndex - 1,
+        rowsFetched: rows.length,
+        durationMs: Date.now() - startMs,
+      });
       throw err;
     }
     if (batch.length === 0) break;
@@ -340,6 +405,14 @@ async function fetchStratifiedReviews(
     }
     if (batch.length < AI_REVIEW_FETCH_BATCH) break;
   }
+
+  logDiag("ai-fetch-reviews-done", {
+    appId,
+    reviewWindowMode: window.mode,
+    batches: batchIndex,
+    rawRows: rows.length,
+    durationMs: Date.now() - startMs,
+  });
 
   console.log(`[AI Analysis] Fetched ${rows.length} raw reviews (batched) in ${Date.now() - startMs}ms`);
 
@@ -818,10 +891,17 @@ export class AIAnalysisService {
   ): Promise<AIAnalysisResult> {
     const { step: report, emit: reportEmit } = createProgressStepReporter(onProgress, progressFloor);
 
+    const dbReviewTotal = await withDbRetry(
+      () => prisma.appReview.count({ where: { appId } }),
+      `ai-review-count-total-${appId}`,
+    );
+
     logDiag("ai-analysis-start", {
       appId,
       userId: userId.slice(0, 8),
       reviewWindowMode: reviewWindow.mode,
+      reviewWindowDays: reviewWindow.mode === "days" ? reviewWindow.days : undefined,
+      dbReviewTotalInApp: dbReviewTotal,
     });
 
     report(
@@ -882,7 +962,7 @@ export class AIAnalysisService {
       logDiag("ai-analysis-done", { appId, reviewCount: reviews.length });
       return result;
     } catch (err) {
-      logDiagError("ai-analysis-failed", err, { appId, reviewCount: reviews.length });
+      logDbError("ai-analysis-failed", err, { appId, reviewCount: reviews.length });
       throw err;
     }
   }
@@ -953,7 +1033,7 @@ export class AIAnalysisService {
       logDiag("ai-analysis-done", { appId, reviewCount: filtered.length, source });
       return result;
     } catch (err) {
-      logDiagError("ai-analysis-failed", err, {
+      logDbError("ai-analysis-failed", err, {
         appId,
         reviewCount: filtered.length,
         source,

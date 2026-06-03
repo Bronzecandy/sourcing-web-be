@@ -1,4 +1,5 @@
-import { logDiag, logDiagError, serializeErr } from "./process-diagnostics";
+import { logDiag, logDbError } from "./process-diagnostics";
+import { classifyPgError, serializePgError } from "./pg-error";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -75,18 +76,19 @@ export async function withDbRetry<T>(
     } catch (err: unknown) {
       lastErr = err;
       if (!isRetryableDbError(err)) {
-        logDiagError("db-query-failed", err, { label, attempt });
+        logDbError("db-query-failed", err, { label, attempt, retryable: false });
         throw err;
       }
       if (attempt === maxAttempts) {
-        logDiagError("db-retry-exhausted", err, { label, attempt, maxAttempts });
+        logDbError("db-retry-exhausted", err, { label, attempt, maxAttempts });
         throw err;
       }
       logDiag("db-retry", {
         label,
         attempt,
         maxAttempts,
-        ...serializeErr(err),
+        dbKind: classifyPgError(err),
+        ...serializePgError(err),
       });
       const wait = delayMs * attempt;
       const code = errorCode(err) ?? "unknown";

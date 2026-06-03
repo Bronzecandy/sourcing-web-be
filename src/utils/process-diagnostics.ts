@@ -1,5 +1,6 @@
 import { cache } from "./cache";
 import { pool } from "./prisma";
+import { classifyPgError, serializePgError } from "./pg-error";
 
 const ENABLED = process.env.DIAG_LOGS !== "0";
 
@@ -65,16 +66,25 @@ export function serializeErr(err: unknown): Record<string, string | undefined> {
   };
 }
 
+export function logDbError(
+  event: string,
+  err: unknown,
+  extra: Record<string, string | number | boolean | null | undefined> = {},
+): void {
+  if (!ENABLED) return;
+  logDiag(event, {
+    dbKind: classifyPgError(err),
+    ...serializePgError(err),
+    ...extra,
+  });
+}
+
 export function logDiagError(
   event: string,
   err: unknown,
   extra?: Record<string, string | number | boolean>,
 ): void {
-  if (!ENABLED) return;
-  logDiag(event, {
-    ...serializeErr(err),
-    ...extra,
-  });
+  logDbError(event, err, extra ?? {});
 }
 
 export function installProcessDiagnostics(): void {
