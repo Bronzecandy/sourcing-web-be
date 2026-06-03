@@ -3,6 +3,9 @@ import cron from "node-cron";
 import app from "./app";
 import { precomputeAll } from "./precompute";
 import { warmLibraryCache } from "./services/library-store";
+import { installProcessDiagnostics, logDiag, logDiagError } from "./utils/process-diagnostics";
+
+installProcessDiagnostics();
 
 const PORT = parseInt(process.env.PORT || "3001");
 
@@ -21,11 +24,14 @@ async function warmAppDb(): Promise<void> {
 
 async function runPrecompute(label: string) {
   console.log(`[${label}] Pre-computing all data...`);
+  logDiag("precompute-start", { label });
   try {
     const { durationMs, keys } = await precomputeAll();
     console.log(`[${label}] Done in ${durationMs}ms (${keys} cache keys)`);
+    logDiag("precompute-done", { label, durationMs, keys });
   } catch (err) {
     console.error(`[${label}] Failed:`, err);
+    logDiagError("precompute-failed", err, { label });
   }
 }
 
@@ -40,6 +46,11 @@ app.listen(PORT, async () => {
   console.log(`Library admin UI: http://localhost:${PORT}/admin/libraries`);
   console.log(`AI model: ${process.env.OPENAI_MODEL ?? "(not set)"}`);
   console.log(`Cron: pre-compute daily at 10:15 Asia/Ho_Chi_Minh`);
+  logDiag("server-listening", {
+    port: PORT,
+    skipWarmup: process.env.SKIP_WARMUP === "1",
+    nodeEnv: process.env.NODE_ENV ?? "(unset)",
+  });
   if (process.env.SKIP_WARMUP === "1") {
     console.log(`[warm-up] Skipped (SKIP_WARMUP=1)`);
   } else {

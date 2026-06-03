@@ -1,5 +1,6 @@
 import { cache, setForceRefresh } from "./utils/cache";
 import { withDbRetry } from "./utils/db-retry";
+import { logDiag } from "./utils/process-diagnostics";
 import { rankingService } from "./services/ranking.service";
 import { gameService } from "./services/game.service";
 import { prisma } from "./utils/prisma";
@@ -119,6 +120,7 @@ export async function precomputeAll(): Promise<{ durationMs: number; keys: numbe
       ]),
     ]);
     console.log(`[precompute] Phase 1 done (${((Date.now() - start) / 1000).toFixed(1)}s)`);
+    logDiag("precompute-phase", { phase: 1, elapsedSec: Math.round((Date.now() - start) / 1000) });
 
     // Phase 2: Potential analysis — per platform sequentially, queries within a platform in parallel
     console.log("[precompute] Phase 2: Potential analysis...");
@@ -154,6 +156,7 @@ export async function precomputeAll(): Promise<{ durationMs: number; keys: numbe
       );
     }
     console.log(`[precompute] Phase 2 done (${((Date.now() - start) / 1000).toFixed(1)}s)`);
+    logDiag("precompute-phase", { phase: 2, elapsedSec: Math.round((Date.now() - start) / 1000) });
 
     // Phase 3: Top 200 — full detail + potential + breakdown
     const { top: topIds, extra: extraIds } = await collectPrecomputeAppIds();
@@ -173,6 +176,12 @@ export async function precomputeAll(): Promise<{ durationMs: number; keys: numbe
         await runBatch(batch.flatMap((appId) => detailTasksForApp(appId, daysList)));
         const elapsed = ((Date.now() - start) / 1000).toFixed(0);
         console.log(`[precompute] ${progress} done (${elapsed}s elapsed)`);
+        logDiag("precompute-batch", {
+          phase: 3,
+          batchLabel: label,
+          progress,
+          elapsedSec: Number(elapsed),
+        });
         if (i + BATCH_SIZE < ids.length) await sleep(BATCH_DELAY_MS);
       }
     };
@@ -183,6 +192,12 @@ export async function precomputeAll(): Promise<{ durationMs: number; keys: numbe
 
     const duration = Date.now() - start;
     console.log(`[precompute] All done in ${(duration / 1000).toFixed(1)}s (${cache.keys().length} keys cached)`);
+    logDiag("precompute-phase", {
+      phase: 3,
+      done: true,
+      durationSec: Math.round(duration / 1000),
+      cacheKeys: cache.keys().length,
+    });
 
     return { durationMs: duration, keys: cache.keys().length };
   } finally {

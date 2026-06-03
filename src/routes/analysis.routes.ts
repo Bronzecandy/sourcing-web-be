@@ -33,6 +33,7 @@ import {
 } from "../utils/analysis-progress-stream";
 import type { AuthedRequest } from "../middleware/auth";
 import type { Response } from "express";
+import { logDiag, logDiagError } from "../utils/process-diagnostics";
 
 const router = Router();
 
@@ -540,6 +541,7 @@ router.post("/analyze/:appId", async (req: AuthedRequest, res) => {
   if (!userId) return;
   const appId = parseInt(String(req.params.appId));
   const reviewWindow = parseReviewWindow(req.body?.reviewWindow);
+  logDiag("api-ai-analyze", { appId, stream: wantsAnalysisStream(req.body) });
 
   if (wantsAnalysisStream(req.body)) {
     const out = createAnalysisStreamWriter(res);
@@ -555,6 +557,7 @@ router.post("/analyze/:appId", async (req: AuthedRequest, res) => {
       out.done(result);
     } catch (err) {
       console.error("[analysis route] POST analyze (stream):", err);
+      logDiagError("api-ai-analyze-failed", err, { appId, stream: true });
       out.fail(err instanceof Error ? err.message : "Analysis failed");
     }
     return;
@@ -567,6 +570,7 @@ router.post("/analyze/:appId", async (req: AuthedRequest, res) => {
     res.end(JSON.stringify({ success: true, data: result }));
   } catch (err) {
     clearInterval(keepAlive);
+    logDiagError("api-ai-analyze-failed", err, { appId, stream: false });
     console.error("[analysis route] POST analyze:", err);
     const message = err instanceof Error ? err.message : "Analysis failed";
     res.end(JSON.stringify({ success: false, error: message }));

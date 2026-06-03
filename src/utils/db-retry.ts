@@ -1,3 +1,5 @@
+import { logDiag, logDiagError, serializeErr } from "./process-diagnostics";
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function errorCode(err: unknown): string | undefined {
@@ -72,7 +74,20 @@ export async function withDbRetry<T>(
       return await fn();
     } catch (err: unknown) {
       lastErr = err;
-      if (!isRetryableDbError(err) || attempt === maxAttempts) throw err;
+      if (!isRetryableDbError(err)) {
+        logDiagError("db-query-failed", err, { label, attempt });
+        throw err;
+      }
+      if (attempt === maxAttempts) {
+        logDiagError("db-retry-exhausted", err, { label, attempt, maxAttempts });
+        throw err;
+      }
+      logDiag("db-retry", {
+        label,
+        attempt,
+        maxAttempts,
+        ...serializeErr(err),
+      });
       const wait = delayMs * attempt;
       const code = errorCode(err) ?? "unknown";
       console.warn(

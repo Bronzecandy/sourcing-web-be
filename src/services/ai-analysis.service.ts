@@ -39,6 +39,7 @@ import {
   saveAnalysisForUser,
 } from "./ai-analysis-store";
 import { isRetryableDbError, withDbRetry } from "../utils/db-retry";
+import { logDiag, logDiagError } from "../utils/process-diagnostics";
 
 const RATING_BUCKETS = [
   { label: "Very Negative", min: 1, max: 1 },
@@ -277,7 +278,16 @@ async function queryReviewBatch(
       return res.rows;
     } catch (err) {
       lastErr = err;
-      if (!isRetryableDbError(err) || attempt === 3) throw err;
+      if (!isRetryableDbError(err) || attempt === 3) {
+        logDiagError("ai-review-batch-failed", err, { appId, afterId, attempt: attempt + 1 });
+        throw err;
+      }
+      logDiag("ai-review-batch-retry", {
+        appId,
+        afterId,
+        attempt: attempt + 1,
+        message: (err as Error).message?.slice(0, 200),
+      });
       console.warn(`[AI Analysis] AppReview batch retry ${attempt + 1}/3:`, (err as Error).message);
       await sleep(250 * (attempt + 1));
     }
@@ -808,6 +818,12 @@ export class AIAnalysisService {
   ): Promise<AIAnalysisResult> {
     const { step: report, emit: reportEmit } = createProgressStepReporter(onProgress, progressFloor);
 
+    logDiag("ai-analysis-start", {
+      appId,
+      userId: userId.slice(0, 8),
+      reviewWindowMode: reviewWindow.mode,
+    });
+
     report(
       Math.max(4, progressFloor),
       progressFloor > 4
@@ -836,8 +852,11 @@ export class AIAnalysisService {
     }
 
     if (reviews.length === 0) {
+      logDiag("ai-analysis-no-reviews", { appId, gameName });
       throw new Error(`No reviews found for ${gameName} (appId: ${appId})`);
     }
+
+    logDiag("ai-analysis-reviews-loaded", { appId, reviewCount: reviews.length, gameName });
 
     report(
       Math.max(10, progressFloor + 2),
@@ -852,13 +871,20 @@ export class AIAnalysisService {
       (latestRank?.raw ?? null) as TapTapRawApp | Record<string, unknown> | null,
     );
 
-    return this.runLLMAnalysis(userId, appId, gameName, reviews, {
-      source: "database",
-      iconUrl,
-      analysisContext,
-      reviewWindow,
-      onProgress: reportEmit,
-    });
+    try {
+      const result = await this.runLLMAnalysis(userId, appId, gameName, reviews, {
+        source: "database",
+        iconUrl,
+        analysisContext,
+        reviewWindow,
+        onProgress: reportEmit,
+      });
+      logDiag("ai-analysis-done", { appId, reviewCount: reviews.length });
+      return result;
+    } catch (err) {
+      logDiagError("ai-analysis-failed", err, { appId, reviewCount: reviews.length });
+      throw err;
+    }
   }
 
   async analyzeExternalReviews(
@@ -875,6 +901,14 @@ export class AIAnalysisService {
   ): Promise<AIAnalysisResult> {
     const { step: report, emit: reportEmit } = createProgressStepReporter(onProgress, progressFloor);
 
+    logDiag("ai-analysis-start", {
+      appId,
+      source,
+      userId: userId.slice(0, 8),
+      reviewCount: reviews.length,
+      reviewWindowMode: reviewWindow.mode,
+    });
+
     report(
       Math.max(12, progressFloor),
       "Đang lọc bình luận theo khoảng thời gian đã chọn…",
@@ -884,8 +918,16 @@ export class AIAnalysisService {
     const filtered = filterReviewsByWindow(reviews, reviewWindow);
 
     if (filtered.length === 0) {
+      logDiag("ai-analysis-no-reviews", { appId, gameName, source });
       throw new Error(`No reviews found for ${gameName} (appId: ${appId})`);
     }
+
+    logDiag("ai-analysis-reviews-loaded", {
+      appId,
+      reviewCount: filtered.length,
+      gameName,
+      source,
+    });
 
     report(
       Math.max(14, progressFloor + 1),
@@ -900,13 +942,24 @@ export class AIAnalysisService {
       source === "csv-upload" ? null : tapTapDetailRaw ?? null,
     );
 
-    return this.runLLMAnalysis(userId, appId, gameName, filtered, {
-      source,
-      iconUrl,
-      analysisContext,
-      reviewWindow,
-      onProgress: reportEmit,
-    });
+    try {
+      const result = await this.runLLMAnalysis(userId, appId, gameName, filtered, {
+        source,
+        iconUrl,
+        analysisContext,
+        reviewWindow,
+        onProgress: reportEmit,
+      });
+      logDiag("ai-analysis-done", { appId, reviewCount: filtered.length, source });
+      return result;
+    } catch (err) {
+      logDiagError("ai-analysis-failed", err, {
+        appId,
+        reviewCount: filtered.length,
+        source,
+      });
+      throw err;
+    }
   }
 }
 
