@@ -42,6 +42,14 @@ import { isRetryableDbError, withDbRetry } from "../utils/db-retry";
 import { runDbQuery } from "../utils/db-diagnostics";
 import { classifyPgError, serializePgError } from "../utils/pg-error";
 import { logDiag, logDbError } from "../utils/process-diagnostics";
+import {
+  AI_MAX_REVIEWS_FOR_ANALYSIS,
+  AI_STRATIFY_TIME_BUCKETS,
+  allocateStratifiedCellLimits,
+  buildTimeSlices,
+  capStratifiedReviews,
+  type StratifiedCapResult,
+} from "../utils/review-stratified-cap";
 
 const RATING_BUCKETS = [
   { label: "Very Negative", min: 1, max: 1 },
@@ -50,8 +58,6 @@ const RATING_BUCKETS = [
   { label: "Positive", min: 4, max: 4 },
   { label: "Very Positive", min: 5, max: 5 },
 ] as const;
-
-const PER_BUCKET_LIMIT = 100_000;
 
 function intEnv(name: string, def: number): number {
   const v = process.env[name];
@@ -75,7 +81,7 @@ const AI_MAP_CONCURRENCY = Math.max(1, intEnv("AI_MAP_CONCURRENCY", 6));
 /** After packing, merge down to at most this many map batches (default 3). */
 const AI_MAX_MAP_CHUNKS = Math.max(1, intEnv("AI_MAX_MAP_CHUNKS", 3));
 /** Fetch reviews in batches to survive replica recovery conflicts + retry transient PG errors. */
-const AI_REVIEW_FETCH_BATCH = Math.max(50, intEnv("AI_REVIEW_FETCH_BATCH", 1000));
+const AI_REVIEW_FETCH_BATCH = Math.max(50, intEnv("AI_REVIEW_FETCH_BATCH", 2000));
 
 function collapseWhitespace(s: string): string {
   return s.replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
@@ -364,43 +370,226 @@ function parseReviewRow(
   return { text, score, date, bucket: bucketLabel };
 }
 
-type ReviewFetchBatchProgress = (info: { batchIndex: number; totalRows: number }) => void;
+type ReviewFetchBatchProgress = (info: {
+  batchIndex: number;
+  totalRows: number;
+  totalInWindow?: number;
+  capped?: boolean;
+}) => void;
 
-async function fetchStratifiedReviews(
+type FetchStratifiedResult = StratifiedCapResult<StratifiedReview>;
+
+function appendWindowBoundsSql(
+  bounds: { minReviewAt: Date | null; maxReviewAt: Date | null },
+  params: unknown[],
+  startIdx: number,
+): { where: string; nextIdx: number } {
+  let where = "";
+  let idx = startIdx;
+  if (bounds.minReviewAt) {
+    where += ` AND "reviewAt" >= $${idx}`;
+    params.push(bounds.minReviewAt);
+    idx++;
+  }
+  if (bounds.maxReviewAt) {
+    where += ` AND "reviewAt" <= $${idx}`;
+    params.push(bounds.maxReviewAt);
+    idx++;
+  }
+  return { where, nextIdx: idx };
+}
+
+async function countReviewsInWindow(
   appId: number,
-  window: ReviewWindow = { mode: "all" },
+  bounds: { minReviewAt: Date | null; maxReviewAt: Date | null },
+): Promise<number> {
+  return withDbRetry(async () => {
+    const params: unknown[] = [appId];
+    const extra = appendWindowBoundsSql(bounds, params, 2);
+    const res = await pool.query<{ cnt: number }>(
+      `SELECT COUNT(*)::int AS cnt FROM "AppReview" WHERE "appId" = $1 AND raw IS NOT NULL${extra.where}`,
+      params,
+    );
+    return res.rows[0]?.cnt ?? 0;
+  }, `ai-review-count-window-${appId}`);
+}
+
+function parseRowsToStratifiedReviews(
+  rows: { raw: Record<string, unknown>; reviewAt: Date | null }[],
+): StratifiedReview[] {
+  const out: StratifiedReview[] = [];
+  for (const row of rows) {
+    try {
+      const raw = row.raw;
+      const review = raw?.review as Record<string, unknown> | undefined;
+      const score = Math.round(Number(review?.score ?? 0));
+      const bucket = RATING_BUCKETS.find((b) => score >= b.min && score <= b.max);
+      const bucketLabel = bucket?.label ?? "Unrated";
+      const r = parseReviewRow(row, bucketLabel);
+      if (r) out.push(r);
+    } catch (rowErr) {
+      console.warn("[AI Analysis] skip corrupt AppReview row:", (rowErr as Error).message);
+    }
+  }
+  return out;
+}
+
+async function queryStratifiedCell(
+  appId: number,
+  bounds: { minReviewAt: Date | null; maxReviewAt: Date | null },
+  opts: {
+    star: number;
+    limit: number;
+    timeStart?: Date;
+    timeEnd?: Date;
+    reviewAtIsNull?: boolean;
+  },
+): Promise<{ raw: Record<string, unknown>; reviewAt: Date | null }[]> {
+  const params: unknown[] = [appId, opts.star];
+  let where = `"appId" = $1 AND raw IS NOT NULL
+    AND (regexp_match(raw::text, '"score"\\s*:\\s*([0-9]+)'))[1]::int = $2`;
+  let idx = 3;
+  const extra = appendWindowBoundsSql(bounds, params, idx);
+  where += extra.where;
+  idx = extra.nextIdx;
+
+  if (opts.reviewAtIsNull) {
+    where += ` AND "reviewAt" IS NULL`;
+  } else if (opts.timeStart && opts.timeEnd) {
+    where += ` AND "reviewAt" >= $${idx} AND "reviewAt" < $${idx + 1}`;
+    params.push(opts.timeStart, opts.timeEnd);
+    idx += 2;
+  }
+
+  params.push(opts.limit);
+  const res = await pool.query<{ raw: Record<string, unknown>; reviewAt: Date | null }>(
+    `SELECT raw, "reviewAt"
+     FROM "AppReview"
+     WHERE ${where}
+     ORDER BY RANDOM()
+     LIMIT $${idx}`,
+    params,
+  );
+  return res.rows;
+}
+
+async function fetchStratifiedReviewsSampled(
+  appId: number,
+  bounds: { minReviewAt: Date | null; maxReviewAt: Date | null },
+  totalInWindow: number,
+  onBatchProgress?: ReviewFetchBatchProgress,
+): Promise<FetchStratifiedResult> {
+  const startMs = Date.now();
+  const rangeRes = await withDbRetry(
+    () =>
+      pool.query<{ min: Date | null; max: Date | null; nulls: number }>(
+        `SELECT MIN("reviewAt") AS min, MAX("reviewAt") AS max,
+                COUNT(*) FILTER (WHERE "reviewAt" IS NULL)::int AS nulls
+         FROM "AppReview"
+         WHERE "appId" = $1 AND raw IS NOT NULL`,
+        [appId],
+      ),
+    `ai-review-date-range-${appId}`,
+  );
+  const minAt = rangeRes.rows[0]?.min;
+  const maxAt = rangeRes.rows[0]?.max;
+  const nullDates = rangeRes.rows[0]?.nulls ?? 0;
+
+  const { perCell } = allocateStratifiedCellLimits(
+    AI_MAX_REVIEWS_FOR_ANALYSIS,
+    AI_STRATIFY_TIME_BUCKETS,
+    nullDates > 0,
+  );
+
+  const collected: StratifiedReview[] = [];
+  let cellIndex = 0;
+  const stars = [1, 2, 3, 4, 5] as const;
+
+  const runCells = async (
+    timeStart: Date | undefined,
+    timeEnd: Date | undefined,
+    reviewAtIsNull: boolean,
+  ) => {
+    for (const star of stars) {
+      cellIndex++;
+      const rows = await withDbRetry(
+        () =>
+          queryStratifiedCell(appId, bounds, {
+            star,
+            limit: perCell,
+            timeStart,
+            timeEnd,
+            reviewAtIsNull,
+          }),
+        `ai-stratified-cell-${appId}-${cellIndex}`,
+      );
+      collected.push(...parseRowsToStratifiedReviews(rows));
+      onBatchProgress?.({
+        batchIndex: cellIndex,
+        totalRows: collected.length,
+        totalInWindow,
+        capped: true,
+      });
+    }
+  };
+
+  if (minAt && maxAt) {
+    const slices = buildTimeSlices(minAt, maxAt, AI_STRATIFY_TIME_BUCKETS);
+    for (const slice of slices) {
+      await runCells(slice.start, slice.end, false);
+    }
+  } else {
+    for (const star of stars) {
+      cellIndex++;
+      const rows = await withDbRetry(
+        () => queryStratifiedCell(appId, bounds, { star, limit: perCell }),
+        `ai-stratified-cell-${appId}-${cellIndex}`,
+      );
+      collected.push(...parseRowsToStratifiedReviews(rows));
+      onBatchProgress?.({
+        batchIndex: cellIndex,
+        totalRows: collected.length,
+        totalInWindow,
+        capped: true,
+      });
+    }
+  }
+  if (nullDates > 0) {
+    await runCells(undefined, undefined, true);
+  }
+
+  const capped = capStratifiedReviews(collected, AI_MAX_REVIEWS_FOR_ANALYSIS);
+
+  logDiag("ai-fetch-reviews-done", {
+    appId,
+    reviewWindowMode: "sampled",
+    rawRows: capped.reviews.length,
+    totalInWindow,
+    capped: true,
+    cellsQueried: cellIndex,
+    durationMs: Date.now() - startMs,
+  });
+
+  console.log(
+    `[AI Analysis] Stratified sample ${capped.reviews.length}/${totalInWindow} reviews (${cellIndex} cells) in ${Date.now() - startMs}ms`,
+  );
+
+  return capped;
+}
+
+async function fetchStratifiedReviewsFull(
+  appId: number,
+  bounds: { minReviewAt: Date | null; maxReviewAt: Date | null },
   onBatchProgress?: ReviewFetchBatchProgress,
 ): Promise<StratifiedReview[]> {
   const startMs = Date.now();
-  const bounds = reviewWindowSqlBounds(window);
   const rows: { raw: Record<string, unknown>; reviewAt: Date | null }[] = [];
   let afterId = 0;
   let batchIndex = 0;
 
-  logDiag("ai-fetch-reviews-start", {
-    appId,
-    reviewWindowMode: window.mode,
-    reviewWindowDays: window.mode === "days" ? window.days : undefined,
-    minReviewAt: bounds.minReviewAt?.toISOString() ?? null,
-    maxReviewAt: bounds.maxReviewAt?.toISOString() ?? null,
-    batchSize: AI_REVIEW_FETCH_BATCH,
-  });
-
   for (;;) {
     batchIndex++;
-    let batch: { id: number; raw: Record<string, unknown>; reviewAt: Date | null }[];
-    try {
-      batch = await queryReviewBatch(appId, afterId, AI_REVIEW_FETCH_BATCH, bounds, batchIndex);
-    } catch (err) {
-      console.error(`[AI Analysis] AppReview batch failed after retries for appId=${appId}:`, err);
-      logDbError("ai-fetch-reviews-aborted", err, {
-        appId,
-        batchesCompleted: batchIndex - 1,
-        rowsFetched: rows.length,
-        durationMs: Date.now() - startMs,
-      });
-      throw err;
-    }
+    const batch = await queryReviewBatch(appId, afterId, AI_REVIEW_FETCH_BATCH, bounds, batchIndex);
     if (batch.length === 0) break;
     for (const row of batch) {
       rows.push({ raw: row.raw, reviewAt: row.reviewAt });
@@ -410,32 +599,7 @@ async function fetchStratifiedReviews(
     if (batch.length < AI_REVIEW_FETCH_BATCH) break;
   }
 
-  logDiag("ai-fetch-reviews-done", {
-    appId,
-    reviewWindowMode: window.mode,
-    batches: batchIndex,
-    rawRows: rows.length,
-    durationMs: Date.now() - startMs,
-  });
-
-  console.log(`[AI Analysis] Fetched ${rows.length} raw reviews (batched) in ${Date.now() - startMs}ms`);
-
-  const allReviews: StratifiedReview[] = [];
-
-  for (const row of rows) {
-    try {
-      const raw = row.raw;
-      const review = raw?.review as Record<string, unknown> | undefined;
-      const score = Math.round(Number(review?.score ?? 0));
-      const bucket = RATING_BUCKETS.find((b) => score >= b.min && score <= b.max);
-      const bucketLabel = bucket?.label ?? "Unrated";
-      const r = parseReviewRow(row, bucketLabel);
-      if (r) allReviews.push(r);
-    } catch (rowErr) {
-      console.warn("[AI Analysis] skip corrupt AppReview row:", (rowErr as Error).message);
-    }
-  }
-
+  const allReviews = parseRowsToStratifiedReviews(rows);
   allReviews.sort((a, b) => {
     if (a.date === "unknown" && b.date === "unknown") return 0;
     if (a.date === "unknown") return 1;
@@ -443,9 +607,64 @@ async function fetchStratifiedReviews(
     return b.date.localeCompare(a.date);
   });
 
-  console.log(`[AI Analysis] Parsed ${allReviews.length} valid reviews in ${Date.now() - startMs}ms`);
-
+  console.log(`[AI Analysis] Fetched ${allReviews.length} raw reviews (batched) in ${Date.now() - startMs}ms`);
   return allReviews;
+}
+
+async function fetchStratifiedReviews(
+  appId: number,
+  window: ReviewWindow = { mode: "all" },
+  onBatchProgress?: ReviewFetchBatchProgress,
+): Promise<FetchStratifiedResult> {
+  const startMs = Date.now();
+  const bounds = reviewWindowSqlBounds(window);
+  const totalInWindow = await countReviewsInWindow(appId, bounds);
+  const useCap = totalInWindow > AI_MAX_REVIEWS_FOR_ANALYSIS;
+
+  logDiag("ai-fetch-reviews-start", {
+    appId,
+    reviewWindowMode: window.mode,
+    reviewWindowDays: window.mode === "days" ? window.days : undefined,
+    minReviewAt: bounds.minReviewAt?.toISOString() ?? null,
+    maxReviewAt: bounds.maxReviewAt?.toISOString() ?? null,
+    batchSize: AI_REVIEW_FETCH_BATCH,
+    totalInWindow,
+    maxReviews: AI_MAX_REVIEWS_FOR_ANALYSIS,
+    stratifiedCap: useCap,
+  });
+
+  if (useCap) {
+    console.log(
+      `[AI Analysis] appId=${appId}: ${totalInWindow} reviews in window — stratified cap at ${AI_MAX_REVIEWS_FOR_ANALYSIS}`,
+    );
+    return fetchStratifiedReviewsSampled(appId, bounds, totalInWindow, onBatchProgress);
+  }
+
+  const reviews = await fetchStratifiedReviewsFull(appId, bounds, onBatchProgress);
+  logDiag("ai-fetch-reviews-done", {
+    appId,
+    reviewWindowMode: window.mode,
+    rawRows: reviews.length,
+    totalInWindow,
+    capped: false,
+    durationMs: Date.now() - startMs,
+  });
+  return { reviews, totalBeforeCap: reviews.length, capped: false };
+}
+
+function applyCapNoteToResult(
+  result: AIAnalysisResult,
+  cap: StratifiedCapResult<StratifiedReview>,
+): AIAnalysisResult {
+  if (!cap.capped) return result;
+  const note = `Phân tích trên ${cap.reviews.length.toLocaleString("vi-VN")} / ${cap.totalBeforeCap.toLocaleString("vi-VN")} bình luận (giới hạn ${AI_MAX_REVIEWS_FOR_ANALYSIS.toLocaleString("vi-VN")}, phân tầng theo thời gian và mức sao).`;
+  return {
+    ...result,
+    reviewsTotalInWindow: cap.totalBeforeCap,
+    reviewsCapped: true,
+    summaryBullets: [note, ...(result.summaryBullets ?? [])],
+    summary: [note, result.summary].filter(Boolean).join("\n"),
+  };
 }
 
 function buildBucketCounts(reviews: StratifiedReview[]): Record<string, number> {
@@ -930,16 +1149,25 @@ export class AIAnalysisService {
     const iconUrl =
       (latestRank?.raw as TapTapRawApp | null)?.icon?.url ?? null;
 
-    let reviews = await fetchStratifiedReviews(appId, reviewWindow, ({ batchIndex, totalRows }) => {
-      const pct = Math.min(9, 4 + Math.min(5, batchIndex));
-      report(
-        pct,
-        `Đang tải bình luận từ CSDL (lô ${batchIndex}, ${totalRows.toLocaleString("vi-VN")} dòng)…`,
-        "fetch",
-      );
+    let capMeta = await fetchStratifiedReviews(appId, reviewWindow, ({ batchIndex, totalRows, totalInWindow, capped }) => {
+      const est = totalInWindow
+        ? Math.max(1, Math.ceil(totalInWindow / AI_REVIEW_FETCH_BATCH))
+        : batchIndex + 5;
+      const pct = capped
+        ? Math.min(progressFloor + 22, progressFloor + 2 + Math.floor((batchIndex / Math.max(est, 1)) * 20))
+        : Math.min(9, 4 + Math.min(5, batchIndex));
+      const label = capped && totalInWindow
+        ? `Đang lấy mẫu phân tầng (ô ${batchIndex}, ${totalRows.toLocaleString("vi-VN")} / ${totalInWindow.toLocaleString("vi-VN")})…`
+        : `Đang tải bình luận từ CSDL (lô ${batchIndex}, ${totalRows.toLocaleString("vi-VN")} dòng)…`;
+      report(pct, label, "fetch");
     });
+    let reviews = capMeta.reviews;
     if (reviewWindow.mode !== "all") {
-      reviews = filterReviewsByWindow(reviews, reviewWindow);
+      const filtered = filterReviewsByWindow(reviews, reviewWindow);
+      if (filtered.length !== reviews.length) {
+        capMeta = capStratifiedReviews(filtered);
+        reviews = capMeta.reviews;
+      }
     }
 
     if (reviews.length === 0) {
@@ -947,13 +1175,18 @@ export class AIAnalysisService {
       throw new Error(`No reviews found for ${gameName} (appId: ${appId})`);
     }
 
-    logDiag("ai-analysis-reviews-loaded", { appId, reviewCount: reviews.length, gameName });
+    logDiag("ai-analysis-reviews-loaded", {
+      appId,
+      reviewCount: reviews.length,
+      totalInWindow: capMeta.totalBeforeCap,
+      capped: capMeta.capped,
+      gameName,
+    });
 
-    report(
-      Math.max(10, progressFloor + 2),
-      `Đã tải ${reviews.length} bình luận — bắt đầu phân tích AI…`,
-      "fetch",
-    );
+    const loadMsg = capMeta.capped
+      ? `Đã lấy mẫu ${reviews.length.toLocaleString("vi-VN")} / ${capMeta.totalBeforeCap.toLocaleString("vi-VN")} bình luận — bắt đầu AI…`
+      : `Đã tải ${reviews.length} bình luận — bắt đầu phân tích AI…`;
+    report(Math.max(10, progressFloor + 2), loadMsg, "fetch");
 
     const analysisContext = buildAnalysisContextFromRaw(
       appId,
@@ -970,8 +1203,8 @@ export class AIAnalysisService {
         reviewWindow,
         onProgress: reportEmit,
       });
-      logDiag("ai-analysis-done", { appId, reviewCount: reviews.length });
-      return result;
+      logDiag("ai-analysis-done", { appId, reviewCount: reviews.length, capped: capMeta.capped });
+      return applyCapNoteToResult(result, capMeta);
     } catch (err) {
       logDbError("ai-analysis-failed", err, { appId, reviewCount: reviews.length });
       throw err;
@@ -1006,7 +1239,8 @@ export class AIAnalysisService {
       "filter",
     );
 
-    const filtered = filterReviewsByWindow(reviews, reviewWindow);
+    let capMeta = capStratifiedReviews(filterReviewsByWindow(reviews, reviewWindow));
+    const filtered = capMeta.reviews;
 
     if (filtered.length === 0) {
       logDiag("ai-analysis-no-reviews", { appId, gameName, source });
@@ -1016,15 +1250,16 @@ export class AIAnalysisService {
     logDiag("ai-analysis-reviews-loaded", {
       appId,
       reviewCount: filtered.length,
+      totalInWindow: capMeta.totalBeforeCap,
+      capped: capMeta.capped,
       gameName,
       source,
     });
 
-    report(
-      Math.max(14, progressFloor + 1),
-      `${filtered.length} bình luận sau lọc — chuẩn bị AI…`,
-      "filter",
-    );
+    const filterMsg = capMeta.capped
+      ? `${filtered.length.toLocaleString("vi-VN")} / ${capMeta.totalBeforeCap.toLocaleString("vi-VN")} bình luận (mẫu phân tầng) — chuẩn bị AI…`
+      : `${filtered.length} bình luận sau lọc — chuẩn bị AI…`;
+    report(Math.max(14, progressFloor + 1), filterMsg, "filter");
 
     const analysisContext = buildAnalysisContextFromRaw(
       appId,
@@ -1041,8 +1276,8 @@ export class AIAnalysisService {
         reviewWindow,
         onProgress: reportEmit,
       });
-      logDiag("ai-analysis-done", { appId, reviewCount: filtered.length, source });
-      return result;
+      logDiag("ai-analysis-done", { appId, reviewCount: filtered.length, source, capped: capMeta.capped });
+      return applyCapNoteToResult(result, capMeta);
     } catch (err) {
       logDbError("ai-analysis-failed", err, {
         appId,
