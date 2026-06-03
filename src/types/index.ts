@@ -444,7 +444,7 @@ export interface AIAnalysisResult {
   recentTrend: string;
   recentTrendBullets?: string[];
   reviewsAnalyzed: number;
-  /** Tổng review trong khoảng (trước khi giới hạn 10k mẫu phân tầng). */
+  /** Tổng review trong khoảng (trước khi giới hạn cap AI, mặc định 15k). */
   reviewsTotalInWindow?: number;
   reviewsCapped?: boolean;
   bucketCounts: Record<string, number>;

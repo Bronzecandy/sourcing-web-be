@@ -47,8 +47,10 @@ import { buildDbFetchProgress } from "../utils/analysis-progress-copy";
 import {
   AI_MAX_REVIEWS_FOR_ANALYSIS,
   AI_STRATIFY_TIME_BUCKETS,
-  allocateStratifiedCellLimits,
+  allocateTimeBucketLimits,
   buildTimeSlices,
+  AI_DB_STRATIFIED_THRESHOLD,
+  capReviewsForAnalysis,
   capStratifiedReviews,
   type StratifiedCapResult,
 } from "../utils/review-stratified-cap";
@@ -439,21 +441,19 @@ function parseRowsToStratifiedReviews(
   return { reviews: out, corruptSkipped };
 }
 
-async function queryStratifiedCell(
+async function queryReviewsInTimeBucket(
   appId: number,
   bounds: { minReviewAt: Date | null; maxReviewAt: Date | null },
   opts: {
-    star: number;
     limit: number;
     timeStart?: Date;
     timeEnd?: Date;
     reviewAtIsNull?: boolean;
   },
 ): Promise<{ raw: Record<string, unknown>; reviewAt: Date | null }[]> {
-  const params: unknown[] = [appId, opts.star];
-  let where = `"appId" = $1 AND raw IS NOT NULL
-    AND (regexp_match(raw::text, '"score"\\s*:\\s*([0-9]+)'))[1]::int = $2`;
-  let idx = 3;
+  const params: unknown[] = [appId];
+  let where = `"appId" = $1 AND raw IS NOT NULL`;
+  let idx = 2;
   const extra = appendWindowBoundsSql(bounds, params, idx);
   where += extra.where;
   idx = extra.nextIdx;
@@ -478,6 +478,63 @@ async function queryStratifiedCell(
   return res.rows;
 }
 
+function stratifiedReviewKey(r: StratifiedReview): string {
+  return `${r.date}|${r.score}|${r.text.slice(0, 120)}`;
+}
+
+/** Bổ sung review khi lấy mẫu theo khung thời gian chưa đủ tới `target`. */
+async function topUpStratifiedReviews(
+  appId: number,
+  bounds: { minReviewAt: Date | null; maxReviewAt: Date | null },
+  collected: StratifiedReview[],
+  target: number,
+  onBatchProgress?: ReviewFetchBatchProgress,
+): Promise<StratifiedReview[]> {
+  const goal = Math.min(target, collected.length + 500_000);
+  if (collected.length >= goal) return collected;
+
+  const seen = new Set(collected.map(stratifiedReviewKey));
+  const out = [...collected];
+  let afterId = 0;
+  let batchIndex = 0;
+
+  while (out.length < goal) {
+    batchIndex++;
+    const batch = await queryReviewBatch(appId, afterId, AI_REVIEW_FETCH_BATCH, bounds, batchIndex);
+    if (batch.length === 0) break;
+
+    for (const row of batch) {
+      afterId = row.id;
+      try {
+        const raw = row.raw;
+        const review = raw?.review as Record<string, unknown> | undefined;
+        const score = Math.round(Number(review?.score ?? 0));
+        const bucket = RATING_BUCKETS.find((b) => score >= b.min && score <= b.max);
+        const bucketLabel = bucket?.label ?? "Unrated";
+        const parsed = parseReviewRow(row, bucketLabel);
+        if (!parsed) continue;
+        const key = stratifiedReviewKey(parsed);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(parsed);
+        if (out.length >= goal) break;
+      } catch {
+        /* skip corrupt */
+      }
+    }
+
+    onBatchProgress?.({
+      batchIndex,
+      totalRows: out.length,
+      capped: true,
+    });
+
+    if (batch.length < AI_REVIEW_FETCH_BATCH) break;
+  }
+
+  return out;
+}
+
 async function fetchStratifiedReviewsSampled(
   appId: number,
   bounds: { minReviewAt: Date | null; maxReviewAt: Date | null },
@@ -500,75 +557,78 @@ async function fetchStratifiedReviewsSampled(
   const maxAt = rangeRes.rows[0]?.max;
   const nullDates = rangeRes.rows[0]?.nulls ?? 0;
 
-  const { perCell, cellCount: stratifiedCellCount } = allocateStratifiedCellLimits(
+  const { perBucket, bucketCount } = allocateTimeBucketLimits(
     AI_MAX_REVIEWS_FOR_ANALYSIS,
     AI_STRATIFY_TIME_BUCKETS,
     nullDates > 0,
   );
 
-  const collected: StratifiedReview[] = [];
+  let collected: StratifiedReview[] = [];
   let corruptSkipped = 0;
-  let cellIndex = 0;
-  const stepTotal = stratifiedCellCount;
-  const stars = [1, 2, 3, 4, 5] as const;
+  let bucketIndex = 0;
+  const stepTotal = bucketCount;
 
-  const runCells = async (
-    timeStart: Date | undefined,
-    timeEnd: Date | undefined,
-    reviewAtIsNull: boolean,
+  const fetchBucket = async (
+    label: string,
+    opts: {
+      limit: number;
+      timeStart?: Date;
+      timeEnd?: Date;
+      reviewAtIsNull?: boolean;
+    },
   ) => {
-    for (const star of stars) {
-      cellIndex++;
-      const rows = await withDbRetry(
-        () =>
-          queryStratifiedCell(appId, bounds, {
-            star,
-            limit: perCell,
-            timeStart,
-            timeEnd,
-            reviewAtIsNull,
-          }),
-        `ai-stratified-cell-${appId}-${cellIndex}`,
-      );
-      const parsed = parseRowsToStratifiedReviews(rows);
-      corruptSkipped += parsed.corruptSkipped;
-      collected.push(...parsed.reviews);
-      onBatchProgress?.({
-        batchIndex: cellIndex,
-        totalRows: collected.length,
-        totalInWindow,
-        capped: true,
-        stepTotal,
-      });
-    }
+    bucketIndex++;
+    const rows = await withDbRetry(
+      () => queryReviewsInTimeBucket(appId, bounds, opts),
+      `ai-time-bucket-${appId}-${label}`,
+    );
+    const parsed = parseRowsToStratifiedReviews(rows);
+    corruptSkipped += parsed.corruptSkipped;
+    collected.push(...parsed.reviews);
+    onBatchProgress?.({
+      batchIndex: bucketIndex,
+      totalRows: collected.length,
+      totalInWindow,
+      capped: true,
+      stepTotal,
+    });
   };
 
   if (minAt && maxAt) {
     const slices = buildTimeSlices(minAt, maxAt, AI_STRATIFY_TIME_BUCKETS);
-    for (const slice of slices) {
-      await runCells(slice.start, slice.end, false);
-    }
-  } else {
-    for (const star of stars) {
-      cellIndex++;
-      const rows = await withDbRetry(
-        () => queryStratifiedCell(appId, bounds, { star, limit: perCell }),
-        `ai-stratified-cell-${appId}-${cellIndex}`,
-      );
-      const parsed = parseRowsToStratifiedReviews(rows);
-      corruptSkipped += parsed.corruptSkipped;
-      collected.push(...parsed.reviews);
-      onBatchProgress?.({
-        batchIndex: cellIndex,
-        totalRows: collected.length,
-        totalInWindow,
-        capped: true,
-        stepTotal,
+    for (let i = 0; i < slices.length; i++) {
+      const slice = slices[i]!;
+      await fetchBucket(`t${i}`, {
+        limit: perBucket,
+        timeStart: slice.start,
+        timeEnd: slice.end,
       });
     }
+  } else {
+    await fetchBucket("all", { limit: perBucket });
   }
+
   if (nullDates > 0) {
-    await runCells(undefined, undefined, true);
+    await fetchBucket("unknown-date", {
+      limit: perBucket,
+      reviewAtIsNull: true,
+    });
+  }
+
+  const beforeTopUp = collected.length;
+  if (collected.length < AI_MAX_REVIEWS_FOR_ANALYSIS) {
+    collected = await topUpStratifiedReviews(
+      appId,
+      bounds,
+      collected,
+      AI_MAX_REVIEWS_FOR_ANALYSIS,
+      onBatchProgress,
+    );
+    if (collected.length > beforeTopUp) {
+      aiInfoLog(
+        `[AI Analysis] appId=${appId}: top-up stratified sample ${beforeTopUp} → ${collected.length} (target ${AI_MAX_REVIEWS_FOR_ANALYSIS})`,
+      );
+    }
   }
 
   const capped = capStratifiedReviews(collected, AI_MAX_REVIEWS_FOR_ANALYSIS);
@@ -583,15 +643,19 @@ async function fetchStratifiedReviewsSampled(
     rawRows: capped.reviews.length,
     totalInWindow,
     capped: true,
-    cellsQueried: cellIndex,
+    timeBucketsQueried: bucketIndex,
     durationMs: Date.now() - startMs,
   });
 
   aiInfoLog(
-    `[AI Analysis] Stratified sample ${capped.reviews.length}/${totalInWindow} reviews (${cellIndex} cells) in ${Date.now() - startMs}ms`,
+    `[AI Analysis] Time-stratified sample ${capped.reviews.length}/${totalInWindow} reviews (${bucketIndex} time buckets) in ${Date.now() - startMs}ms`,
   );
 
-  return capped;
+  return {
+    reviews: capped.reviews,
+    totalBeforeCap: totalInWindow,
+    capped: totalInWindow > AI_MAX_REVIEWS_FOR_ANALYSIS,
+  };
 }
 
 async function fetchStratifiedReviewsFull(
@@ -640,7 +704,8 @@ async function fetchStratifiedReviews(
   const startMs = Date.now();
   const bounds = reviewWindowSqlBounds(window);
   const totalInWindow = await countReviewsInWindow(appId, bounds);
-  const useCap = totalInWindow > AI_MAX_REVIEWS_FOR_ANALYSIS;
+  const overMax = totalInWindow > AI_MAX_REVIEWS_FOR_ANALYSIS;
+  const useDbCellSample = totalInWindow > AI_DB_STRATIFIED_THRESHOLD;
 
   logDiagBrief("ai-fetch-reviews-start", {
     appId,
@@ -648,26 +713,47 @@ async function fetchStratifiedReviews(
     reviewWindowDays: window.mode === "days" ? window.days : undefined,
     totalInWindow,
     maxReviews: AI_MAX_REVIEWS_FOR_ANALYSIS,
-    stratifiedCap: useCap,
+    stratifiedCap: overMax,
+    fetchMode: !overMax ? "full" : useDbCellSample ? "db_time_buckets" : "full_then_cap",
   });
 
-  if (useCap) {
+  if (!overMax) {
     aiInfoLog(
-      `[AI Analysis] appId=${appId}: ${totalInWindow} reviews in window — stratified cap at ${AI_MAX_REVIEWS_FOR_ANALYSIS}`,
+      `[AI Analysis] appId=${appId}: ${totalInWindow} reviews — loading all (no sampling)`,
     );
-    return fetchStratifiedReviewsSampled(appId, bounds, totalInWindow, onBatchProgress);
+    const reviews = await fetchStratifiedReviewsFull(appId, bounds, onBatchProgress);
+    logDiagBrief("ai-fetch-reviews-done", {
+      appId,
+      reviewWindowMode: window.mode,
+      rawRows: reviews.length,
+      totalInWindow,
+      capped: false,
+      durationMs: Date.now() - startMs,
+    });
+    return { reviews, totalBeforeCap: totalInWindow, capped: false };
   }
 
-  const reviews = await fetchStratifiedReviewsFull(appId, bounds, onBatchProgress);
-  logDiagBrief("ai-fetch-reviews-done", {
-    appId,
-    reviewWindowMode: window.mode,
-    rawRows: reviews.length,
-    totalInWindow,
-    capped: false,
-    durationMs: Date.now() - startMs,
-  });
-  return { reviews, totalBeforeCap: reviews.length, capped: false };
+  if (!useDbCellSample) {
+    aiInfoLog(
+      `[AI Analysis] appId=${appId}: ${totalInWindow} reviews — full load then cap at ${AI_MAX_REVIEWS_FOR_ANALYSIS}`,
+    );
+    const reviews = await fetchStratifiedReviewsFull(appId, bounds, onBatchProgress);
+    const capped = capStratifiedReviews(reviews, AI_MAX_REVIEWS_FOR_ANALYSIS);
+    logDiagBrief("ai-fetch-reviews-done", {
+      appId,
+      reviewWindowMode: window.mode,
+      rawRows: capped.reviews.length,
+      totalInWindow,
+      capped: true,
+      durationMs: Date.now() - startMs,
+    });
+    return { ...capped, totalBeforeCap: totalInWindow, capped: true };
+  }
+
+  aiInfoLog(
+    `[AI Analysis] appId=${appId}: ${totalInWindow} reviews — DB stratified sample up to ${AI_MAX_REVIEWS_FOR_ANALYSIS}`,
+  );
+  return fetchStratifiedReviewsSampled(appId, bounds, totalInWindow, onBatchProgress);
 }
 
 function applyCapNoteToResult(
@@ -675,7 +761,7 @@ function applyCapNoteToResult(
   cap: StratifiedCapResult<StratifiedReview>,
 ): AIAnalysisResult {
   if (!cap.capped) return result;
-  const note = `Phân tích trên ${cap.reviews.length.toLocaleString("vi-VN")} / ${cap.totalBeforeCap.toLocaleString("vi-VN")} bình luận (giới hạn ${AI_MAX_REVIEWS_FOR_ANALYSIS.toLocaleString("vi-VN")}, phân tầng theo thời gian và mức sao).`;
+  const note = `Phân tích trên ${cap.reviews.length.toLocaleString("vi-VN")} / ${cap.totalBeforeCap.toLocaleString("vi-VN")} bình luận (giới hạn ${AI_MAX_REVIEWS_FOR_ANALYSIS.toLocaleString("vi-VN")}, phân tầng theo thời gian).`;
   return {
     ...result,
     reviewsTotalInWindow: cap.totalBeforeCap,
@@ -1170,7 +1256,7 @@ export class AIAnalysisService {
       reviewWindow,
       ({ batchIndex, totalRows, totalInWindow, capped, stepTotal }) => {
         const est = capped
-          ? (stepTotal ?? AI_STRATIFY_TIME_BUCKETS * 5)
+          ? (stepTotal ?? AI_STRATIFY_TIME_BUCKETS + 1)
           : totalInWindow
             ? Math.max(1, Math.ceil(totalInWindow / AI_REVIEW_FETCH_BATCH))
             : batchIndex + 5;
@@ -1195,7 +1281,7 @@ export class AIAnalysisService {
     if (reviewWindow.mode !== "all") {
       const filtered = filterReviewsByWindow(reviews, reviewWindow);
       if (filtered.length !== reviews.length) {
-        capMeta = capStratifiedReviews(filtered);
+        capMeta = capReviewsForAnalysis(filtered);
         reviews = capMeta.reviews;
       }
     }
@@ -1273,7 +1359,7 @@ export class AIAnalysisService {
       "filter",
     );
 
-    let capMeta = capStratifiedReviews(filterReviewsByWindow(reviews, reviewWindow));
+    let capMeta = capReviewsForAnalysis(filterReviewsByWindow(reviews, reviewWindow));
     const filtered = capMeta.reviews;
 
     if (filtered.length === 0) {

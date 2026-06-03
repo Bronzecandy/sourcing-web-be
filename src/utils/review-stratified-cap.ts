@@ -1,4 +1,4 @@
-/** Giới hạn review đưa vào LLM + lấy mẫu phân tầng (thời gian × sao). */
+/** Giới hạn review đưa vào LLM + lấy mẫu phân tầng theo thời gian (khi > cap). */
 
 export interface ReviewForStratifiedCap {
   text: string;
@@ -24,7 +24,13 @@ export function intEnvCap(name: string, def: number): number {
 
 export const AI_MAX_REVIEWS_FOR_ANALYSIS = Math.max(
   500,
-  intEnvCap("AI_MAX_REVIEWS_FOR_ANALYSIS", 10_000),
+  intEnvCap("AI_MAX_REVIEWS_FOR_ANALYSIS", 15_000),
+);
+
+/** Dưới ngưỡng này: tải full rồi cap trong RAM. Trên ngưỡng: lấy mẫu theo khung thời gian trên DB. */
+export const AI_DB_STRATIFIED_THRESHOLD = Math.max(
+  AI_MAX_REVIEWS_FOR_ANALYSIS,
+  intEnvCap("AI_DB_STRATIFIED_THRESHOLD", 25_000),
 );
 
 export const AI_STRATIFY_TIME_BUCKETS = Math.max(
@@ -51,8 +57,8 @@ function timeBucketIndex(
   return Math.min(bucketCount - 1, Math.floor(ratio * bucketCount));
 }
 
-function cellKey(timeIdx: number | "unknown", score: number): string {
-  return `${timeIdx}-${score}`;
+function timeCellKey(timeIdx: number | "unknown"): string {
+  return String(timeIdx);
 }
 
 function allocatePerCellLimits(total: number, cellCount: number): number[] {
@@ -78,7 +84,7 @@ export function sampleEvenly<T>(items: T[], take: number): T[] {
   return out;
 }
 
-function groupByStratifiedCells(
+function groupByTimeBuckets(
   reviews: ReviewForStratifiedCap[],
   timeBucketCount: number,
 ): Map<string, ReviewForStratifiedCap[]> {
@@ -103,16 +109,13 @@ function groupByStratifiedCells(
   };
 
   for (const r of reviews) {
-    const score =
-      r.score >= 1 && r.score <= 5 ? r.score : Math.round(Number(r.score)) || 0;
-    if (score < 1 || score > 5) continue;
     const t = parseYmd(r.date);
     if (t == null) {
-      push(cellKey("unknown", score), r);
+      push(timeCellKey("unknown"), r);
       continue;
     }
     const tb = timeBucketIndex(r.date, minMs, maxMs, timeBucketCount);
-    push(cellKey(tb, score), r);
+    push(timeCellKey(tb), r);
   }
 
   for (const list of groups.values()) {
@@ -133,7 +136,22 @@ export type StratifiedCapResult<T extends ReviewForStratifiedCap> = {
   capped: boolean;
 };
 
-/** Phân tầng theo khung thời gian + sao 1–5, tối đa `max` review. */
+/**
+ * ≤ max: trả nguyên danh sách (không lấy mẫu).
+ * > max: phân tầng theo thời gian tới `max`.
+ */
+export function capReviewsForAnalysis<T extends ReviewForStratifiedCap>(
+  reviews: T[],
+  max: number = AI_MAX_REVIEWS_FOR_ANALYSIS,
+): StratifiedCapResult<T> {
+  const totalBeforeCap = reviews.length;
+  if (totalBeforeCap <= max) {
+    return { reviews, totalBeforeCap, capped: false };
+  }
+  return capStratifiedReviews(reviews, max);
+}
+
+/** Phân tầng theo khung thời gian, tối đa `max` review (không chia theo sao). */
 export function capStratifiedReviews<T extends ReviewForStratifiedCap>(
   reviews: T[],
   max: number = AI_MAX_REVIEWS_FOR_ANALYSIS,
@@ -144,7 +162,7 @@ export function capStratifiedReviews<T extends ReviewForStratifiedCap>(
     return { reviews, totalBeforeCap, capped: false };
   }
 
-  const groups = groupByStratifiedCells(reviews, timeBucketCount);
+  const groups = groupByTimeBuckets(reviews, timeBucketCount);
   const keys = [...groups.keys()].filter((k) => (groups.get(k)?.length ?? 0) > 0);
   const limits = allocatePerCellLimits(max, keys.length);
 
@@ -185,12 +203,23 @@ export function buildTimeSlices(
   return slices;
 }
 
+/** Số review tối đa mỗi khung thời gian khi lấy mẫu trên DB. */
+export function allocateTimeBucketLimits(
+  max: number,
+  timeBucketCount: number,
+  includeUnknownTime: boolean,
+): { perBucket: number; bucketCount: number } {
+  const bucketCount = timeBucketCount + (includeUnknownTime ? 1 : 0);
+  const perBucket = Math.max(1, Math.ceil(max / Math.max(1, bucketCount)));
+  return { perBucket, bucketCount };
+}
+
+/** @deprecated Dùng allocateTimeBucketLimits */
 export function allocateStratifiedCellLimits(
   max: number,
   timeBucketCount: number,
   includeUnknownTime: boolean,
 ): { perCell: number; cellCount: number } {
-  const cellCount = timeBucketCount * 5 + (includeUnknownTime ? 5 : 0);
-  const perCell = Math.max(1, Math.ceil(max / Math.max(1, cellCount)));
-  return { perCell, cellCount };
+  const { perBucket, bucketCount } = allocateTimeBucketLimits(max, timeBucketCount, includeUnknownTime);
+  return { perCell: perBucket, cellCount: bucketCount };
 }

@@ -26,7 +26,7 @@ Tất cả đều gọi chung `AiAnalysisService.runLLMAnalysis()` sau khi có d
 
 ### Thu thập dữ liệu theo nguồn
 
-- **CSDL:** `fetchStratifiedReviews(appId)` — stratified theo sao 1–5, batch SQL (`be/src/services/ai-analysis.service.ts`).
+- **CSDL:** `fetchStratifiedReviews(appId)` — ≤15k BL: tải hết; >15k: phân tầng theo thời gian tới cap (mặc định `AI_MAX_REVIEWS_FOR_ANALYSIS=15000`), batch SQL (`be/src/services/ai-analysis.service.ts`).
 - **TapTap external:** `be/src/routes/analysis.routes.ts` → `fetchTapTapBundle` — ưu tiên `TAPTAP_PROXY_URL`, fallback direct; reviews + `detailRaw` cho metadata.
 - **Steam:** `fetchSteamReviewsUpTo` + `buildSteamDetailRaw`.
 - **CSV:** `parseCsvBuffer` → reviews + hash `appId` giả.
