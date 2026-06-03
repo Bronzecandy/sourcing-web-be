@@ -1,4 +1,5 @@
 import { prisma } from "../utils/prisma";
+import { withDbRetry } from "../utils/db-retry";
 import type { TapTapRawApp } from "../types";
 
 export interface AnalysisContext {
@@ -292,10 +293,14 @@ export function buildSearchHaystack(raw: TapTapRawApp | Record<string, unknown> 
 }
 
 export async function loadAnalysisContext(appId: number): Promise<AnalysisContext | null> {
-  const latestRank = await prisma.appRank.findFirst({
-    where: { appId },
-    orderBy: { date: "desc" },
-  });
+  const latestRank = await withDbRetry(
+    () =>
+      prisma.appRank.findFirst({
+        where: { appId },
+        orderBy: { date: "desc" },
+      }),
+    `analysis-context-rank-${appId}`,
+  );
   const raw = (latestRank?.raw ?? null) as TapTapRawApp | null;
   const gameName = raw?.title ?? `App #${appId}`;
   const iconUrl = raw?.icon?.url ?? null;

@@ -1,4 +1,5 @@
 import { cache, setForceRefresh } from "./utils/cache";
+import { withDbRetry } from "./utils/db-retry";
 import { rankingService } from "./services/ranking.service";
 import { gameService } from "./services/game.service";
 import { prisma } from "./utils/prisma";
@@ -7,37 +8,11 @@ const ALL_PLATFORMS = ["combined", "android", "ios"] as const;
 const POTENTIAL_DAYS = [7, 14, 30];
 const DETAIL_DAYS = [7, 14, 30, 60];
 
-function isRetryableDbError(err: unknown): boolean {
-  const code = (err as { code?: string }).code;
-  const msg = String((err as { message?: string }).message ?? "");
-  return code === "40001" || code === "P2034" || code === "P1008"
-    || msg.includes("timed out") || msg.includes("timeout exceeded")
-    || msg.includes("SocketTimeout")
-    || msg.includes("ETIMEDOUT") || msg.includes("ECONNRESET")
-    || msg.includes("Connection terminated");
-}
-
-async function retry<T>(
-  fn: () => Promise<T>,
-  label: string,
-  maxAttempts = 5,
-  delayMs = 3000,
-): Promise<T> {
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      return await fn();
-    } catch (err: unknown) {
-      if (!isRetryableDbError(err) || attempt === maxAttempts) throw err;
-      const wait = delayMs * attempt;
-      const code = (err as { code?: string }).code ?? "unknown";
-      console.warn(`[precompute] ${label} attempt ${attempt}/${maxAttempts} failed (${code}), retrying in ${wait}ms...`);
-      await new Promise((r) => setTimeout(r, wait));
-    }
-  }
-  throw new Error("unreachable");
-}
-
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function retry<T>(fn: () => Promise<T>, label: string): Promise<T> {
+  return withDbRetry(fn, label);
+}
 
 async function runSequential(tasks: Array<{ label: string; fn: () => Promise<unknown> }>) {
   for (const t of tasks) {

@@ -1,4 +1,5 @@
 import NodeCache from "node-cache";
+import { withDbRetry } from "./db-retry";
 
 const ONE_DAY = 86400;
 
@@ -24,7 +25,7 @@ export function getCachedOrFetch<T>(
     if (cached !== undefined) return Promise.resolve(cached);
   }
 
-  return fetcher().then((data) => {
+  return withDbRetry(() => fetcher(), `cache:${key}`).then((data) => {
     cache.set(key, data, ttl);
     return data;
   });

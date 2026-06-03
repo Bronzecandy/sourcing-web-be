@@ -38,6 +38,7 @@ import {
   listAnalysesForUser,
   saveAnalysisForUser,
 } from "./ai-analysis-store";
+import { isRetryableDbError, withDbRetry } from "../utils/db-retry";
 
 const RATING_BUCKETS = [
   { label: "Very Negative", min: 1, max: 1 },
@@ -242,12 +243,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function isRetryablePgError(err: unknown): boolean {
-  const e = err as { code?: string; message?: string };
-  if (e.code === "40001" || e.code === "40P01" || e.code === "57P03") return true;
-  return typeof e.message === "string" && e.message.includes("conflict with recovery");
-}
-
 async function queryReviewBatch(
   appId: number,
   afterId: number,
@@ -282,7 +277,7 @@ async function queryReviewBatch(
       return res.rows;
     } catch (err) {
       lastErr = err;
-      if (!isRetryablePgError(err) || attempt === 3) throw err;
+      if (!isRetryableDbError(err) || attempt === 3) throw err;
       console.warn(`[AI Analysis] AppReview batch retry ${attempt + 1}/3:`, (err as Error).message);
       await sleep(250 * (attempt + 1));
     }
@@ -798,7 +793,10 @@ export class AIAnalysisService {
 
   /** Có review trong DB → phân tích nhanh, không cần proxy TapTap. */
   async countDatabaseReviews(appId: number): Promise<number> {
-    return prisma.appReview.count({ where: { appId } });
+    return withDbRetry(
+      () => prisma.appReview.count({ where: { appId } }),
+      `ai-review-count-${appId}`,
+    );
   }
 
   async analyzeGameReviews(
@@ -818,10 +816,14 @@ export class AIAnalysisService {
       "fetch",
     );
 
-    const latestRank = await prisma.appRank.findFirst({
-      where: { appId },
-      orderBy: { date: "desc" },
-    });
+    const latestRank = await withDbRetry(
+      () =>
+        prisma.appRank.findFirst({
+          where: { appId },
+          orderBy: { date: "desc" },
+        }),
+      `ai-rank-meta-${appId}`,
+    );
 
     const gameName =
       (latestRank?.raw as TapTapRawApp | null)?.title ?? `App #${appId}`;

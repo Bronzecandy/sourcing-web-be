@@ -1,6 +1,7 @@
 import { prisma } from "../utils/prisma";
 import { pool } from "../utils/prisma";
 import { getCachedOrFetch } from "../utils/cache";
+import { withDbRetry } from "../utils/db-retry";
 import { translateTag, translateTags } from "../utils/tag-translator";
 import { translateText, translateVietnameseToEnglish } from "../utils/translator";
 import type {
@@ -416,8 +417,10 @@ export class GameService {
 
         const reviewDistribution: Record<string, number> = {};
         try {
-          const distRows = await pool.query<{ score: number; cnt: number }>(
-            `SELECT (raw->'review'->'score')::text::numeric AS score, COUNT(*)::int AS cnt
+          const distRows = await withDbRetry(
+            () =>
+              pool.query<{ score: number; cnt: number }>(
+                `SELECT (raw->'review'->'score')::text::numeric AS score, COUNT(*)::int AS cnt
              FROM "AppReview"
              WHERE "appId" = $1
                AND raw IS NOT NULL
@@ -425,7 +428,9 @@ export class GameService {
                AND raw->'review'->'score' IS NOT NULL
              GROUP BY score
              ORDER BY score`,
-            [appId]
+                [appId],
+              ),
+            `game-detail-review-dist-${appId}`,
           );
           for (const r of distRows.rows) {
             const star = Math.round(Number(r.score));
@@ -434,7 +439,10 @@ export class GameService {
             }
           }
         } catch (err) {
-          console.warn(`[game-detail] Review distribution query failed for appId ${appId}, skipping`);
+          console.warn(
+            `[game-detail] Review distribution query failed for appId ${appId}, skipping:`,
+            (err as Error).message,
+          );
         }
 
         return {
@@ -475,15 +483,19 @@ export class GameService {
     limit: number = 20
   ) {
     const skip = (page - 1) * limit;
-    const [rows, total] = await Promise.all([
-      prisma.appReview.findMany({
-        where: { appId },
-        orderBy: { reviewAt: "desc" },
-        skip,
-        take: limit,
-      }),
-      prisma.appReview.count({ where: { appId } }),
-    ]);
+    const [rows, total] = await withDbRetry(
+      () =>
+        Promise.all([
+          prisma.appReview.findMany({
+            where: { appId },
+            orderBy: { reviewAt: "desc" },
+            skip,
+            take: limit,
+          }),
+          prisma.appReview.count({ where: { appId } }),
+        ]),
+      `game-reviews-${appId}-p${page}`,
+    );
 
     const data = rows.map((r: { id: number; reviewId: string; raw: unknown; reviewAt: Date | null }) => {
       const raw = r.raw as Record<string, unknown> | null;
