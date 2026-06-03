@@ -426,7 +426,7 @@ export class GameService {
                FROM "AppReview"
                WHERE "appId" = $1
                  AND raw IS NOT NULL
-                 AND raw->'review' ? 'score'
+                 AND (raw->'review'->>'score') IS NOT NULL
                  AND (raw->'review'->>'score') ~ '^[0-9]+(\\.[0-9]+)?$'
              ) s
              GROUP BY star
