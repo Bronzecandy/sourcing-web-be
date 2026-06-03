@@ -34,7 +34,7 @@ import {
 import type { AuthedRequest } from "../middleware/auth";
 import type { Response } from "express";
 import { beginAnalysisStream, endAnalysisStream } from "../utils/analysis-active-guard";
-import { logDiag, logDiagError } from "../utils/process-diagnostics";
+import { logDiagBrief, logDiagError } from "../utils/process-diagnostics";
 
 const router = Router();
 
@@ -204,13 +204,14 @@ router.post("/analyze-external", async (req: AuthedRequest, res) => {
         return;
       }
 
-      progress({ percent: 3, phase: "db_check", message: "Đang kiểm tra bình luận trong CSDL…" });
+      progress({ percent: 3, phase: "db_check", message: "Đang kiểm tra dữ liệu đã lưu trên server…" });
       const dbReviewCount = await aiAnalysisService.countDatabaseReviews(appId);
       if (dbReviewCount > 0) {
         progress({
           percent: 8,
           phase: "db",
-          message: `Có ${dbReviewCount} bình luận trong CSDL — phân tích nhanh (không qua proxy)…`,
+          message: `Tìm thấy ${dbReviewCount.toLocaleString("vi-VN")} bình luận — dùng dữ liệu đã lưu (nhanh hơn tải TapTap)…`,
+          detail: { total: dbReviewCount },
         });
         try {
           const result = await aiAnalysisService.analyzeGameReviews(
@@ -548,7 +549,7 @@ router.post("/analyze/:appId", async (req: AuthedRequest, res) => {
   if (!userId) return;
   const appId = parseInt(String(req.params.appId));
   const reviewWindow = parseReviewWindow(req.body?.reviewWindow);
-  logDiag("api-ai-analyze", { appId, stream: wantsAnalysisStream(req.body) });
+  logDiagBrief("api-ai-analyze", { appId, stream: wantsAnalysisStream(req.body) });
 
   if (wantsAnalysisStream(req.body)) {
     beginAnalysisStream(`analyze-${appId}`);

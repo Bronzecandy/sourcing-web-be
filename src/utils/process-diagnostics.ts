@@ -3,6 +3,11 @@ import { pool } from "./prisma";
 import { classifyPgError, serializePgError } from "./pg-error";
 
 const ENABLED = process.env.DIAG_LOGS !== "0";
+const VERBOSE = process.env.DIAG_VERBOSE === "1";
+
+export function isDiagVerbose(): boolean {
+  return VERBOSE;
+}
 
 function mb(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
@@ -48,6 +53,32 @@ export function logDiag(
     ...detail,
   };
   console.log("[diag]", JSON.stringify(payload));
+}
+
+/** Chi tiết từng batch / query — chỉ khi DIAG_VERBOSE=1. */
+export function logDiagVerbose(
+  event: string,
+  detail: Record<string, string | number | boolean | null | undefined> = {},
+): void {
+  if (!ENABLED || !VERBOSE) return;
+  logDiag(event, detail);
+}
+
+/** Mốc quan trọng — không kèm pool/memory (tránh spam khi gọi dày). */
+export function logDiagBrief(
+  event: string,
+  detail: Record<string, string | number | boolean | null | undefined> = {},
+): void {
+  if (!ENABLED) return;
+  console.log(
+    "[diag]",
+    JSON.stringify({
+      event,
+      pid: process.pid,
+      uptimeSec: Math.round(process.uptime()),
+      ...detail,
+    }),
+  );
 }
 
 export function serializeErr(err: unknown): Record<string, string | undefined> {

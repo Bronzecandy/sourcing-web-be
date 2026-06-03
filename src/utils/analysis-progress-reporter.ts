@@ -15,7 +15,12 @@ export function createMonotonicReporter(
     if (nextMax > max || (messageChanged && nextMax >= max)) {
       max = nextMax;
       if (messageChanged) lastMessage = message;
-      onProgress?.({ percent: max, message: message || lastMessage, phase: event.phase });
+      onProgress?.({
+        percent: max,
+        message: message || lastMessage,
+        phase: event.phase,
+        detail: event.detail,
+      });
     }
   };
 }
@@ -25,8 +30,12 @@ export function createProgressStepReporter(
   floor = 0,
 ) {
   const emit = createMonotonicReporter(onProgress, floor);
-  const step = (percent: number, message: string, phase: string) =>
-    emit({ percent, message, phase });
+  const step = (
+    percent: number,
+    message: string,
+    phase: string,
+    detail?: AnalysisProgressEvent["detail"],
+  ) => emit({ percent, message, phase, detail });
   return { step, emit };
 }
 
