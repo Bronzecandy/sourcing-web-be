@@ -419,21 +419,24 @@ export class GameService {
         try {
           const distRows = await withDbRetry(
             () =>
-              pool.query<{ score: number; cnt: number }>(
-                `SELECT (raw->'review'->'score')::text::numeric AS score, COUNT(*)::int AS cnt
-             FROM "AppReview"
-             WHERE "appId" = $1
-               AND raw IS NOT NULL
-               AND raw->'review' IS NOT NULL
-               AND raw->'review'->'score' IS NOT NULL
-             GROUP BY score
-             ORDER BY score`,
+              pool.query<{ star: number; cnt: number }>(
+                `SELECT star, COUNT(*)::int AS cnt
+             FROM (
+               SELECT LEAST(5, GREATEST(1, ROUND((raw->'review'->>'score')::numeric)))::int AS star
+               FROM "AppReview"
+               WHERE "appId" = $1
+                 AND raw IS NOT NULL
+                 AND raw->'review' ? 'score'
+                 AND (raw->'review'->>'score') ~ '^[0-9]+(\\.[0-9]+)?$'
+             ) s
+             GROUP BY star
+             ORDER BY star`,
                 [appId],
               ),
             `game-detail-review-dist-${appId}`,
           );
           for (const r of distRows.rows) {
-            const star = Math.round(Number(r.score));
+            const star = r.star;
             if (star >= 1 && star <= 5) {
               reviewDistribution[`${star}`] = (reviewDistribution[`${star}`] ?? 0) + r.cnt;
             }
