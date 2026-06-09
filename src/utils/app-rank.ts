@@ -145,6 +145,16 @@ export function primaryLaunchBoard(
   return null;
 }
 
+/** Rank on a specific launch board for the given platform. */
+export function rankForLaunchBoard(
+  row: AppRankRow,
+  board: PrimaryLaunchBoard,
+  platform: "combined" | "android" | "ios",
+): number | null {
+  const { android, ios } = boardRanks(row, board);
+  return platformPairRank(android, ios, platform);
+}
+
 /** Rank from the highest-priority launch board that has data (Pop > Hot > New). */
 export function launchedPriorityRank(
   row: AppRankRow,

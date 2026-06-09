@@ -12,9 +12,10 @@ import {
   hasReserveRank,
   activeLaunchBoards,
   computeAppLifecycle,
-  launchBoardCount,
   launchedPriorityRank,
   primaryLaunchBoard,
+  rankForLaunchBoard,
+  type PrimaryLaunchBoard,
   releaseDateFromRaw,
   reserveRank,
   type AppLifecycleMeta,
@@ -23,9 +24,53 @@ import type { GamePotentialDetail, PotentialBreakdown } from "../types";
 import { downloadCountFromRaw } from "../utils/taptap-raw-extract";
 
 const ALGO_VERSION_RESERVE = "v6";
-const ALGO_VERSION_LAUNCHED = "v8";
+const ALGO_VERSION_LAUNCHED = "v12";
+
+const LAUNCH_BOARD_WEIGHTS: Record<PrimaryLaunchBoard, number> = {
+  pop: 0.5,
+  hot: 0.3,
+  new: 0.2,
+};
+
+/** Base chart-quality score by primary board (Pop > Hot > New). */
+const LAUNCH_CHART_BASE: Record<PrimaryLaunchBoard, number> = {
+  pop: 100,
+  hot: 65,
+  new: 35,
+};
+
+/** Launch-board subscore weights — sum to 1.0, output 0–100. */
+const LAUNCH_BOARD_SUB_WEIGHTS = {
+  chartQuality: 0.6,
+  consistency: 0.25,
+  coverage: 0.15,
+} as const;
+
+/** Launched composite weights — must sum to 1.0 so raw max = 100 when all subs = 100. */
+const LAUNCHED_COMPOSITE_WEIGHTS = {
+  momentum: 0.22,
+  engagement: 0.45,
+  stability: 0.13,
+  launchBoard: 0.15,
+  preLaunch: 0.05,
+} as const;
 
 export class RankingService {
+  /** Multi-board coverage snapshot (0–100) for latest day. */
+  private static launchCoverageScore(active: Set<PrimaryLaunchBoard>): number {
+    const p = active.has("pop");
+    const h = active.has("hot");
+    const n = active.has("new");
+    if (p && h && n) return 100;
+    if (p && h) return 85;
+    if (p && n) return 70;
+    if (p) return 55;
+    if (h && n) return 40;
+    if (h) return 25;
+    if (n) return 10;
+    return 0;
+  }
+
   private static clamp(v: number, lo = 0, hi = 100) {
     return Math.max(lo, Math.min(hi, v));
   }
@@ -37,18 +82,50 @@ export class RankingService {
   private scoreMomentum(ranks: number[]) {
     const C = RankingService.clamp;
     const R = RankingService.r1;
+    const TOP_CHART = 10;
 
-    const recentHalf = ranks.slice(Math.floor(ranks.length / 2));
-    const avgRecentRank = recentHalf.reduce((a, b) => a + b, 0) / recentHalf.length;
-    const positionScore = C(100 - avgRecentRank * 0.5);
+    const avgRank = ranks.reduce((a, b) => a + b, 0) / ranks.length;
+    const positionScore = C(100 - avgRank * 0.5);
 
     const rankStart = ranks[0];
     const rankEnd = ranks[ranks.length - 1];
     const change = rankStart - rankEnd;
-    const absoluteScore = C(50 + change);
-    const maxClimb = Math.max(rankStart - 1, 1);
-    const relativeScore = C(50 + (change / maxClimb) * 50);
-    const rankChangeScore = Math.max(absoluteScore, relativeScore);
+
+    let climbScore: number;
+    let absoluteScore = 0;
+    let relativeScore = 0;
+    if (change > 0) {
+      absoluteScore = C(50 + change);
+      const maxClimb = Math.max(rankStart - 1, 1);
+      relativeScore = C(50 + (change / maxClimb) * 50);
+      climbScore = Math.max(absoluteScore, relativeScore);
+    } else if (change === 0) {
+      climbScore = 50;
+    } else {
+      absoluteScore = C(50 + change);
+      let softened = absoluteScore;
+      if (rankStart <= TOP_CHART && rankEnd <= TOP_CHART) {
+        softened = C(50 + change * 0.4);
+      }
+      const maxFall = Math.max(ranks.length, 1);
+      relativeScore = C(50 + (change / maxFall) * 50);
+      climbScore = Math.max(softened, relativeScore);
+    }
+
+    let maintenanceScore = 0;
+    if (rankEnd <= TOP_CHART) {
+      maintenanceScore = C(100 - rankEnd * 0.5);
+      if (rankEnd === 1 && change === 0) {
+        maintenanceScore = 100;
+      } else if (change === 0) {
+        maintenanceScore = C(100 - rankEnd * 0.45);
+      } else if (change < 0 && rankStart <= TOP_CHART) {
+        maintenanceScore = C(maintenanceScore - Math.abs(change) * 1.25);
+        maintenanceScore = Math.max(maintenanceScore, C(92 - rankEnd * 1.2));
+      }
+    }
+
+    const rankChangeScore = C(Math.max(climbScore, maintenanceScore));
 
     const bestRank = Math.min(...ranks);
     const peakScore = C(100 - bestRank * 0.5);
@@ -57,10 +134,13 @@ export class RankingService {
     return {
       score,
       positionScore,
-      avgRecentRank: R(avgRecentRank),
+      avgRank: R(avgRank),
+      avgRecentRank: R(avgRank),
       rankChangeScore,
-      absoluteScore,
-      relativeScore,
+      climbScore: R(climbScore),
+      maintenanceScore: R(maintenanceScore),
+      absoluteScore: R(absoluteScore),
+      relativeScore: R(relativeScore),
       peakScore,
       bestRank,
       rankStart,
@@ -346,6 +426,121 @@ export class RankingService {
     return downloadCountFromRaw(row.raw);
   }
 
+  /** Weighted launched raw score; all inputs 0–100 → output 0–100. */
+  private computeLaunchedRawComposite(
+    momentumScore: number,
+    engagementScore: number,
+    stabilityScore: number,
+    launchBoardScore: number,
+    preLaunchRaw: number,
+  ): number {
+    const C = RankingService.clamp;
+    const preLaunchScore = C((preLaunchRaw / 3) * 100);
+    const w = LAUNCHED_COMPOSITE_WEIGHTS;
+    return C(
+      momentumScore * w.momentum +
+        engagementScore * w.engagement +
+        stabilityScore * w.stability +
+        launchBoardScore * w.launchBoard +
+        preLaunchScore * w.preLaunch,
+      0,
+      100,
+    );
+  }
+
+  /**
+   * Launched (v11): momentum/stability blend per board; launch-board score = 3 simple parts (0–100).
+   */
+  private scoreLaunchedBoardMetrics(
+    validRows: AppRankRow[],
+    platform: "combined" | "android" | "ios",
+    analysisDays: number,
+  ) {
+    const C = RankingService.clamp;
+    const R = RankingService.r1;
+    const boards = ["pop", "hot", "new"] as const;
+    const latest = validRows[validRows.length - 1]!;
+    const primaryBoard = primaryLaunchBoard(latest, platform);
+    const primaryRank = primaryBoard ? launchedPriorityRank(latest, platform) : null;
+
+    let weightedMom = 0;
+    let weightedStab = 0;
+    let weightSum = 0;
+
+    for (const board of boards) {
+      const ranks: number[] = [];
+      for (const row of validRows) {
+        const rank = rankForLaunchBoard(row, board, platform);
+        if (rank != null) ranks.push(rank);
+      }
+      if (ranks.length < 2) continue;
+
+      const w = LAUNCH_BOARD_WEIGHTS[board];
+      weightedMom += this.scoreMomentum(ranks).score * w;
+      weightedStab += this.scoreStability(ranks, analysisDays).score * w;
+      weightSum += w;
+    }
+
+    const priorityRanks = validRows.map((r) => launchedPriorityRank(r, platform)!);
+    const priorityMomentum = this.scoreMomentum(priorityRanks);
+    const priorityStability = this.scoreStability(priorityRanks, analysisDays);
+
+    const momentum =
+      weightSum > 0
+        ? { ...priorityMomentum, score: weightedMom / weightSum }
+        : priorityMomentum;
+    const stability =
+      weightSum > 0
+        ? { ...priorityStability, score: weightedStab / weightSum }
+        : priorityStability;
+
+    let chartQuality = 0;
+    if (primaryBoard) {
+      const rank = primaryRank ?? 200;
+      const rankFactor = C(100 - rank * 0.5) / 100;
+      chartQuality = C(LAUNCH_CHART_BASE[primaryBoard] * rankFactor);
+    }
+
+    const n = validRows.length;
+    let popDays = 0;
+    let hotDays = 0;
+    let newDays = 0;
+    for (const row of validRows) {
+      if (rankForLaunchBoard(row, "pop", platform) != null) popDays++;
+      if (rankForLaunchBoard(row, "hot", platform) != null) hotDays++;
+      if (rankForLaunchBoard(row, "new", platform) != null) newDays++;
+    }
+    const consistency = C((popDays / n) * 60 + (hotDays / n) * 25 + (newDays / n) * 15);
+
+    const active = new Set(activeLaunchBoards(latest, platform).map((t) => t.board));
+    const coverage = RankingService.launchCoverageScore(active);
+
+    const sw = LAUNCH_BOARD_SUB_WEIGHTS;
+    const score = C(
+      chartQuality * sw.chartQuality + consistency * sw.consistency + coverage * sw.coverage,
+      0,
+      100,
+    );
+
+    return {
+      momentum,
+      stability,
+      launchBoard: {
+        primaryBoard,
+        primaryRank,
+        score: R(score),
+        chartQuality: R(chartQuality),
+        consistency: R(consistency),
+        coverage: R(coverage),
+        popDayRate: R((popDays / n) * 100),
+        hotDayRate: R((hotDays / n) * 100),
+        newDayRate: R((newDays / n) * 100),
+        activeBoardCount: active.size,
+        activeBoards: activeLaunchBoards(latest, platform),
+      },
+    };
+  }
+
   private launchCategoryForApp(appRows: AppRankRow[]): LaunchCategory | undefined {
     for (let i = appRows.length - 1; i >= 0; i--) {
       const cat = classifyLaunchCategory(appRows[i]!);
@@ -384,7 +579,7 @@ export class RankingService {
     const reserves = validRows.map((r) => r.reserveCount ?? null);
     const downloads = validRows.map((r) => this.downloadCountForRow(r));
 
-    const momentum = this.scoreMomentum(ranks);
+    let momentum = this.scoreMomentum(ranks);
     const engagement =
       segment === "launched"
         ? this.scoreEngagement(ratings, fans, reserves, analysisDays, {
@@ -392,7 +587,8 @@ export class RankingService {
             downloadCounts: downloads,
           })
         : this.scoreEngagement(ratings, fans, reserves, analysisDays, { includeReserve: true });
-    const stability = this.scoreStability(ranks, analysisDays);
+    let stability = this.scoreStability(ranks, analysisDays);
+    let launchBoardMetrics: ReturnType<RankingService["scoreLaunchedBoardMetrics"]> | undefined;
     let confidence = this.scoreConfidence(validRows.length, analysisDays);
     if (segment === "launched" && validRows.length < 3) {
       confidence = {
@@ -402,15 +598,27 @@ export class RankingService {
     }
 
     let rawComposite: number;
+    let preLaunchRaw = 0;
     if (segment === "launched") {
-      rawComposite = momentum.score * 0.25 + engagement.score * 0.55 + stability.score * 0.2;
-      const latestRow = validRows[validRows.length - 1]!;
-      if (launchBoardCount(latestRow, platform) >= 2) rawComposite += 5;
-      rawComposite += this.scorePreLaunchReserveBonus(appRows);
+      launchBoardMetrics = this.scoreLaunchedBoardMetrics(validRows, platform, analysisDays);
+      momentum = launchBoardMetrics.momentum;
+      stability = launchBoardMetrics.stability;
+      preLaunchRaw = this.scorePreLaunchReserveBonus(appRows);
+      rawComposite = this.computeLaunchedRawComposite(
+        momentum.score,
+        engagement.score,
+        stability.score,
+        launchBoardMetrics.launchBoard.score,
+        preLaunchRaw,
+      );
     } else {
-      rawComposite = momentum.score * 0.2 + engagement.score * 0.6 + stability.score * 0.2;
+      rawComposite = RankingService.clamp(
+        momentum.score * 0.2 + engagement.score * 0.6 + stability.score * 0.2,
+        0,
+        100,
+      );
     }
-    const compositeScore = rawComposite * confidence.multiplier;
+    const compositeScore = RankingService.clamp(rawComposite * confidence.multiplier, 0, 100);
 
     const latest = validRows[validRows.length - 1]!;
     const firstRank = ranks[0];
@@ -482,7 +690,7 @@ export class RankingService {
     const reserves = validRows.map((r) => r.reserveCount ?? null);
     const downloads = validRows.map((r) => this.downloadCountForRow(r));
 
-    const momentum = this.scoreMomentum(ranks);
+    let momentum = this.scoreMomentum(ranks);
     const engagement =
       segment === "launched"
         ? this.scoreEngagement(ratings, fans, reserves, analysisDays, {
@@ -490,30 +698,48 @@ export class RankingService {
             downloadCounts: downloads,
           })
         : this.scoreEngagement(ratings, fans, reserves, analysisDays, { includeReserve: true });
-    const stability = this.scoreStability(ranks, analysisDays);
+    let stability = this.scoreStability(ranks, analysisDays);
     let confidence = this.scoreConfidence(validRows.length, analysisDays);
+    let launchBoardMetrics: ReturnType<RankingService["scoreLaunchedBoardMetrics"]> | undefined;
 
     let rawComposite: number;
+    let preLaunchRaw = 0;
     if (segment === "launched") {
-      rawComposite = momentum.score * 0.25 + engagement.score * 0.55 + stability.score * 0.2;
-      const latestRow = validRows[validRows.length - 1]!;
-      if (launchBoardCount(latestRow, platform) >= 2) rawComposite += 5;
-      rawComposite += this.scorePreLaunchReserveBonus(appRows);
+      launchBoardMetrics = this.scoreLaunchedBoardMetrics(validRows, platform, analysisDays);
+      momentum = launchBoardMetrics.momentum;
+      stability = launchBoardMetrics.stability;
+      preLaunchRaw = this.scorePreLaunchReserveBonus(appRows);
+      rawComposite = this.computeLaunchedRawComposite(
+        momentum.score,
+        engagement.score,
+        stability.score,
+        launchBoardMetrics.launchBoard.score,
+        preLaunchRaw,
+      );
       if (validRows.length < 3) {
         confidence = { ...confidence, multiplier: Math.min(confidence.multiplier, 0.85) };
       }
     } else {
-      rawComposite = momentum.score * 0.2 + engagement.score * 0.6 + stability.score * 0.2;
+      rawComposite = RankingService.clamp(
+        momentum.score * 0.2 + engagement.score * 0.6 + stability.score * 0.2,
+        0,
+        100,
+      );
     }
-    const compositeScore = rawComposite * confidence.multiplier;
+    const compositeScore = RankingService.clamp(rawComposite * confidence.multiplier, 0, 100);
 
     const R = RankingService.r1;
+    const preLaunchScore =
+      segment === "launched" ? R(RankingService.clamp((preLaunchRaw / 3) * 100)) : undefined;
     return {
       momentum: {
         score: R(momentum.score),
         positionScore: R(momentum.positionScore),
+        avgRank: momentum.avgRank,
         avgRecentRank: momentum.avgRecentRank,
         rankChangeScore: R(momentum.rankChangeScore),
+        climbScore: momentum.climbScore,
+        maintenanceScore: momentum.maintenanceScore,
         absoluteScore: R(momentum.absoluteScore),
         relativeScore: R(momentum.relativeScore),
         peakScore: R(momentum.peakScore),
@@ -568,8 +794,9 @@ export class RankingService {
       compositeScore: R(compositeScore),
       rawComposite: R(rawComposite),
       segment,
-      preLaunchBonus:
-        segment === "launched" ? R(this.scorePreLaunchReserveBonus(appRows)) : undefined,
+      preLaunchBonus: segment === "launched" ? R(preLaunchRaw) : undefined,
+      preLaunchScore,
+      launchBoard: launchBoardMetrics?.launchBoard,
     };
   }
 
@@ -598,7 +825,7 @@ export class RankingService {
     const firstLaunch = await this.fetchFirstLaunchDate(appId);
     const launchKey = firstLaunch ? firstLaunch.toISOString().split("T")[0] : "none";
     return getCachedOrFetch(
-      `potential-breakdown-v2-${appId}-${platform}-${days}-${launchKey}`,
+      `potential-breakdown-v6-${appId}-${platform}-${days}-${launchKey}`,
       async () => {
         const recentRows = await this.fetchLightRows(days);
         const recentApp = recentRows.filter((r) => r.appId === appId);

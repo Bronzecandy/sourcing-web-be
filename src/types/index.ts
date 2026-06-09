@@ -171,8 +171,12 @@ export interface GamePotentialDetail {
   momentum: {
     score: number;
     positionScore: number;
+    avgRank: number;
+    /** @deprecated alias of avgRank — full-window average */
     avgRecentRank: number;
     rankChangeScore: number;
+    climbScore: number;
+    maintenanceScore: number;
     absoluteScore: number;
     relativeScore: number;
     peakScore: number;
@@ -233,6 +237,25 @@ export interface GamePotentialDetail {
   rawComposite: number;
   segment?: PotentialSegment;
   preLaunchBonus?: number;
+  /** Launched v10: pre-launch reserve normalized 0–100 (5% weight) */
+  preLaunchScore?: number;
+  /** Launched v11: simplified launch-chart score (15% weight in composite) */
+  launchBoard?: {
+    primaryBoard: "pop" | "hot" | "new" | null;
+    primaryRank: number | null;
+    score: number;
+    /** BXH chính + hạng hôm nay (60% of launch-board score) */
+    chartQuality: number;
+    /** % ngày trên Pop/Hot/New, ưu tiên Pop (25%) */
+    consistency: number;
+    /** Có mặt trên bao nhiêu loại BXH hôm nay (15%) */
+    coverage: number;
+    popDayRate: number;
+    hotDayRate: number;
+    newDayRate: number;
+    activeBoardCount: number;
+    activeBoards: Array<{ board: "pop" | "hot" | "new"; rank: number | null }>;
+  };
 }
 
 export interface PotentialBreakdown {
