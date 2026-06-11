@@ -1,0 +1,34 @@
+# Neon DB + Precompute — vận hành an toàn
+
+## Vấn đề đã gặp (production)
+
+- DB crawl thường là **Neon read replica** → lỗi **`40001` / `replica_recovery_conflict`** khi query nặng song song.
+- `withDbRetry` (`src/utils/db-retry.ts`) retry tối đa 5 lần (mặc định), backoff tăng dần.
+- Phase 4 **Distribution** trước đây: concurrency cao + `HEAVY_DB_RETRY` 12 lần + cohort Map lớn → **OOM / container kill** trước khi catch exception.
+
+## Nguyên tắc xử lý (giống code cũ)
+
+1. **Retry transient** (`40001`, `40P01`, timeout…) qua `withDbRetry` — không retry vô hạn.
+2. **Fail-soft trong precompute**: `retrySoft` trong `precompute.ts` — log `SKIP … after DB retries`, tiếp tục task khác; **không** làm process chết.
+3. **Skip query phụ** khi lỗi (vd. `game.service` bỏ qua review distribution nếu query fail).
+4. **Distribution Phase 4 chạy cuối** (sau Phase 1–3) để dashboard/ranking/potential warm trước.
+
+## Cấu hình khuyến nghị
+
+| Biến | Mặc định mới | Ghi chú |
+|------|--------------|---------|
+| `PRECOMPUTE_START_DELAY_MS` | `45000` prod | Server listen + health trước khi warm |
+| `PRECOMPUTE_DISTRIBUTION_CONCURRENCY` | `1` | Tuần tự từng overview/trends |
+| `PRECOMPUTE_DISTRIBUTION_TASK_DELAY_MS` | `3000` | Nghỉ giữa task Distribution |
+| `PRECOMPUTE_DISTRIBUTION_WARMUP_YEARS` | `1` | Deploy chỉ warm năm mới nhất |
+| `PRECOMPUTE_DISTRIBUTION_MAX_YEARS` | `0` (= all) | Giới hạn năm khi `cron` |
+| `DISTRIBUTION_TRENDS_MONTH_CONCURRENCY` | `2` | Tháng trong trends |
+| `DISTRIBUTION_DB_MAX_ATTEMPTS` | `5` | Khớp cache retry |
+| `DISTRIBUTION_COHORT_CACHE_TTL` | `1800` | Cohort trung gian, không 24h |
+| `SKIP_WARMUP=1` | — | Bật nếu cần deploy nhanh, cron warm sau |
+
+## Khi sửa Distribution / precompute
+
+- Không tăng concurrency mặc định trên production mà không đo RAM.
+- Sau mỗi task Distribution precompute: `pruneCacheKeyPrefix("distribution-cohort-board-")`.
+- Cron (`label=cron`) mới force refresh Distribution nếu không set `PRECOMPUTE_DISTRIBUTION_FORCE`.

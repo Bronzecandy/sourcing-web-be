@@ -1,7 +1,7 @@
-import { cache, cacheHas, setForceRefresh } from "./utils/cache";
+import { cache, cacheHas, pruneCacheKeyPrefix, setForceRefresh } from "./utils/cache";
 import { waitForPrecomputeSlot } from "./utils/analysis-active-guard";
-import { withDbRetry } from "./utils/db-retry";
-import { logDiag } from "./utils/process-diagnostics";
+import { withDbRetry, type DbRetryOptions } from "./utils/db-retry";
+import { logDiag, logDiagError } from "./utils/process-diagnostics";
 import { runWithConcurrency } from "./utils/run-with-concurrency";
 import { rankingService } from "./services/ranking.service";
 import { gameService } from "./services/game.service";
@@ -21,8 +21,25 @@ const DETAIL_DAYS = [7, 14, 30, 60];
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+const PRECOMPUTE_RETRY: DbRetryOptions = {
+  maxAttempts: Math.max(1, parseInt(process.env.PRECOMPUTE_DB_MAX_ATTEMPTS ?? "5", 10) || 5),
+  delayMs: Math.max(500, parseInt(process.env.PRECOMPUTE_DB_RETRY_DELAY_MS ?? "3000", 10) || 3000),
+};
+
 async function retry<T>(fn: () => Promise<T>, label: string): Promise<T> {
-  return withDbRetry(fn, label);
+  return withDbRetry(fn, label, PRECOMPUTE_RETRY);
+}
+
+/** On Neon 40001 / timeout: log and continue — never take down warm-up or the process. */
+async function retrySoft<T>(fn: () => Promise<T>, label: string): Promise<T | null> {
+  try {
+    return await withDbRetry(fn, label, PRECOMPUTE_RETRY);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[precompute] SKIP ${label} after DB retries: ${message}`);
+    logDiagError("precompute-task-skipped", err, { label });
+    return null;
+  }
 }
 
 async function runSequential(tasks: Array<{ label: string; fn: () => Promise<unknown> }>) {
@@ -34,7 +51,7 @@ async function runSequential(tasks: Array<{ label: string; fn: () => Promise<unk
 
 const PRECOMPUTE_DB_CONCURRENCY = Math.max(
   1,
-  parseInt(process.env.PRECOMPUTE_DB_CONCURRENCY ?? "8", 10) || 8,
+  parseInt(process.env.PRECOMPUTE_DB_CONCURRENCY ?? "6", 10) || 6,
 );
 
 async function runBatch(tasks: Array<{ label: string; fn: () => Promise<unknown> }>) {
@@ -54,7 +71,6 @@ async function collectTopAppIds(): Promise<number[]> {
   }, "collectTopAppIds");
 }
 
-/** Game mới lên BXH (lần đầu xuất hiện trong N ngày gần đây). */
 async function collectNewChartAppIds(withinDays = 14): Promise<number[]> {
   return retry(async () => {
     const cutoff = new Date();
@@ -70,7 +86,6 @@ async function collectNewChartAppIds(withinDays = 14): Promise<number[]> {
   }, "collectNewChartAppIds");
 }
 
-/** Mọi game có mặt trên snapshot BXH mới nhất (bắt game vừa vào top). */
 async function collectLatestSnapshotAppIds(): Promise<number[]> {
   return retry(async () => {
     const latest = await prisma.appRank.aggregate({ _max: { date: true } });
@@ -119,7 +134,12 @@ const BATCH_DELAY_MS = Math.max(0, parseInt(process.env.PRECOMPUTE_BATCH_DELAY_M
 
 const PRECOMPUTE_DISTRIBUTION_CONCURRENCY = Math.max(
   1,
-  parseInt(process.env.PRECOMPUTE_DISTRIBUTION_CONCURRENCY ?? "2", 10) || 2,
+  parseInt(process.env.PRECOMPUTE_DISTRIBUTION_CONCURRENCY ?? "1", 10) || 1,
+);
+
+const PRECOMPUTE_DISTRIBUTION_TASK_DELAY_MS = Math.max(
+  0,
+  parseInt(process.env.PRECOMPUTE_DISTRIBUTION_TASK_DELAY_MS ?? "3000", 10) || 3000,
 );
 
 function isDistributionPrecomputeEnabled(): boolean {
@@ -132,7 +152,18 @@ function shouldForceDistributionRefresh(label?: string): boolean {
   return label === "cron" || label === "admin-refresh";
 }
 
-async function precomputeDistribution(options: { force: boolean }): Promise<void> {
+/** warm-up: latest year(s) only; cron/admin: all years (optional cap via PRECOMPUTE_DISTRIBUTION_MAX_YEARS). */
+function yearsForDistributionPrecompute(allYears: number[], label?: string): number[] {
+  const sorted = [...allYears].sort((a, b) => b - a);
+  const capAll = parseInt(process.env.PRECOMPUTE_DISTRIBUTION_MAX_YEARS ?? "0", 10) || 0;
+  if (label === "cron" || label === "admin-refresh") {
+    return capAll > 0 ? sorted.slice(0, capAll) : sorted;
+  }
+  const warmYears = Math.max(1, parseInt(process.env.PRECOMPUTE_DISTRIBUTION_WARMUP_YEARS ?? "1", 10) || 1);
+  return sorted.slice(0, warmYears);
+}
+
+async function precomputeDistribution(options: { force: boolean; label?: string }): Promise<void> {
   if (!isDistributionPrecomputeEnabled()) {
     console.log("[precompute] Phase 4: Distribution skipped (PRECOMPUTE_DISTRIBUTION=0)");
     return;
@@ -140,13 +171,18 @@ async function precomputeDistribution(options: { force: boolean }): Promise<void
 
   const includeTrends = process.env.PRECOMPUTE_DISTRIBUTION_INCLUDE_TRENDS !== "0";
   const phaseStart = Date.now();
-  console.log("[precompute] Phase 4: Distribution analytics...");
+  console.log("[precompute] Phase 4: Distribution analytics (sequential, soft-fail on DB)...");
 
   setForceRefresh(false);
   try {
     await waitForPrecomputeSlot();
     const meta = await distributionService.getMeta();
-    const years = meta.years;
+    const years = yearsForDistributionPrecompute(meta.years, options.label);
+    if (years.length < meta.years.length) {
+      console.log(
+        `[precompute]   distribution years limited to [${years.join(", ")}] (label=${options.label ?? "warm-up"})`,
+      );
+    }
 
     type DistTask = {
       label: string;
@@ -177,6 +213,9 @@ async function precomputeDistribution(options: { force: boolean }): Promise<void
     }
 
     let skipped = 0;
+    let failed = 0;
+    let built = 0;
+
     await runWithConcurrency(
       tasks.map((task) => async () => {
         if (!options.force && cacheHas(task.cacheKey)) {
@@ -185,29 +224,42 @@ async function precomputeDistribution(options: { force: boolean }): Promise<void
         }
         await waitForPrecomputeSlot();
         const t0 = Date.now();
-        await retry(task.run, task.label);
+        const ok = await retrySoft(task.run, task.label);
         const ms = Date.now() - t0;
-        const match = task.label.match(/^distribution-(overview|trends)-(\d+)-(reserve|new|old)$/);
-        logDiag("precompute-distribution", {
-          kind: match?.[1] ?? task.label,
-          year: match?.[2] ? Number(match[2]) : null,
-          tab: (match?.[3] as DistributionTab | undefined) ?? null,
-          ms,
-        });
-        console.log(`[precompute]   ${task.label} done (${(ms / 1000).toFixed(1)}s)`);
+        if (ok === null) {
+          failed += 1;
+        } else {
+          built += 1;
+          const match = task.label.match(/^distribution-(overview|trends)-(\d+)-(reserve|new|old)$/);
+          logDiag("precompute-distribution", {
+            kind: match?.[1] ?? task.label,
+            year: match?.[2] ? Number(match[2]) : null,
+            tab: (match?.[3] as DistributionTab | undefined) ?? null,
+            ms,
+          });
+          console.log(`[precompute]   ${task.label} done (${(ms / 1000).toFixed(1)}s)`);
+        }
+        const pruned = pruneCacheKeyPrefix("distribution-cohort-board-");
+        if (pruned > 0) {
+          logDiag("precompute-cohort-prune", { keys: pruned });
+        }
+        if (PRECOMPUTE_DISTRIBUTION_TASK_DELAY_MS > 0) {
+          await sleep(PRECOMPUTE_DISTRIBUTION_TASK_DELAY_MS);
+        }
       }),
       PRECOMPUTE_DISTRIBUTION_CONCURRENCY,
     );
 
     const elapsed = ((Date.now() - phaseStart) / 1000).toFixed(1);
     console.log(
-      `[precompute] Phase 4 done (${elapsed}s, ${tasks.length - skipped} built, ${skipped} skipped)`,
+      `[precompute] Phase 4 done (${elapsed}s, built=${built}, skipped=${skipped}, failed=${failed})`,
     );
     logDiag("precompute-phase", {
       phase: 4,
       elapsedSec: Math.round((Date.now() - phaseStart) / 1000),
-      built: tasks.length - skipped,
+      built,
       skipped,
+      failed,
     });
   } finally {
     setForceRefresh(true);
@@ -223,7 +275,6 @@ export async function precomputeAll(options?: {
 
   try {
     await waitForPrecomputeSlot();
-    // Phase 1: Dashboard + dates + tags + rankings — all in parallel
     console.log("[precompute] Phase 1: Dashboard + Rankings...");
     await runBatch([
       { label: "dashboard", fn: () => gameService.getDashboardStats() },
@@ -243,9 +294,6 @@ export async function precomputeAll(options?: {
     console.log(`[precompute] Phase 1 done (${((Date.now() - start) / 1000).toFixed(1)}s)`);
     logDiag("precompute-phase", { phase: 1, elapsedSec: Math.round((Date.now() - start) / 1000) });
 
-    await precomputeDistribution({ force: shouldForceDistributionRefresh(label) });
-
-    // Phase 2: Potential analysis — per platform sequentially, queries within a platform in parallel
     await waitForPrecomputeSlot();
     console.log("[precompute] Phase 2: Potential analysis...");
     for (const platform of ALL_PLATFORMS) {
@@ -277,13 +325,12 @@ export async function precomputeAll(options?: {
             label: `reserve-${platform}-${days}`,
             fn: () => rankingService.getTopReserveGrowth(days, platform),
           })),
-        ]
+        ],
       );
     }
     console.log(`[precompute] Phase 2 done (${((Date.now() - start) / 1000).toFixed(1)}s)`);
     logDiag("precompute-phase", { phase: 2, elapsedSec: Math.round((Date.now() - start) / 1000) });
 
-    // Phase 3: Top 200 — full detail + potential + breakdown
     await waitForPrecomputeSlot();
     const { top: topIds, extra: extraIds } = await collectPrecomputeAppIds();
     console.log(
@@ -293,19 +340,19 @@ export async function precomputeAll(options?: {
     const runAppBatches = async (
       ids: number[],
       daysList: number[],
-      label: string,
+      batchLabel: string,
     ) => {
       if (ids.length === 0) return;
       for (let i = 0; i < ids.length; i += BATCH_SIZE) {
         await waitForPrecomputeSlot();
         const batch = ids.slice(i, i + BATCH_SIZE);
-        const progress = `${label} [${i + 1}-${Math.min(i + BATCH_SIZE, ids.length)}/${ids.length}]`;
+        const progress = `${batchLabel} [${i + 1}-${Math.min(i + BATCH_SIZE, ids.length)}/${ids.length}]`;
         await runBatch(batch.flatMap((appId) => detailTasksForApp(appId, daysList)));
         const elapsed = ((Date.now() - start) / 1000).toFixed(0);
         console.log(`[precompute] ${progress} done (${elapsed}s elapsed)`);
         logDiag("precompute-batch", {
           phase: 3,
-          batchLabel: label,
+          batchLabel,
           progress,
           elapsedSec: Number(elapsed),
         });
@@ -314,8 +361,12 @@ export async function precomputeAll(options?: {
     };
 
     await runAppBatches(topIds, DETAIL_DAYS, "top");
-    // Game mới / snapshot mới nhất: chỉ warm 7+14 ngày (tiết kiệm thời gian & cache)
     await runAppBatches(extraIds, [7, 14], "extra");
+    console.log(`[precompute] Phase 3 done (${((Date.now() - start) / 1000).toFixed(1)}s)`);
+    logDiag("precompute-phase", { phase: 3, elapsedSec: Math.round((Date.now() - start) / 1000) });
+
+    // Distribution last: heaviest RAM + DB; soft-fail so deploy never dies here.
+    await precomputeDistribution({ force: shouldForceDistributionRefresh(label), label });
 
     const duration = Date.now() - start;
     console.log(`[precompute] All done in ${(duration / 1000).toFixed(1)}s (${cache.keys().length} keys cached)`);

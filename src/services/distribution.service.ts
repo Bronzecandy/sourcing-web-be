@@ -67,10 +67,18 @@ export function distributionTrendsCacheKey(
 }
 
 const CACHE_TTL = 86400;
-const HEAVY_DB_RETRY = { maxAttempts: 12, delayMs: 2000 };
+/** Align with cache/getCachedOrFetch defaults — avoid 12× retry piling connections on Neon replica (40001). */
+const HEAVY_DB_RETRY = {
+  maxAttempts: Math.max(1, parseInt(process.env.DISTRIBUTION_DB_MAX_ATTEMPTS ?? "5", 10) || 5),
+  delayMs: Math.max(500, parseInt(process.env.DISTRIBUTION_DB_RETRY_DELAY_MS ?? "3000", 10) || 3000),
+};
+const COHORT_CACHE_TTL = Math.max(
+  300,
+  parseInt(process.env.DISTRIBUTION_COHORT_CACHE_TTL ?? "1800", 10) || 1800,
+);
 const TRENDS_MONTH_CONCURRENCY = Math.max(
   1,
-  parseInt(process.env.DISTRIBUTION_TRENDS_MONTH_CONCURRENCY ?? "4", 10) || 4,
+  parseInt(process.env.DISTRIBUTION_TRENDS_MONTH_CONCURRENCY ?? "2", 10) || 2,
 );
 
 const COHORT_ROW_SELECT = `
@@ -433,7 +441,7 @@ async function fetchBoardCohortEdgesCached(
   return getCachedOrFetch(
     key,
     () => fetchBoardCohortEdgesRaw(periodStart, periodEnd, board),
-    CACHE_TTL,
+    COHORT_CACHE_TTL,
     HEAVY_DB_RETRY,
   );
 }

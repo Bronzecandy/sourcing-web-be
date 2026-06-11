@@ -76,6 +76,10 @@ Tính năng chính:
 | `CORS_ORIGIN` | FE origin (mặc định `http://localhost:5173`) |
 | `TAPTAP_PROXY_URL`, `TAPTAP_PROXY_KEY` | Cặp `API_KEY` trên proxy |
 | `SKIP_WARMUP=1` | Bỏ warmup cache khi dev |
+| `PRECOMPUTE_START_DELAY_MS` | Trì hoãn warm-up sau listen (prod mặc định 45s) |
+| `PRECOMPUTE_DISTRIBUTION_*` | Phase 4 Distribution — xem `neon-precompute-safety.mdc` |
+
+**Neon replica / warm-up OOM:** xem rule `neon-precompute-safety.mdc` (40001, fail-soft, concurrency).
 
 Scripts BE: `npm run dev`, `prisma:*`, `seed`, `smoke:rubric`, `src/inspect-db.ts`.
 

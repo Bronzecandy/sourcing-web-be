@@ -56,7 +56,7 @@ app.listen(PORT, async () => {
   if (process.env.SKIP_WARMUP === "1") {
     console.log(`[warm-up] Skipped (SKIP_WARMUP=1)`);
   } else {
-    const defaultDelay = process.env.NODE_ENV === "development" ? 120_000 : 0;
+    const defaultDelay = process.env.NODE_ENV === "development" ? 120_000 : 45_000;
     const startDelay = Math.max(
       0,
       parseInt(process.env.PRECOMPUTE_START_DELAY_MS ?? String(defaultDelay), 10) || 0,

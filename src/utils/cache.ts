@@ -19,6 +19,18 @@ export function cacheHas(key: string): boolean {
   return cache.get(key) !== undefined;
 }
 
+/** Drop intermediate cache entries (e.g. cohort maps) to free RAM during heavy precompute. */
+export function pruneCacheKeyPrefix(prefix: string): number {
+  let n = 0;
+  for (const key of cache.keys()) {
+    if (key.startsWith(prefix)) {
+      cache.del(key);
+      n += 1;
+    }
+  }
+  return n;
+}
+
 const inflight = new Map<string, Promise<unknown>>();
 
 export function getCachedOrFetch<T>(
