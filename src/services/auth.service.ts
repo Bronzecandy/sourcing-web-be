@@ -232,6 +232,7 @@ const ROUTE_PERMISSION_FALLBACK: Array<{ perm: PermissionKey; path: string }> = 
   { perm: "crawl.dashboard", path: "/" },
   { perm: "crawl.ranking", path: "/ranking" },
   { perm: "analytics.potential", path: "/potential" },
+  { perm: "analytics.distribution", path: "/distribution" },
   { perm: "ai.read", path: "/ai-analysis" },
   { perm: "libraries.read", path: "/libraries" },
 ];

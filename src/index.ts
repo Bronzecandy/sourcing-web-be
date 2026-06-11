@@ -56,6 +56,16 @@ app.listen(PORT, async () => {
   if (process.env.SKIP_WARMUP === "1") {
     console.log(`[warm-up] Skipped (SKIP_WARMUP=1)`);
   } else {
-    runPrecompute("warm-up");
+    const defaultDelay = process.env.NODE_ENV === "development" ? 120_000 : 0;
+    const startDelay = Math.max(
+      0,
+      parseInt(process.env.PRECOMPUTE_START_DELAY_MS ?? String(defaultDelay), 10) || 0,
+    );
+    if (startDelay > 0) {
+      console.log(`[warm-up] Scheduled in ${Math.round(startDelay / 1000)}s (PRECOMPUTE_START_DELAY_MS)`);
+      setTimeout(() => runPrecompute("warm-up"), startDelay);
+    } else {
+      runPrecompute("warm-up");
+    }
   }
 });

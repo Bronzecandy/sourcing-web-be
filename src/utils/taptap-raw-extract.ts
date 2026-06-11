@@ -17,6 +17,14 @@ function statObj(raw: unknown): Record<string, unknown> | null {
   return stat && typeof stat === "object" ? (stat as Record<string, unknown>) : null;
 }
 
+/** TapTap fans / follow count from raw.stat (or raw.app.stat). */
+export function fansCountFromRaw(raw: unknown): number | null {
+  const stat = statObj(raw);
+  if (!stat) return null;
+  const n = num(stat.fans_count);
+  return n != null && n >= 0 ? Math.round(n) : null;
+}
+
 /** TapTap download/install count from raw (hits_total preferred). */
 export function downloadCountFromRaw(raw: unknown): number | null {
   const stat = statObj(raw);

@@ -19,6 +19,7 @@ async function retry<T>(fn: () => Promise<T>, label: string): Promise<T> {
 
 async function runSequential(tasks: Array<{ label: string; fn: () => Promise<unknown> }>) {
   for (const t of tasks) {
+    await waitForPrecomputeSlot();
     await retry(t.fn, t.label);
   }
 }
@@ -30,7 +31,10 @@ const PRECOMPUTE_DB_CONCURRENCY = Math.max(
 
 async function runBatch(tasks: Array<{ label: string; fn: () => Promise<unknown> }>) {
   await runWithConcurrency(
-    tasks.map((t) => () => retry(t.fn, t.label)),
+    tasks.map((t) => async () => {
+      await waitForPrecomputeSlot();
+      return retry(t.fn, t.label);
+    }),
     PRECOMPUTE_DB_CONCURRENCY,
   );
 }
@@ -110,6 +114,7 @@ export async function precomputeAll(): Promise<{ durationMs: number; keys: numbe
   setForceRefresh(true);
 
   try {
+    await waitForPrecomputeSlot();
     // Phase 1: Dashboard + dates + tags + rankings — all in parallel
     console.log("[precompute] Phase 1: Dashboard + Rankings...");
     await runBatch([
@@ -131,8 +136,10 @@ export async function precomputeAll(): Promise<{ durationMs: number; keys: numbe
     logDiag("precompute-phase", { phase: 1, elapsedSec: Math.round((Date.now() - start) / 1000) });
 
     // Phase 2: Potential analysis — per platform sequentially, queries within a platform in parallel
+    await waitForPrecomputeSlot();
     console.log("[precompute] Phase 2: Potential analysis...");
     for (const platform of ALL_PLATFORMS) {
+      await waitForPrecomputeSlot();
       console.log(`[precompute]   platform=${platform}...`);
       await runBatch(
         [
@@ -167,6 +174,7 @@ export async function precomputeAll(): Promise<{ durationMs: number; keys: numbe
     logDiag("precompute-phase", { phase: 2, elapsedSec: Math.round((Date.now() - start) / 1000) });
 
     // Phase 3: Top 200 — full detail + potential + breakdown
+    await waitForPrecomputeSlot();
     const { top: topIds, extra: extraIds } = await collectPrecomputeAppIds();
     console.log(
       `[precompute] Phase 3: top ${topIds.length} + extra (new/latest) ${extraIds.length} games...`,

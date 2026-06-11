@@ -122,6 +122,168 @@ export interface DashboardStats {
   tagDistribution: Array<{ tag: string; count: number }>;
 }
 
+export type DistributionMetric = "reserve" | "download" | "rating" | "reviewCount" | "fans";
+export type DistributionLifecycle = "reserve" | "new" | "old" | "unknown";
+export type DistributionLifecycleFilter = "all" | DistributionLifecycle;
+
+export interface BucketDefinition {
+  label: string;
+  min: number;
+  max: number | null;
+}
+
+export interface DistributionBucket {
+  label: string;
+  min: number;
+  max: number | null;
+  count: number;
+  countDelta: number;
+  metricSum: number;
+  metricDelta: number;
+  byLifecycle: Record<DistributionLifecycle, number>;
+}
+
+export interface DistributionSummary {
+  totalGames: number;
+  byLifecycle: Record<DistributionLifecycle, number>;
+  periodStart: string | null;
+  periodEnd: string | null;
+}
+
+export interface DistributionMonthlyPoint {
+  month: number;
+  periodStart: string | null;
+  periodEnd: string | null;
+  totalGames: number;
+  totalMetricSum: number;
+  totalMetricDelta: number;
+}
+
+export interface DistributionQuery {
+  year: number;
+  month?: number;
+  metric: DistributionMetric;
+  lifecycle: DistributionLifecycleFilter;
+}
+
+export interface DistributionMonthResponse {
+  mode: "month";
+  metric: DistributionMetric;
+  lifecycle: DistributionLifecycleFilter;
+  year: number;
+  month: number;
+  buckets: DistributionBucket[];
+  summary: DistributionSummary;
+  message?: string;
+}
+
+export interface DistributionYearResponse {
+  mode: "year";
+  metric: DistributionMetric;
+  lifecycle: DistributionLifecycleFilter;
+  year: number;
+  monthlyTrend: DistributionMonthlyPoint[];
+  buckets: DistributionBucket[];
+  summary: DistributionSummary;
+}
+
+export type DistributionResponse = DistributionMonthResponse | DistributionYearResponse;
+
+export interface DistributionMeta {
+  years: number[];
+  months: Record<number, number[]>;
+  metrics: Array<{ id: DistributionMetric; label: string }>;
+  bucketDefinitions: Record<DistributionMetric, BucketDefinition[]>;
+  growthBucketDefinitions: {
+    count: BucketDefinition[];
+    rating: BucketDefinition[];
+  };
+}
+
+/** Tab lifecycle — không gồm "all" / "unknown". */
+export type DistributionTab = "reserve" | "new" | "old";
+
+export interface DistributionTrendPoint {
+  key: string;
+  label: string;
+  periodStart: string | null;
+  periodEnd: string | null;
+  totalGames: number;
+  metricSum: number;
+  metricDelta: number;
+}
+
+export interface DistributionGrowthBucket {
+  label: string;
+  min: number;
+  max: number | null;
+  count: number;
+  totalDelta: number;
+  sharePct: number;
+}
+
+export interface DistributionRatingInsights {
+  highRatingShare: number;
+  lowRatingShare: number;
+  improvingShare: number;
+  decliningShare: number;
+  avgRating: number;
+  avgRatingDelta: number;
+  vote5StarShare: number | null;
+}
+
+export interface DistributionTabInsights {
+  primaryMetric: DistributionMetric;
+  label: string;
+  value: string;
+  sub?: string;
+  items: Array<{ label: string; value: string }>;
+}
+
+export interface DistributionMetricBlock {
+  metric: DistributionMetric;
+  label: string;
+  /** @deprecated use absoluteBuckets */
+  buckets: DistributionBucket[];
+  absoluteBuckets: DistributionBucket[];
+  growthBuckets: DistributionGrowthBucket[];
+  totalGames: number;
+  metricSum: number;
+  metricDelta: number;
+  gamesWithGrowth: number;
+  gamesIncreased: number;
+  gamesDecreased: number;
+  gamesFlat: number;
+  trend: DistributionTrendPoint[];
+  ratingInsights?: DistributionRatingInsights;
+}
+
+export interface DistributionOverviewQuery {
+  year?: number | null;
+  month?: number;
+  lifecycle: DistributionTab;
+}
+
+export interface DistributionOverviewResponse {
+  lifecycle: DistributionTab;
+  year: number | null;
+  month: number | null;
+  periodStart: string | null;
+  periodEnd: string | null;
+  segmentCounts: Record<DistributionLifecycle, number>;
+  segmentTotal: number;
+  metrics: DistributionMetricBlock[];
+  tabInsights: DistributionTabInsights;
+  message?: string;
+}
+
+export interface DistributionTrendsResponse {
+  lifecycle: DistributionTab;
+  year: number | null;
+  month: number | null;
+  metrics: Array<{ metric: DistributionMetric; trend: DistributionTrendPoint[] }>;
+}
+
 export type PotentialSegment = "reserve" | "launched";
 export type LaunchCategory = "new_launch" | "established_launch";
 

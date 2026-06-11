@@ -15,18 +15,31 @@ export function setForceRefresh(v: boolean) {
   forceRefresh = v;
 }
 
+const inflight = new Map<string, Promise<unknown>>();
+
 export function getCachedOrFetch<T>(
   key: string,
   fetcher: () => Promise<T>,
-  ttl: number = ONE_DAY
+  ttl: number = ONE_DAY,
+  retry?: { maxAttempts?: number; delayMs?: number },
 ): Promise<T> {
   if (!forceRefresh) {
     const cached = cache.get<T>(key);
     if (cached !== undefined) return Promise.resolve(cached);
   }
 
-  return withDbRetry(() => fetcher(), `cache:${key}`).then((data) => {
-    cache.set(key, data, ttl);
-    return data;
-  });
+  const pending = inflight.get(key) as Promise<T> | undefined;
+  if (pending) return pending;
+
+  const promise = withDbRetry(() => fetcher(), `cache:${key}`, retry)
+    .then((data) => {
+      cache.set(key, data, ttl);
+      return data;
+    })
+    .finally(() => {
+      inflight.delete(key);
+    });
+
+  inflight.set(key, promise);
+  return promise;
 }

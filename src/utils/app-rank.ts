@@ -26,6 +26,7 @@ export interface AppRankRow {
   fansCount?: number | null;
   reserveCount?: number | null;
   downloadCount?: number | null;
+  reviewCount?: number | null;
   raw?: unknown;
 }
 

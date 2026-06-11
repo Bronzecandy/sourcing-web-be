@@ -4,6 +4,7 @@ export const PERMISSION_KEYS = [
   "crawl.game",
   "crawl.reviews",
   "analytics.potential",
+  "analytics.distribution",
   "ai.read",
   "ai.run",
   "ai.delete",
@@ -25,6 +26,7 @@ export interface PermissionMap {
   "crawl.game": boolean;
   "crawl.reviews": boolean;
   "analytics.potential": boolean;
+  "analytics.distribution": boolean;
   "ai.read": boolean;
   "ai.run": boolean;
   "ai.delete": boolean;
@@ -56,6 +58,7 @@ export function emptyPermissions(): PermissionMap {
     "crawl.game": false,
     "crawl.reviews": false,
     "analytics.potential": false,
+    "analytics.distribution": false,
     "ai.read": false,
     "ai.run": false,
     "ai.delete": false,

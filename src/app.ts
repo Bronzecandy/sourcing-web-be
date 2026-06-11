@@ -7,6 +7,7 @@ import translateRoutes from "./routes/translate.routes";
 import rankingRoutes from "./routes/ranking.routes";
 import analysisRoutes from "./routes/analysis.routes";
 import librariesRoutes from "./routes/libraries.routes";
+import analyticsRoutes from "./routes/analytics.routes";
 import authRoutes from "./routes/auth.routes";
 import adminRoutes from "./routes/admin.routes";
 import { errorHandler } from "./middleware/error-handler";
@@ -65,6 +66,7 @@ app.use("/api/games", gameRoutes);
 app.use("/api/ranking", rankingRoutes);
 app.use("/api/analysis", analysisRoutes);
 app.use("/api/libraries", librariesRoutes);
+app.use("/api/analytics", analyticsRoutes);
 
 app.get("/admin/libraries", (_req, res) => {
   res.sendFile(path.join(process.cwd(), "public", "admin", "libraries.html"));
