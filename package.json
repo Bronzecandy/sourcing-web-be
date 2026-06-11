@@ -20,6 +20,7 @@
     "prisma:studio": "prisma studio",
     "seed": "tsx src/seed.ts",
     "smoke:rubric": "tsx src/scripts/smoke-rubric.ts",
+    "smoke:distribution": "tsx src/scripts/smoke-distribution.ts",
     "peek:tags": "tsx src/scripts/peek-app-raw-tags.ts"
   },
   "keywords": [],

@@ -1,10 +1,18 @@
-import { cache, setForceRefresh } from "./utils/cache";
+import { cache, cacheHas, setForceRefresh } from "./utils/cache";
 import { waitForPrecomputeSlot } from "./utils/analysis-active-guard";
 import { withDbRetry } from "./utils/db-retry";
 import { logDiag } from "./utils/process-diagnostics";
 import { runWithConcurrency } from "./utils/run-with-concurrency";
 import { rankingService } from "./services/ranking.service";
 import { gameService } from "./services/game.service";
+import {
+  DISTRIBUTION_META_CACHE_KEY,
+  DISTRIBUTION_TABS,
+  distributionOverviewCacheKey,
+  distributionTrendsCacheKey,
+  distributionService,
+} from "./services/distribution.service";
+import type { DistributionTab } from "./types";
 import { prisma } from "./utils/prisma";
 
 const ALL_PLATFORMS = ["combined", "android", "ios"] as const;
@@ -109,8 +117,108 @@ function detailTasksForApp(appId: number, daysList: number[]) {
 const BATCH_SIZE = Math.max(1, parseInt(process.env.PRECOMPUTE_BATCH_SIZE ?? "20", 10) || 20);
 const BATCH_DELAY_MS = Math.max(0, parseInt(process.env.PRECOMPUTE_BATCH_DELAY_MS ?? "50", 10) || 50);
 
-export async function precomputeAll(): Promise<{ durationMs: number; keys: number }> {
+const PRECOMPUTE_DISTRIBUTION_CONCURRENCY = Math.max(
+  1,
+  parseInt(process.env.PRECOMPUTE_DISTRIBUTION_CONCURRENCY ?? "2", 10) || 2,
+);
+
+function isDistributionPrecomputeEnabled(): boolean {
+  return process.env.PRECOMPUTE_DISTRIBUTION !== "0";
+}
+
+function shouldForceDistributionRefresh(label?: string): boolean {
+  if (process.env.PRECOMPUTE_DISTRIBUTION_FORCE === "1") return true;
+  if (process.env.PRECOMPUTE_DISTRIBUTION_FORCE === "0") return false;
+  return label === "cron" || label === "admin-refresh";
+}
+
+async function precomputeDistribution(options: { force: boolean }): Promise<void> {
+  if (!isDistributionPrecomputeEnabled()) {
+    console.log("[precompute] Phase 4: Distribution skipped (PRECOMPUTE_DISTRIBUTION=0)");
+    return;
+  }
+
+  const includeTrends = process.env.PRECOMPUTE_DISTRIBUTION_INCLUDE_TRENDS !== "0";
+  const phaseStart = Date.now();
+  console.log("[precompute] Phase 4: Distribution analytics...");
+
+  setForceRefresh(false);
+  try {
+    await waitForPrecomputeSlot();
+    const meta = await distributionService.getMeta();
+    const years = meta.years;
+
+    type DistTask = {
+      label: string;
+      cacheKey: string;
+      run: () => Promise<unknown>;
+    };
+
+    const tasks: DistTask[] = [];
+    if (!options.force && cacheHas(DISTRIBUTION_META_CACHE_KEY)) {
+      console.log("[precompute]   distribution meta cached");
+    }
+
+    for (const year of years) {
+      for (const tab of DISTRIBUTION_TABS) {
+        tasks.push({
+          label: `distribution-overview-${year}-${tab}`,
+          cacheKey: distributionOverviewCacheKey(year, tab),
+          run: () => distributionService.getOverview({ year, lifecycle: tab }),
+        });
+        if (includeTrends) {
+          tasks.push({
+            label: `distribution-trends-${year}-${tab}`,
+            cacheKey: distributionTrendsCacheKey(year, tab),
+            run: () => distributionService.getTrends({ year, lifecycle: tab }),
+          });
+        }
+      }
+    }
+
+    let skipped = 0;
+    await runWithConcurrency(
+      tasks.map((task) => async () => {
+        if (!options.force && cacheHas(task.cacheKey)) {
+          skipped += 1;
+          return;
+        }
+        await waitForPrecomputeSlot();
+        const t0 = Date.now();
+        await retry(task.run, task.label);
+        const ms = Date.now() - t0;
+        const match = task.label.match(/^distribution-(overview|trends)-(\d+)-(reserve|new|old)$/);
+        logDiag("precompute-distribution", {
+          kind: match?.[1] ?? task.label,
+          year: match?.[2] ? Number(match[2]) : null,
+          tab: (match?.[3] as DistributionTab | undefined) ?? null,
+          ms,
+        });
+        console.log(`[precompute]   ${task.label} done (${(ms / 1000).toFixed(1)}s)`);
+      }),
+      PRECOMPUTE_DISTRIBUTION_CONCURRENCY,
+    );
+
+    const elapsed = ((Date.now() - phaseStart) / 1000).toFixed(1);
+    console.log(
+      `[precompute] Phase 4 done (${elapsed}s, ${tasks.length - skipped} built, ${skipped} skipped)`,
+    );
+    logDiag("precompute-phase", {
+      phase: 4,
+      elapsedSec: Math.round((Date.now() - phaseStart) / 1000),
+      built: tasks.length - skipped,
+      skipped,
+    });
+  } finally {
+    setForceRefresh(true);
+  }
+}
+
+export async function precomputeAll(options?: {
+  label?: string;
+}): Promise<{ durationMs: number; keys: number }> {
   const start = Date.now();
+  const label = options?.label;
   setForceRefresh(true);
 
   try {
@@ -134,6 +242,8 @@ export async function precomputeAll(): Promise<{ durationMs: number; keys: numbe
     ]);
     console.log(`[precompute] Phase 1 done (${((Date.now() - start) / 1000).toFixed(1)}s)`);
     logDiag("precompute-phase", { phase: 1, elapsedSec: Math.round((Date.now() - start) / 1000) });
+
+    await precomputeDistribution({ force: shouldForceDistributionRefresh(label) });
 
     // Phase 2: Potential analysis — per platform sequentially, queries within a platform in parallel
     await waitForPrecomputeSlot();
@@ -210,8 +320,7 @@ export async function precomputeAll(): Promise<{ durationMs: number; keys: numbe
     const duration = Date.now() - start;
     console.log(`[precompute] All done in ${(duration / 1000).toFixed(1)}s (${cache.keys().length} keys cached)`);
     logDiag("precompute-phase", {
-      phase: 3,
-      done: true,
+      phase: "done",
       durationSec: Math.round(duration / 1000),
       cacheKeys: cache.keys().length,
     });

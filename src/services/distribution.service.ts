@@ -1,6 +1,7 @@
 import { pool } from "../utils/prisma";
 import { getCachedOrFetch } from "../utils/cache";
 import { withDbRetry } from "../utils/db-retry";
+import { runWithConcurrency } from "../utils/run-with-concurrency";
 import {
   hasLaunchedRank,
   hasReserveRank,
@@ -45,8 +46,32 @@ export const METRICS_BY_TAB: Record<DistributionTab, DistributionMetric[]> = {
   old: ["download", "fans", "rating", "reviewCount"],
 };
 
-const CACHE_TTL = 3600;
+export const DISTRIBUTION_TABS: DistributionTab[] = ["reserve", "new", "old"];
+
+export const DISTRIBUTION_META_CACHE_KEY = "distribution-meta-v2";
+
+export function distributionOverviewCacheKey(
+  year: number | null,
+  lifecycle: DistributionTab,
+  month?: number | null,
+): string {
+  return `distribution-overview-v7-${year ?? "all"}-${month ?? "full"}-${lifecycle}`;
+}
+
+export function distributionTrendsCacheKey(
+  year: number | null,
+  lifecycle: DistributionTab,
+  month?: number | null,
+): string {
+  return `distribution-trends-v1-${year ?? "all"}-${month ?? "full"}-${lifecycle}`;
+}
+
+const CACHE_TTL = 86400;
 const HEAVY_DB_RETRY = { maxAttempts: 12, delayMs: 2000 };
+const TRENDS_MONTH_CONCURRENCY = Math.max(
+  1,
+  parseInt(process.env.DISTRIBUTION_TRENDS_MONTH_CONCURRENCY ?? "4", 10) || 4,
+);
 
 const COHORT_ROW_SELECT = `
     "appId",
@@ -339,6 +364,16 @@ async function resolveMonthlyBoundsForYear(
 
 type CohortEdgeRows = { firstByApp: Map<number, AppRankRow>; lastByApp: Map<number, AppRankRow> };
 
+function cohortBoardCacheKey(
+  board: "reserve" | "launched",
+  periodStart: Date,
+  periodEnd: Date,
+): string {
+  const start = periodStart.toISOString().split("T")[0];
+  const end = periodEnd.toISOString().split("T")[0];
+  return `distribution-cohort-board-${board}-${start}-${end}`;
+}
+
 async function fetchBoardCohortEdgesRaw(
   periodStart: Date,
   periodEnd: Date,
@@ -389,59 +424,71 @@ async function fetchBoardCohortEdgesRaw(
   return { firstByApp, lastByApp };
 }
 
+async function fetchBoardCohortEdgesCached(
+  periodStart: Date,
+  periodEnd: Date,
+  board: "reserve" | "launched",
+): Promise<CohortEdgeRows> {
+  const key = cohortBoardCacheKey(board, periodStart, periodEnd);
+  return getCachedOrFetch(
+    key,
+    () => fetchBoardCohortEdgesRaw(periodStart, periodEnd, board),
+    CACHE_TTL,
+    HEAVY_DB_RETRY,
+  );
+}
+
+function filterTabCohortEdges(launched: CohortEdgeRows, tab: DistributionTab): CohortEdgeRows {
+  const filteredFirst = new Map<number, AppRankRow>();
+  const filteredLast = new Map<number, AppRankRow>();
+  for (const [appId, lastRow] of launched.lastByApp) {
+    if (classifyLaunchedTab(lastRow) !== tab) continue;
+    filteredLast.set(appId, lastRow);
+    const firstRow = launched.firstByApp.get(appId);
+    if (firstRow) filteredFirst.set(appId, firstRow);
+  }
+  return { firstByApp: filteredFirst, lastByApp: filteredLast };
+}
+
 async function fetchTabCohortEdges(
   periodStart: Date,
   periodEnd: Date,
   tab: DistributionTab,
 ): Promise<CohortEdgeRows> {
   if (tab === "reserve") {
-    return fetchBoardCohortEdgesRaw(periodStart, periodEnd, "reserve");
+    return fetchBoardCohortEdgesCached(periodStart, periodEnd, "reserve");
   }
-
-  const { firstByApp, lastByApp } = await fetchBoardCohortEdgesRaw(
-    periodStart,
-    periodEnd,
-    "launched",
-  );
-  const filteredFirst = new Map<number, AppRankRow>();
-  const filteredLast = new Map<number, AppRankRow>();
-  for (const [appId, lastRow] of lastByApp) {
-    if (classifyLaunchedTab(lastRow) !== tab) continue;
-    filteredLast.set(appId, lastRow);
-    const firstRow = firstByApp.get(appId);
-    if (firstRow) filteredFirst.set(appId, firstRow);
-  }
-  return { firstByApp: filteredFirst, lastByApp: filteredLast };
+  const launched = await fetchBoardCohortEdgesCached(periodStart, periodEnd, "launched");
+  return filterTabCohortEdges(launched, tab);
 }
 
-async function computeSegmentCountsForPeriod(
-  periodStart: Date,
-  periodEnd: Date,
-  reserveCohortSize?: number,
-): Promise<Record<DistributionLifecycle, number>> {
-  const counts = emptyLifecycleCounts();
-  counts.reserve =
-    reserveCohortSize ??
-    parseInt(
-      (
-        await withDbRetry(
-          () =>
-            pool.query<{ count: string }>(
-              `SELECT COUNT(DISTINCT "appId")::text AS count
-               FROM "AppRank"
-               WHERE "date" >= $1::date AND "date" <= $2::date
-                 AND ${RESERVE_BOARD_SQL}`,
-              [periodStart, periodEnd],
-            ),
-          "distribution-segment-reserve-count",
-          HEAVY_DB_RETRY,
-        )
-      ).rows[0]?.count ?? "0",
-      10,
-    );
+async function fetchReserveDistinctCount(periodStart: Date, periodEnd: Date): Promise<number> {
+  return parseInt(
+    (
+      await withDbRetry(
+        () =>
+          pool.query<{ count: string }>(
+            `SELECT COUNT(DISTINCT "appId")::text AS count
+             FROM "AppRank"
+             WHERE "date" >= $1::date AND "date" <= $2::date
+               AND ${RESERVE_BOARD_SQL}`,
+            [periodStart, periodEnd],
+          ),
+        "distribution-segment-reserve-count",
+        HEAVY_DB_RETRY,
+      )
+    ).rows[0]?.count ?? "0",
+    10,
+  );
+}
 
-  const { lastByApp } = await fetchBoardCohortEdgesRaw(periodStart, periodEnd, "launched");
-  for (const row of lastByApp.values()) {
+function segmentCountsFromLaunchedLast(
+  launchedLastByApp: Map<number, AppRankRow>,
+  reserveCount: number,
+): Record<DistributionLifecycle, number> {
+  const counts = emptyLifecycleCounts();
+  counts.reserve = reserveCount;
+  for (const row of launchedLastByApp.values()) {
     const launchedTab = classifyLaunchedTab(row);
     if (launchedTab === "new") counts.new += 1;
     else if (launchedTab === "old") counts.old += 1;
@@ -1006,7 +1053,7 @@ async function computeForPeriod(
 export class DistributionService {
   async getOverview(query: DistributionOverviewQuery): Promise<DistributionOverviewResponse> {
     const { year = null, month, lifecycle } = query;
-    const cacheKey = `distribution-overview-v7-${year ?? "all"}-${month ?? "full"}-${lifecycle}`;
+    const cacheKey = distributionOverviewCacheKey(year ?? null, lifecycle, month ?? null);
 
     return getCachedOrFetch(
       cacheKey,
@@ -1017,7 +1064,7 @@ export class DistributionService {
 
   async getTrends(query: DistributionOverviewQuery): Promise<DistributionTrendsResponse> {
     const { year = null, month, lifecycle } = query;
-    const cacheKey = `distribution-trends-v1-${year ?? "all"}-${month ?? "full"}-${lifecycle}`;
+    const cacheKey = distributionTrendsCacheKey(year ?? null, lifecycle, month ?? null);
 
     return getCachedOrFetch(
       cacheKey,
@@ -1075,11 +1122,19 @@ export class DistributionService {
       };
     }
 
-    const { firstByApp, lastByApp } = await fetchTabCohortEdges(periodStart, periodEnd, lifecycle);
-    const segmentCounts =
-      lifecycle === "reserve"
-        ? { ...emptyLifecycleCounts(), reserve: lastByApp.size }
-        : await computeSegmentCountsForPeriod(periodStart, periodEnd);
+    let firstByApp: Map<number, AppRankRow>;
+    let lastByApp: Map<number, AppRankRow>;
+    let segmentCounts: Record<DistributionLifecycle, number>;
+
+    if (lifecycle === "reserve") {
+      ({ firstByApp, lastByApp } = await fetchTabCohortEdges(periodStart, periodEnd, lifecycle));
+      segmentCounts = { ...emptyLifecycleCounts(), reserve: lastByApp.size };
+    } else {
+      const launched = await fetchBoardCohortEdgesCached(periodStart, periodEnd, "launched");
+      ({ firstByApp, lastByApp } = filterTabCohortEdges(launched, lifecycle));
+      const reserveCount = await fetchReserveDistinctCount(periodStart, periodEnd);
+      segmentCounts = segmentCountsFromLaunchedLast(launched.lastByApp, reserveCount);
+    }
     const segmentTotal = segmentCounts[lifecycle];
 
     const metricResultMap = {} as Record<DistributionMetric, PeriodComputeResult>;
@@ -1122,15 +1177,20 @@ export class DistributionService {
 
     if (year != null) {
       const monthlyBounds = await resolveMonthlyBoundsForYear(year);
-      for (let m = 1; m <= 12; m++) {
-        const bounds = monthlyBounds.get(m);
-        if (!bounds) continue;
-        const results = await computeMetricsForPeriod(
-          bounds.periodStart,
-          bounds.periodEnd,
-          metrics,
-          lifecycle,
-        );
+      const monthEntries = [...monthlyBounds.entries()].sort(([a], [b]) => a - b);
+      const monthResults = await runWithConcurrency(
+        monthEntries.map(([m, bounds]) => async () => ({
+          month: m,
+          results: await computeMetricsForPeriod(
+            bounds.periodStart,
+            bounds.periodEnd,
+            metrics,
+            lifecycle,
+          ),
+        })),
+        TRENDS_MONTH_CONCURRENCY,
+      );
+      for (const { month: m, results } of monthResults) {
         for (const metric of metrics) {
           const r = results[metric]!;
           out[metric]!.push({
@@ -1174,7 +1234,7 @@ export class DistributionService {
   }
 
   async getMeta(): Promise<DistributionMeta> {
-    return getCachedOrFetch("distribution-meta-v2", async () => {
+    return getCachedOrFetch(DISTRIBUTION_META_CACHE_KEY, async () => {
       const { rows } = await pool.query<{ year: number; month: number }>(
         `SELECT DISTINCT EXTRACT(YEAR FROM "date")::int AS year,
                 EXTRACT(MONTH FROM "date")::int AS month

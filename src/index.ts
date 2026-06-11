@@ -26,7 +26,7 @@ async function runPrecompute(label: string) {
   console.log(`[${label}] Pre-computing all data...`);
   logDiag("precompute-start", { label });
   try {
-    const { durationMs, keys } = await precomputeAll();
+    const { durationMs, keys } = await precomputeAll({ label });
     console.log(`[${label}] Done in ${durationMs}ms (${keys} cache keys)`);
     logDiag("precompute-done", { label, durationMs, keys });
   } catch (err) {

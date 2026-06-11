@@ -15,6 +15,10 @@ export function setForceRefresh(v: boolean) {
   forceRefresh = v;
 }
 
+export function cacheHas(key: string): boolean {
+  return cache.get(key) !== undefined;
+}
+
 const inflight = new Map<string, Promise<unknown>>();
 
 export function getCachedOrFetch<T>(

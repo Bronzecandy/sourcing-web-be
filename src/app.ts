@@ -52,7 +52,7 @@ app.get("/api/health", (_req, res) => {
 });
 
 app.post("/api/admin/refresh-cache", async (_req, res) => {
-  const { durationMs, keys } = await precomputeAll();
+  const { durationMs, keys } = await precomputeAll({ label: "admin-refresh" });
   res.json({ success: true, durationMs, cacheKeys: keys });
 });
 
