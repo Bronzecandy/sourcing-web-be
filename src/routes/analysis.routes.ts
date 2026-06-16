@@ -38,6 +38,11 @@ import { logDiagBrief, logDiagError } from "../utils/process-diagnostics";
 
 const router = Router();
 
+function parseAnalysisScope(raw: unknown): "all" | "mine" {
+  const v = String(raw ?? "all").toLowerCase();
+  return v === "mine" ? "mine" : "all";
+}
+
 function actorUserId(req: AuthedRequest, res: Response): string | null {
   const id = req.authUser?.id;
   if (!id) {
@@ -118,11 +123,56 @@ function startKeepAlive(res: import("express").Response): NodeJS.Timeout {
   }, 10_000);
 }
 
+router.get("/record/:analysisId", async (req: AuthedRequest, res) => {
+  try {
+    const userId = actorUserId(req, res);
+    if (!userId) return;
+    const analysisId = String(req.params.analysisId ?? "").trim();
+    if (!analysisId) {
+      res.status(400).json({ success: false, error: "Missing analysisId" });
+      return;
+    }
+    const result = await aiAnalysisService.getAnalysisById(analysisId);
+    if (!result) {
+      res.status(404).json({ success: false, error: "Analysis not found" });
+      return;
+    }
+    res.json({ success: true, data: result });
+  } catch (err) {
+    console.error("[analysis route] GET record:", err);
+    res.status(500).json({ success: false, error: "Failed to fetch analysis" });
+  }
+});
+
+router.get("/lookup", async (req: AuthedRequest, res) => {
+  try {
+    const userId = actorUserId(req, res);
+    if (!userId) return;
+    const appId = parseInt(String(req.query.appId ?? ""), 10);
+    const analyzedAt = String(req.query.at ?? "").trim();
+    const by = String(req.query.by ?? "").trim() || undefined;
+    if (!Number.isFinite(appId) || !analyzedAt) {
+      res.status(400).json({ success: false, error: "Missing appId or at" });
+      return;
+    }
+    const result = await aiAnalysisService.getAnalysisByKey(appId, analyzedAt, by);
+    if (!result) {
+      res.status(404).json({ success: false, error: "Analysis not found" });
+      return;
+    }
+    res.json({ success: true, data: result });
+  } catch (err) {
+    console.error("[analysis route] GET lookup:", err);
+    res.status(500).json({ success: false, error: "Failed to fetch analysis" });
+  }
+});
+
 router.get("/all", async (req: AuthedRequest, res) => {
   try {
     const userId = actorUserId(req, res);
     if (!userId) return;
-    const all = await aiAnalysisService.getAllAnalyses(userId);
+    const scope = parseAnalysisScope(req.query.scope);
+    const all = await aiAnalysisService.getAllAnalyses(userId, scope);
     res.json({ success: true, data: all });
   } catch (err) {
     console.error("[analysis route] GET all:", err);
@@ -593,7 +643,8 @@ router.get("/:appId", async (req: AuthedRequest, res) => {
     const userId = actorUserId(req, res);
     if (!userId) return;
     const appId = parseInt(String(req.params.appId));
-    const result = await aiAnalysisService.getLatestAnalysis(userId, appId);
+    const scope = parseAnalysisScope(req.query.scope);
+    const result = await aiAnalysisService.getLatestAnalysis(userId, appId, scope);
     res.json({ success: true, data: result });
   } catch (err) {
     console.error("[analysis route] GET latest:", err);
@@ -606,7 +657,8 @@ router.get("/:appId/history", async (req: AuthedRequest, res) => {
     const userId = actorUserId(req, res);
     if (!userId) return;
     const appId = parseInt(String(req.params.appId));
-    const history = await aiAnalysisService.getAnalysisHistory(userId, appId);
+    const scope = parseAnalysisScope(req.query.scope);
+    const history = await aiAnalysisService.getAnalysisHistory(userId, appId, scope);
     res.json({ success: true, data: history });
   } catch (err) {
     console.error("[analysis route] GET history:", err);

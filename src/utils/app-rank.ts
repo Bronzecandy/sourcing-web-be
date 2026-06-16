@@ -27,6 +27,9 @@ export interface AppRankRow {
   reserveCount?: number | null;
   downloadCount?: number | null;
   reviewCount?: number | null;
+  /** Populated when SQL extracts release timestamp (distribution / light queries). */
+  releaseDate?: Date | null;
+  vote5StarShare?: number | null;
   raw?: unknown;
 }
 
@@ -189,7 +192,11 @@ export function activeLaunchBoards(
   return out;
 }
 
-export { releaseDateFromRaw, releaseDateIsoFromRaw } from "./taptap-raw-extract";
+export {
+  releaseDateFromRaw,
+  releaseDateFromRow,
+  releaseDateIsoFromRaw,
+} from "./taptap-raw-extract";
 
 export interface AppLifecycleMeta {
   firstLaunchDate: string | null;

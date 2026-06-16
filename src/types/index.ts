@@ -291,9 +291,15 @@ export interface PotentialScoreResult {
   appId: number;
   title: string;
   iconUrl: string | null;
-  momentumScore: number;
-  engagementScore: number;
-  stabilityScore: number;
+  /** Merged scale + growth (reserve/download audience). */
+  audienceScore: number;
+  /** @deprecated alias of audienceScore */
+  scaleScore?: number;
+  /** @deprecated alias of audienceScore */
+  growthScore?: number;
+  ratingScore: number;
+  rankQualityScore: number;
+  launchBoardScore?: number;
   dataConfidence: number;
   compositeScore: number;
   currentRank: number | null;
@@ -329,66 +335,76 @@ export interface PotentialLifecycleMeta {
   reserveWindowDays?: number;
 }
 
+/** Metric the scale/growth pillars measure for this segment. */
+export type PotentialScaleMetric = "reserve" | "download";
+
+/** Merged audience pillar — scale base tier + growth bonus (forgiving when base is large). */
+export interface PotentialAudienceBlock {
+  score: number;
+  metric: PotentialScaleMetric;
+  start: number | null;
+  end: number | null;
+  delta: number;
+  /** Base points from absolute scale tier (Distribution buckets). */
+  baseValue: number;
+  baseTierLabel: string | null;
+  /** Additive bonus/penalty from growth tier. */
+  growthBonus: number;
+  growthTierLabel: string | null;
+  /** How much growth bonus was applied (lower when base is high). */
+  growthWeight: number;
+}
+
+/** @deprecated use PotentialAudienceBlock */
+export type PotentialScaleBlock = PotentialAudienceBlock;
+/** @deprecated use PotentialAudienceBlock */
+export type PotentialGrowthBlock = PotentialAudienceBlock;
+
+/** Rating pillar — start-rating base + per-0.1 delta adjustment. */
+export interface PotentialRatingBlock {
+  score: number;
+  start: number | null;
+  end: number | null;
+  delta: number;
+  /** Base from rating at period start (8★→60, 10★→90). */
+  baseValue: number;
+  /** Points added/subtracted for rating change (±5 per 0.1). */
+  deltaAdjustment: number;
+}
+
+/** Consolidated rank quality + stability (replaces old momentum + stability). */
+export interface PotentialRankQualityBlock {
+  score: number;
+  /** Mean per-day tier score (top-10→100, top-20→80, top-50→55, …). */
+  positionQuality: number;
+  top10Rate: number;
+  top20Rate: number;
+  top50Rate: number;
+  /** % days in top 20 (presence). */
+  presenceScore: number;
+  /** Longest consecutive top-20 streak, scaled 0–100. */
+  streakScore: number;
+  volatilityScore: number;
+  /** Climb / maintenance movement. */
+  movementScore: number;
+  avgRank: number;
+  bestRank: number;
+  rankStart: number;
+  rankEnd: number;
+  change: number;
+  stdDev: number;
+  longestTop20Streak: number;
+  daysTracked: number;
+}
+
 export interface GamePotentialDetail {
-  momentum: {
-    score: number;
-    positionScore: number;
-    avgRank: number;
-    /** @deprecated alias of avgRank — full-window average */
-    avgRecentRank: number;
-    rankChangeScore: number;
-    climbScore: number;
-    maintenanceScore: number;
-    absoluteScore: number;
-    relativeScore: number;
-    peakScore: number;
-    bestRank: number;
-    rankStart: number;
-    rankEnd: number;
-    change: number;
-  };
-  engagement: {
-    score: number;
-    ratingStart: number | null;
-    ratingEnd: number | null;
-    ratingDelta: number;
-    ratingBaseScore: number | null;
-    ratingChangeScore: number | null;
-    ratingScore: number | null;
-    fansStart: number | null;
-    fansEnd: number | null;
-    fansGrowth: number;
-    fansRate: number | null;
-    fansRateScore: number | null;
-    fansAbsScore: number | null;
-    fansScore: number | null;
-    resStart: number | null;
-    resEnd: number | null;
-    resGrowth: number;
-    resRate: number | null;
-    resRateScore: number | null;
-    resAbsScore: number | null;
-    resScore: number | null;
-    dlStart?: number | null;
-    dlEnd?: number | null;
-    dlGrowth?: number;
-    dlRate?: number | null;
-    dlRateScore?: number | null;
-    dlAbsScore?: number | null;
-    dlScore?: number | null;
-    subsCount: number;
-    absThreshold: number;
-  };
-  stability: {
-    score: number;
-    presenceScore: number;
-    volatilityScore: number;
-    streakScore: number;
-    daysInTop: number;
-    stdDev: number;
-    maxStreak: number;
-    analysisDays: number;
-  };
+  audience: PotentialAudienceBlock;
+  /** @deprecated use audience */
+  scale?: PotentialAudienceBlock;
+  /** @deprecated use audience */
+  growth?: PotentialAudienceBlock;
+  rating: PotentialRatingBlock;
+  rankQuality: PotentialRankQualityBlock;
   confidence: {
     coverage: number;
     multiplier: number;
@@ -397,11 +413,13 @@ export interface GamePotentialDetail {
   };
   compositeScore: number;
   rawComposite: number;
+  /** True when rank chart was prevented from dragging composite below audience+rating core. */
+  floorApplied?: boolean;
   segment?: PotentialSegment;
   preLaunchBonus?: number;
-  /** Launched v10: pre-launch reserve normalized 0–100 (5% weight) */
+  /** Launched: pre-launch reserve normalized 0–100 (5% weight) */
   preLaunchScore?: number;
-  /** Launched v11: simplified launch-chart score (15% weight in composite) */
+  /** Launched: launch-chart breadth score (15% weight in composite) */
   launchBoard?: {
     primaryBoard: "pop" | "hot" | "new" | null;
     primaryRank: number | null;
@@ -528,6 +546,15 @@ export interface RubricRedFlagBlock {
    */
   sexualScore?: number | null;
   otherTaboosNote?: string | null;
+  /** Cách người chơi đề cập từng red flag trong review (từ LLM). */
+  playerMentions?: {
+    summary?: string | null;
+    politics?: string | null;
+    religion?: string | null;
+    casino?: string | null;
+    violence?: string | null;
+    sexual?: string | null;
+  };
 }
 
 /** Tổng hợp theo từng đầu mục lớn (manifest.parts) — phục vụ hiển thị & đối chiếu công thức điểm tổng. */
@@ -596,6 +623,9 @@ export interface RedFlagsChecklist {
 /** Tóm tắt red flag đặt đầu response để UI đọc nhanh (không thay thế rubric.redFlag đầy đủ). */
 export interface RedFlagAtAGlance {
   headlineVi: string;
+  /** Chi tiết bổ sung — cách người chơi nhắc từng vấn đề. */
+  detailVi?: string[];
+  playerMentions?: RubricRedFlagBlock["playerMentions"];
   riskLevel: "clear" | "low" | "medium" | "high" | "critical";
   blockedByHardGate: boolean;
   /** Politics/casino hoặc bạo lực/gợi dục từ medium trở lên */
@@ -636,6 +666,10 @@ export interface AIAnalysisResult {
   dateRangeStart: string | null;
   dateRangeEnd: string | null;
   analyzedAt: string;
+  /** UserAiAnalysis row id — dùng cho URL chia sẻ. */
+  analysisId?: string;
+  /** User who ran this analysis (from UserAiAnalysis row; not in stored payload). */
+  analyzedByUserId?: string;
   reviewWindowMode?: "all" | "days" | "range";
   reviewWindowDays?: 7 | 14 | 30 | 60;
   reviewFilterFrom?: string;

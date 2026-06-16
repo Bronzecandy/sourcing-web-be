@@ -12,6 +12,8 @@ import {
   distributionTrendsCacheKey,
   distributionService,
 } from "./services/distribution.service";
+import { refreshCohortStore } from "./services/distribution-cohort-store";
+import { refreshPotentialScorers } from "./utils/distribution-percentile";
 import type { DistributionTab } from "./types";
 import { prisma } from "./utils/prisma";
 
@@ -51,7 +53,7 @@ async function runSequential(tasks: Array<{ label: string; fn: () => Promise<unk
 
 const PRECOMPUTE_DB_CONCURRENCY = Math.max(
   1,
-  parseInt(process.env.PRECOMPUTE_DB_CONCURRENCY ?? "6", 10) || 6,
+  parseInt(process.env.PRECOMPUTE_DB_CONCURRENCY ?? "2", 10) || 2,
 );
 
 async function runBatch(tasks: Array<{ label: string; fn: () => Promise<unknown> }>) {
@@ -176,6 +178,13 @@ async function precomputeDistribution(options: { force: boolean; label?: string 
   setForceRefresh(false);
   try {
     await waitForPrecomputeSlot();
+    console.log("[precompute]   refreshing distribution cohort store...");
+    try {
+      await refreshCohortStore();
+    } catch (err) {
+      console.warn("[precompute]   cohort store refresh failed:", (err as Error).message);
+    }
+
     const meta = await distributionService.getMeta();
     const years = yearsForDistributionPrecompute(meta.years, options.label);
     if (years.length < meta.years.length) {
@@ -212,43 +221,93 @@ async function precomputeDistribution(options: { force: boolean; label?: string 
       }
     }
 
+    const includeAllTime =
+      options.label === "cron" || options.label === "admin-refresh" || options.force;
+    if (includeAllTime) {
+      for (const tab of DISTRIBUTION_TABS) {
+        tasks.push({
+          label: `distribution-overview-all-${tab}`,
+          cacheKey: distributionOverviewCacheKey(null, tab),
+          run: () => distributionService.getOverview({ year: null, lifecycle: tab }),
+        });
+        if (includeTrends) {
+          tasks.push({
+            label: `distribution-trends-all-${tab}`,
+            cacheKey: distributionTrendsCacheKey(null, tab),
+            run: () => distributionService.getTrends({ year: null, lifecycle: tab }),
+          });
+        }
+      }
+    }
+
     let skipped = 0;
     let failed = 0;
     let built = 0;
+    const failedTasks: DistTask[] = [];
 
-    await runWithConcurrency(
-      tasks.map((task) => async () => {
-        if (!options.force && cacheHas(task.cacheKey)) {
-          skipped += 1;
-          return;
-        }
+    const runDistTasks = async (taskList: DistTask[], softFail: boolean) => {
+      await runWithConcurrency(
+        taskList.map((task) => async () => {
+          if (!options.force && cacheHas(task.cacheKey)) {
+            skipped += 1;
+            return;
+          }
+          await waitForPrecomputeSlot();
+          const t0 = Date.now();
+          const ok = softFail ? await retrySoft(task.run, task.label) : await retry(task.run, task.label);
+          const ms = Date.now() - t0;
+          if (softFail && ok === null) {
+            failed += 1;
+            failedTasks.push(task);
+          } else {
+            built += 1;
+            const match = task.label.match(/^distribution-(overview|trends)-(\d+)-(reserve|new|old)$/);
+            logDiag("precompute-distribution", {
+              kind: match?.[1] ?? task.label,
+              year: match?.[2] ? Number(match[2]) : null,
+              tab: (match?.[3] as DistributionTab | undefined) ?? null,
+              ms,
+            });
+            console.log(`[precompute]   ${task.label} done (${(ms / 1000).toFixed(1)}s)`);
+          }
+          const pruned = pruneCacheKeyPrefix("distribution-cohort-board-");
+          if (pruned > 0) {
+            logDiag("precompute-cohort-prune", { keys: pruned });
+          }
+          if (PRECOMPUTE_DISTRIBUTION_TASK_DELAY_MS > 0) {
+            await sleep(PRECOMPUTE_DISTRIBUTION_TASK_DELAY_MS);
+          }
+        }),
+        PRECOMPUTE_DISTRIBUTION_CONCURRENCY,
+      );
+    };
+
+    await runDistTasks(tasks, true);
+
+    if (failedTasks.length > 0) {
+      console.log(
+        `[precompute]   distribution retry pass: ${failedTasks.length} task(s) after soft-fail`,
+      );
+      const retryCount = failedTasks.length;
+      failed -= retryCount;
+      for (const task of failedTasks) {
         await waitForPrecomputeSlot();
         const t0 = Date.now();
-        const ok = await retrySoft(task.run, task.label);
-        const ms = Date.now() - t0;
-        if (ok === null) {
-          failed += 1;
-        } else {
+        try {
+          await retry(task.run, `${task.label}-retry`);
           built += 1;
-          const match = task.label.match(/^distribution-(overview|trends)-(\d+)-(reserve|new|old)$/);
-          logDiag("precompute-distribution", {
-            kind: match?.[1] ?? task.label,
-            year: match?.[2] ? Number(match[2]) : null,
-            tab: (match?.[3] as DistributionTab | undefined) ?? null,
-            ms,
-          });
-          console.log(`[precompute]   ${task.label} done (${(ms / 1000).toFixed(1)}s)`);
-        }
-        const pruned = pruneCacheKeyPrefix("distribution-cohort-board-");
-        if (pruned > 0) {
-          logDiag("precompute-cohort-prune", { keys: pruned });
+          console.log(`[precompute]   ${task.label} retry ok (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
+        } catch (err) {
+          failed += 1;
+          const message = err instanceof Error ? err.message : String(err);
+          console.warn(`[precompute] SKIP ${task.label} after hard retry: ${message}`);
+          logDiagError("precompute-task-skipped", err, { label: task.label, pass: "hard-retry" });
         }
         if (PRECOMPUTE_DISTRIBUTION_TASK_DELAY_MS > 0) {
           await sleep(PRECOMPUTE_DISTRIBUTION_TASK_DELAY_MS);
         }
-      }),
-      PRECOMPUTE_DISTRIBUTION_CONCURRENCY,
-    );
+      }
+    }
 
     const elapsed = ((Date.now() - phaseStart) / 1000).toFixed(1);
     console.log(
@@ -295,6 +354,13 @@ export async function precomputeAll(options?: {
     logDiag("precompute-phase", { phase: 1, elapsedSec: Math.round((Date.now() - start) / 1000) });
 
     await waitForPrecomputeSlot();
+    // Load Distribution-calibrated scorers (from disk/cache) before scoring Potential.
+    try {
+      await refreshPotentialScorers();
+      console.log("[precompute]   potential distribution scorers ready");
+    } catch (err) {
+      console.warn("[precompute]   potential scorers refresh failed (using fallback):", (err as Error).message);
+    }
     console.log("[precompute] Phase 2: Potential analysis...");
     for (const platform of ALL_PLATFORMS) {
       await waitForPrecomputeSlot();
@@ -367,6 +433,13 @@ export async function precomputeAll(options?: {
 
     // Distribution last: heaviest RAM + DB; soft-fail so deploy never dies here.
     await precomputeDistribution({ force: shouldForceDistributionRefresh(label), label });
+
+    // Refresh Potential scorers from freshly computed distributions for on-demand scoring.
+    try {
+      await refreshPotentialScorers();
+    } catch (err) {
+      console.warn("[precompute]   potential scorers post-refresh failed:", (err as Error).message);
+    }
 
     const duration = Date.now() - start;
     console.log(`[precompute] All done in ${(duration / 1000).toFixed(1)}s (${cache.keys().length} keys cached)`);

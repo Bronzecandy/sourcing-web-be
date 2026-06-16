@@ -15,10 +15,15 @@ const LAUNCHED_BOARD_SQL = `(
   "newAndroidRank" IS NOT NULL OR "newIosRank" IS NOT NULL
 )`;
 import {
-  downloadCountFromRaw,
-  fansCountFromRaw,
-  releaseDateFromRaw,
-} from "../utils/taptap-raw-extract";
+  APP_RANK_DISTRIBUTION_COHORT_COLUMNS,
+  APP_RANK_DISTRIBUTION_LAST_COLUMNS,
+  APP_RANK_VOTE5_SHARE_SQL,
+} from "../utils/app-rank-sql";
+import { releaseDateFromRow } from "../utils/taptap-raw-extract";
+import { toFiniteNumber } from "../utils/to-finite-number";
+import { parseAppRankRow } from "./distribution-row-utils";
+import { ensureCohortEdges } from "./distribution-cohort-store";
+import { persistDistributionOverview } from "./distribution-disk-cache";
 import type {
   DistributionBucket,
   DistributionLifecycle,
@@ -55,7 +60,7 @@ export function distributionOverviewCacheKey(
   lifecycle: DistributionTab,
   month?: number | null,
 ): string {
-  return `distribution-overview-v7-${year ?? "all"}-${month ?? "full"}-${lifecycle}`;
+  return `distribution-overview-v10-${year ?? "all"}-${month ?? "full"}-${lifecycle}`;
 }
 
 export function distributionTrendsCacheKey(
@@ -81,28 +86,8 @@ const TRENDS_MONTH_CONCURRENCY = Math.max(
   parseInt(process.env.DISTRIBUTION_TRENDS_MONTH_CONCURRENCY ?? "2", 10) || 2,
 );
 
-const COHORT_ROW_SELECT = `
-    "appId",
-    "date",
-    "reserveAndroidRank",
-    "reserveIosRank",
-    "hotAndroidRank",
-    "hotIosRank",
-    "popAndroidRank",
-    "popIosRank",
-    "newAndroidRank",
-    "newIosRank",
-    (raw->'stat'->>'fans_count')::int AS "fansCount",
-    (raw->'stat'->>'reserve_count')::int AS "reserveCount",
-    COALESCE(
-      NULLIF((raw->'stat'->>'hits_total')::bigint, 0),
-      NULLIF((raw->'stat'->>'download_count')::bigint, 0),
-      NULLIF((raw->'stat'->>'pc_download_count')::bigint, 0),
-      NULLIF((raw->'stat'->>'play_total')::bigint, 0)
-    ) AS "downloadCount",
-    raw->'stat'->'rating'->>'score' AS rating,
-    (raw->'stat'->>'review_count')::int AS "reviewCount",
-    raw`;
+const COHORT_FIRST_SELECT = APP_RANK_DISTRIBUTION_COHORT_COLUMNS;
+const COHORT_LAST_SELECT = APP_RANK_DISTRIBUTION_LAST_COLUMNS;
 
 const COUNT_BUCKETS: BucketDefinition[] = [
   { label: "0", min: 0, max: 0 },
@@ -114,14 +99,18 @@ const COUNT_BUCKETS: BucketDefinition[] = [
   { label: "1M+", min: 1_000_001, max: null },
 ];
 
-const RATING_BUCKETS: BucketDefinition[] = [
-  { label: "<5", min: 0, max: 4.99 },
-  { label: "5–6", min: 5, max: 5.99 },
-  { label: "6–7", min: 6, max: 6.99 },
-  { label: "7–8", min: 7, max: 7.99 },
-  { label: "8–9", min: 8, max: 8.99 },
-  { label: "9–10", min: 9, max: 10 },
-];
+function buildRatingBuckets(): BucketDefinition[] {
+  const buckets: BucketDefinition[] = [{ label: "<5", min: 0, max: 4.99 }];
+  for (let i = 0; i < 20; i++) {
+    const min = Math.round((5 + i * 0.25) * 100) / 100;
+    const max = i === 19 ? 10 : Math.round((min + 0.24) * 100) / 100;
+    const maxLabel = i === 19 ? "10.00" : max.toFixed(2);
+    buckets.push({ label: `${min.toFixed(2)}–${maxLabel}`, min, max });
+  }
+  return buckets;
+}
+
+const RATING_BUCKETS: BucketDefinition[] = buildRatingBuckets();
 
 const REVIEW_BUCKETS: BucketDefinition[] = [
   { label: "0", min: 0, max: 0 },
@@ -149,13 +138,17 @@ const COUNT_GROWTH_BUCKETS: BucketDefinition[] = [
 ];
 
 const RATING_GROWTH_BUCKETS: BucketDefinition[] = [
-  { label: "Giảm ≥ 0.5", min: -10, max: -0.5 },
+  { label: "Giảm ≤ −2", min: -10, max: -2 },
+  { label: "−2 ~ −1", min: -1.999, max: -1 },
+  { label: "−1 ~ −0.5", min: -0.999, max: -0.5 },
   { label: "-0.5 ~ -0.2", min: -0.499, max: -0.2 },
   { label: "-0.2 ~ 0", min: -0.199, max: -0.001 },
   { label: "Không đổi", min: 0, max: 0 },
   { label: "+0.01 ~ +0.2", min: 0.001, max: 0.2 },
   { label: "+0.2 ~ +0.5", min: 0.201, max: 0.499 },
-  { label: "Tăng ≥ 0.5", min: 0.5, max: 10 },
+  { label: "+0.5 ~ +1", min: 0.5, max: 0.999 },
+  { label: "+1 ~ +2", min: 1, max: 1.999 },
+  { label: "Tăng ≥ +2", min: 2, max: 10 },
 ];
 
 const METRIC_LABELS: Record<DistributionMetric, string> = {
@@ -168,27 +161,7 @@ const METRIC_LABELS: Record<DistributionMetric, string> = {
 
 const DISTRIBUTION_SNAPSHOT_SQL = `
   SELECT
-    "appId",
-    "date",
-    "reserveAndroidRank",
-    "reserveIosRank",
-    "hotAndroidRank",
-    "hotIosRank",
-    "popAndroidRank",
-    "popIosRank",
-    "newAndroidRank",
-    "newIosRank",
-    (raw->'stat'->>'fans_count')::int AS "fansCount",
-    (raw->'stat'->>'reserve_count')::int AS "reserveCount",
-    COALESCE(
-      NULLIF((raw->'stat'->>'hits_total')::bigint, 0),
-      NULLIF((raw->'stat'->>'download_count')::bigint, 0),
-      NULLIF((raw->'stat'->>'pc_download_count')::bigint, 0),
-      NULLIF((raw->'stat'->>'play_total')::bigint, 0)
-    ) AS "downloadCount",
-    raw->'stat'->'rating'->>'score' AS rating,
-    (raw->'stat'->>'review_count')::int AS "reviewCount",
-    raw
+${APP_RANK_DISTRIBUTION_LAST_COLUMNS}
   FROM "AppRank"
   WHERE "date" = $1
 `;
@@ -219,7 +192,7 @@ function monthsBetween(from: Date, to: Date): number {
 
 function classifyLifecycle(row: AppRankRow, asOf: Date): DistributionLifecycle {
   if (hasReserveRank(row) && !hasLaunchedRank(row)) return "reserve";
-  const releaseDate = releaseDateFromRaw(row.raw);
+  const releaseDate = releaseDateFromRow(row);
   if (!releaseDate) return "unknown";
   if (monthsBetween(releaseDate, asOf) < 6) return "new";
   return "old";
@@ -227,7 +200,7 @@ function classifyLifecycle(row: AppRankRow, asOf: Date): DistributionLifecycle {
 
 /** Phân loại game đã lên bảng Hot/Pop/New theo tuổi ra mắt tại thời điểm snapshot. */
 function classifyLaunchedTab(row: AppRankRow): DistributionTab | "unknown" {
-  const releaseDate = releaseDateFromRaw(row.raw);
+  const releaseDate = releaseDateFromRow(row);
   if (!releaseDate) return "unknown";
   if (monthsBetween(releaseDate, row.date) < 6) return "new";
   return "old";
@@ -240,13 +213,13 @@ function isBoardTab(lifecycle: DistributionQuery["lifecycle"]): lifecycle is Dis
 function metricValue(row: AppRankRow, metric: DistributionMetric): number | null {
   switch (metric) {
     case "reserve":
-      return row.reserveCount ?? null;
+      return toFiniteNumber(row.reserveCount);
     case "download": {
-      const n = row.downloadCount ?? downloadCountFromRaw(row.raw);
+      const n = toFiniteNumber(row.downloadCount);
       return n != null && n > 0 ? n : null;
     }
     case "fans": {
-      const n = row.fansCount ?? fansCountFromRaw(row.raw);
+      const n = toFiniteNumber(row.fansCount);
       return n != null ? n : null;
     }
     case "rating": {
@@ -256,7 +229,7 @@ function metricValue(row: AppRankRow, metric: DistributionMetric): number | null
       return Number.isFinite(n) ? n : null;
     }
     case "reviewCount":
-      return row.reviewCount ?? null;
+      return toFiniteNumber(row.reviewCount);
     default:
       return null;
   }
@@ -273,25 +246,12 @@ function findBucket(value: number, defs: BucketDefinition[]): BucketDefinition {
   return defs[defs.length - 1]!;
 }
 
+function isAllTimeFull(year: number | null, month?: number | null): boolean {
+  return year == null && month == null;
+}
+
 function rowToAppRankRow(r: Record<string, unknown>): AppRankRow {
-  return {
-    appId: r.appId as number,
-    date: r.date as Date,
-    reserveAndroidRank: r.reserveAndroidRank as number | null,
-    reserveIosRank: r.reserveIosRank as number | null,
-    hotAndroidRank: r.hotAndroidRank as number | null,
-    hotIosRank: r.hotIosRank as number | null,
-    popAndroidRank: r.popAndroidRank as number | null,
-    popIosRank: r.popIosRank as number | null,
-    newAndroidRank: r.newAndroidRank as number | null,
-    newIosRank: r.newIosRank as number | null,
-    fansCount: r.fansCount as number | null,
-    reserveCount: r.reserveCount as number | null,
-    downloadCount: r.downloadCount as number | null,
-    rating: r.rating as string | null,
-    reviewCount: r.reviewCount as number | null,
-    raw: r.raw,
-  };
+  return parseAppRankRow(r);
 }
 
 type SnapshotCache = Map<string, Map<number, AppRankRow>>;
@@ -382,6 +342,27 @@ function cohortBoardCacheKey(
   return `distribution-cohort-board-${board}-${start}-${end}`;
 }
 
+async function enrichVote5StarShare(rows: AppRankRow[], snapshotDate: Date): Promise<void> {
+  const appIds = rows.map((r) => r.appId);
+  if (appIds.length === 0) return;
+  const { rows: voteRows } = await withDbRetry(
+    () =>
+      pool.query<{ appId: number; vote5StarShare: string | number | null }>(
+        `SELECT "appId", ${APP_RANK_VOTE5_SHARE_SQL} AS "vote5StarShare"
+         FROM "AppRank"
+         WHERE "date" = $1::date AND "appId" = ANY($2::int[])`,
+        [snapshotDate, appIds],
+      ),
+    "distribution-vote5-enrich",
+    HEAVY_DB_RETRY,
+  );
+  const byApp = new Map(voteRows.map((r) => [r.appId, r.vote5StarShare]));
+  for (const row of rows) {
+    const v = byApp.get(row.appId);
+    row.vote5StarShare = toFiniteNumber(byApp.get(row.appId));
+  }
+}
+
 async function fetchBoardCohortEdgesRaw(
   periodStart: Date,
   periodEnd: Date,
@@ -395,7 +376,7 @@ async function fetchBoardCohortEdgesRaw(
   const { rows: firstRows } = await withDbRetry(
     () =>
       pool.query(
-        `SELECT DISTINCT ON ("appId") ${COHORT_ROW_SELECT}
+        `SELECT DISTINCT ON ("appId") ${COHORT_FIRST_SELECT}
          FROM "AppRank"
          WHERE ${where}
          ORDER BY "appId", "date" ASC`,
@@ -408,7 +389,7 @@ async function fetchBoardCohortEdgesRaw(
   const { rows: lastRows } = await withDbRetry(
     () =>
       pool.query(
-        `SELECT DISTINCT ON ("appId") ${COHORT_ROW_SELECT}
+        `SELECT DISTINCT ON ("appId") ${COHORT_LAST_SELECT}
          FROM "AppRank"
          WHERE ${where}
          ORDER BY "appId", "date" DESC`,
@@ -424,8 +405,12 @@ async function fetchBoardCohortEdgesRaw(
     const row = rowToAppRankRow(r);
     firstByApp.set(row.appId, row);
   }
+  const lastRowList: AppRankRow[] = [];
   for (const r of lastRows as Record<string, unknown>[]) {
-    const row = rowToAppRankRow(r);
+    lastRowList.push(rowToAppRankRow(r));
+  }
+  await enrichVote5StarShare(lastRowList, periodEnd);
+  for (const row of lastRowList) {
     lastByApp.set(row.appId, row);
   }
 
@@ -468,6 +453,18 @@ async function fetchTabCohortEdges(
   }
   const launched = await fetchBoardCohortEdgesCached(periodStart, periodEnd, "launched");
   return filterTabCohortEdges(launched, tab);
+}
+
+async function fetchTabCohortEdgesAllTime(tab: DistributionTab): Promise<CohortEdgeRows> {
+  if (tab === "reserve") {
+    return ensureCohortEdges("reserve");
+  }
+  const launched = await ensureCohortEdges("launched");
+  return filterTabCohortEdges(launched, tab);
+}
+
+async function fetchLaunchedCohortAllTime(): Promise<CohortEdgeRows> {
+  return ensureCohortEdges("launched");
 }
 
 async function fetchReserveDistinctCount(periodStart: Date, periodEnd: Date): Promise<number> {
@@ -649,12 +646,12 @@ function aggregateBuckets(
   for (const app of endApps) {
     const bucket = findBucket(app.value, defs);
     endCounts.set(bucket.label, (endCounts.get(bucket.label) ?? 0) + 1);
-    metricSums.set(bucket.label, (metricSums.get(bucket.label) ?? 0) + app.value);
+    metricSums.set(bucket.label, (metricSums.get(bucket.label) ?? 0) + Number(app.value));
     const lc = byLifecycle.get(bucket.label)!;
     lc[app.lifecycle] += 1;
 
     const startApp = startByApp.get(app.appId);
-    const delta = startApp ? app.value - startApp.value : 0;
+    const delta = startApp ? Number(app.value) - Number(startApp.value) : 0;
     metricDeltas.set(bucket.label, (metricDeltas.get(bucket.label) ?? 0) + delta);
   }
 
@@ -694,7 +691,7 @@ function aggregateGrowthBuckets(
 
   for (const app of endApps) {
     const startApp = startByApp.get(app.appId);
-    const delta = startApp ? app.value - startApp.value : 0;
+    const delta = startApp ? Number(app.value) - Number(startApp.value) : 0;
     if (delta > 0) increased++;
     else if (delta < 0) decreased++;
     else flat++;
@@ -715,25 +712,6 @@ function aggregateGrowthBuckets(
   }));
 
   return { buckets, increased, decreased, flat };
-}
-
-function vote5StarShareFromRaw(raw: unknown): number | null {
-  if (!raw || typeof raw !== "object") return null;
-  const o = raw as Record<string, unknown>;
-  const app =
-    o.app && typeof o.app === "object" ? (o.app as Record<string, unknown>) : o;
-  const stat = app.stat;
-  if (!stat || typeof stat !== "object") return null;
-  const voteInfo = (stat as Record<string, unknown>).vote_info;
-  if (!voteInfo || typeof voteInfo !== "object") return null;
-  const votes = voteInfo as Record<string, number>;
-  let total = 0;
-  for (const v of Object.values(votes)) {
-    if (typeof v === "number" && Number.isFinite(v)) total += v;
-  }
-  if (total <= 0) return null;
-  const five = votes["5"] ?? 0;
-  return Math.round((five / total) * 1000) / 10;
 }
 
 function computeRatingInsights(
@@ -760,7 +738,7 @@ function computeRatingInsights(
     sumDelta += delta;
     if (delta > 0) improving++;
     else if (delta < 0) declining++;
-    const v5 = vote5StarShareFromRaw(app.row.raw);
+    const v5 = app.row.vote5StarShare;
     if (v5 != null) {
       vote5Sum += v5;
       vote5Count++;
@@ -1063,11 +1041,17 @@ export class DistributionService {
     const { year = null, month, lifecycle } = query;
     const cacheKey = distributionOverviewCacheKey(year ?? null, lifecycle, month ?? null);
 
-    return getCachedOrFetch(
+    const data = await getCachedOrFetch(
       cacheKey,
       () => this.buildOverviewBody(year ?? null, month, lifecycle),
       CACHE_TTL,
     );
+
+    if (isAllTimeFull(year ?? null, month ?? null)) {
+      void persistDistributionOverview(cacheKey, data);
+    }
+
+    return data;
   }
 
   async getTrends(query: DistributionOverviewQuery): Promise<DistributionTrendsResponse> {
@@ -1134,7 +1118,19 @@ export class DistributionService {
     let lastByApp: Map<number, AppRankRow>;
     let segmentCounts: Record<DistributionLifecycle, number>;
 
-    if (lifecycle === "reserve") {
+    const allTime = isAllTimeFull(year, month ?? null);
+
+    if (allTime) {
+      if (lifecycle === "reserve") {
+        ({ firstByApp, lastByApp } = await fetchTabCohortEdgesAllTime(lifecycle));
+        segmentCounts = { ...emptyLifecycleCounts(), reserve: lastByApp.size };
+      } else {
+        const launched = await fetchLaunchedCohortAllTime();
+        ({ firstByApp, lastByApp } = filterTabCohortEdges(launched, lifecycle));
+        const reserveEdges = await ensureCohortEdges("reserve");
+        segmentCounts = segmentCountsFromLaunchedLast(launched.lastByApp, reserveEdges.lastByApp.size);
+      }
+    } else if (lifecycle === "reserve") {
       ({ firstByApp, lastByApp } = await fetchTabCohortEdges(periodStart, periodEnd, lifecycle));
       segmentCounts = { ...emptyLifecycleCounts(), reserve: lastByApp.size };
     } else {
@@ -1216,25 +1212,20 @@ export class DistributionService {
     }
 
     const meta = await this.getMeta();
-    for (const y of [...meta.years].sort((a, b) => a - b)) {
-      const { periodStart, periodEnd } = await resolvePeriodBounds(y);
-      if (!periodStart || !periodEnd) continue;
-      const results = await computeMetricsForPeriod(
-        periodStart,
-        periodEnd,
-        metrics,
-        lifecycle,
-      );
+    const sortedYears = [...meta.years].sort((a, b) => a - b);
+    for (const y of sortedYears) {
+      const yearly = await this.getOverview({ year: y, lifecycle });
       for (const metric of metrics) {
-        const r = results[metric]!;
+        const block = yearly.metrics.find((m) => m.metric === metric);
+        if (!block) continue;
         out[metric]!.push({
           key: String(y),
           label: String(y),
-          periodStart: r.summary.periodStart,
-          periodEnd: r.summary.periodEnd,
-          totalGames: r.summary.totalGames,
-          metricSum: r.absoluteBuckets.reduce((s, b) => s + b.metricSum, 0),
-          metricDelta: r.absoluteBuckets.reduce((s, b) => s + b.metricDelta, 0),
+          periodStart: yearly.periodStart,
+          periodEnd: yearly.periodEnd,
+          totalGames: block.totalGames,
+          metricSum: block.metricSum,
+          metricDelta: block.metricDelta,
         });
       }
     }

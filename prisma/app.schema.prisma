@@ -69,7 +69,7 @@ model RubricManifest {
   updatedAt DateTime @updatedAt @db.Timestamptz(6)
 }
 
-/// Per-user AI review analysis results (not shared across users).
+/// AI review analysis results (shared read; row still tied to user who ran it).
 model UserAiAnalysis {
   id         String   @id @default(cuid())
   userId     String
@@ -82,4 +82,5 @@ model UserAiAnalysis {
   @@unique([userId, appId, analyzedAt])
   @@index([userId])
   @@index([userId, appId])
+  @@index([appId, analyzedAt(sort: Desc)])
 }

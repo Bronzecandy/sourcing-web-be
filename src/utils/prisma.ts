@@ -4,7 +4,7 @@ import { PrismaClient } from "../../generated/prisma/client";
 
 const connectionString = process.env.DATABASE_URL!;
 
-const poolMax = Math.max(5, parseInt(process.env.PG_POOL_MAX ?? "25", 10) || 25);
+const poolMax = Math.max(4, parseInt(process.env.PG_POOL_MAX ?? "8", 10) || 8);
 
 export const pool = new pg.Pool({
   connectionString,

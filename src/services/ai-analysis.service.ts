@@ -1,7 +1,7 @@
 import { callLLM, getModel } from "../utils/ai-client";
 import { pool } from "../utils/prisma";
 import { prisma } from "../utils/prisma";
-import type { AIAnalysisResult, TapTapRawApp } from "../types";
+import type { AIAnalysisResult, TapTapRawApp, PotentialBreakdown } from "../types";
 import type { AnalysisProgressReporter } from "../types/analysis-progress";
 import {
   createProgressStepReporter,
@@ -34,7 +34,12 @@ import {
   deleteAllAnalysesForUser,
   deleteAnalysisForUser,
   getAnalysisHistoryForUser,
+  getAnalysisById as fetchStoredAnalysisById,
+  getAnalysisByKey as fetchStoredAnalysisByKey,
+  getAnalysisHistoryForApp,
+  getLatestAnalysisForApp,
   getLatestAnalysisForUser,
+  listAllAnalyses,
   listAnalysesForUser,
   saveAnalysisForUser,
 } from "./ai-analysis-store";
@@ -43,6 +48,10 @@ import { runDbQuery } from "../utils/db-diagnostics";
 import { classifyPgError, serializePgError } from "../utils/pg-error";
 import { aiInfoLog, aiVerboseLog } from "../utils/ai-logger";
 import { logDiag, logDiagBrief, logDiagVerbose, logDbError } from "../utils/process-diagnostics";
+import {
+  APP_REVIEW_LIGHT_SELECT,
+  APP_REVIEW_SAMPLE_ORDER_SQL,
+} from "../utils/app-review-sql";
 import { buildDbFetchProgress } from "../utils/analysis-progress-copy";
 import {
   AI_MAX_REVIEWS_FOR_ANALYSIS,
@@ -252,6 +261,13 @@ export interface StratifiedReview {
   bucket: string;
 }
 
+interface ReviewFetchRow {
+  id?: number;
+  reviewText?: string | null;
+  reviewScore?: number | null;
+  reviewAt: Date | null;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -262,7 +278,7 @@ async function queryReviewBatch(
   limit: number,
   bounds: { minReviewAt: Date | null; maxReviewAt: Date | null },
   batchIndex: number,
-): Promise<{ id: number; raw: Record<string, unknown>; reviewAt: Date | null }[]> {
+): Promise<ReviewFetchRow[]> {
   const label = `ai-AppReview-batch-${appId}`;
   const windowTag =
     bounds.minReviewAt && bounds.maxReviewAt
@@ -293,8 +309,8 @@ async function queryReviewBatch(
             paramIdx++;
           }
           params.push(limit);
-          const res = await pool.query<{ id: number; raw: Record<string, unknown>; reviewAt: Date | null }>(
-            `SELECT id, raw, "reviewAt"
+          const res = await pool.query<ReviewFetchRow & { id: number }>(
+            `SELECT ${APP_REVIEW_LIGHT_SELECT}
          FROM "AppReview"
          WHERE ${where}
          ORDER BY id ASC
@@ -354,20 +370,11 @@ async function queryReviewBatch(
   throw lastErr;
 }
 
-function parseReviewRow(
-  row: { raw: Record<string, unknown>; reviewAt: Date | null },
-  bucketLabel: string,
-): StratifiedReview | null {
-  const raw = row.raw;
-  const review = raw?.review as Record<string, unknown> | undefined;
-  const contents = review?.contents as Record<string, unknown> | undefined;
-  const text =
-    (contents?.text as string) ??
-    ((raw?.sharing as Record<string, unknown>)?.description as string) ??
-    "";
+function parseReviewRow(row: ReviewFetchRow, bucketLabel: string): StratifiedReview | null {
+  const text = String(row.reviewText ?? "").trim();
   if (text.length < 5) return null;
 
-  const score = (review?.score as number) ?? 0;
+  const score = Math.round(Number(row.reviewScore ?? 0));
   const date = row.reviewAt
     ? row.reviewAt.toISOString().slice(0, 10)
     : "unknown";
@@ -421,15 +428,13 @@ async function countReviewsInWindow(
 }
 
 function parseRowsToStratifiedReviews(
-  rows: { raw: Record<string, unknown>; reviewAt: Date | null }[],
+  rows: ReviewFetchRow[],
 ): { reviews: StratifiedReview[]; corruptSkipped: number } {
   const out: StratifiedReview[] = [];
   let corruptSkipped = 0;
   for (const row of rows) {
     try {
-      const raw = row.raw;
-      const review = raw?.review as Record<string, unknown> | undefined;
-      const score = Math.round(Number(review?.score ?? 0));
+      const score = Math.round(Number(row.reviewScore ?? 0));
       const bucket = RATING_BUCKETS.find((b) => score >= b.min && score <= b.max);
       const bucketLabel = bucket?.label ?? "Unrated";
       const r = parseReviewRow(row, bucketLabel);
@@ -450,7 +455,7 @@ async function queryReviewsInTimeBucket(
     timeEnd?: Date;
     reviewAtIsNull?: boolean;
   },
-): Promise<{ raw: Record<string, unknown>; reviewAt: Date | null }[]> {
+): Promise<ReviewFetchRow[]> {
   const params: unknown[] = [appId];
   let where = `"appId" = $1 AND raw IS NOT NULL`;
   let idx = 2;
@@ -467,11 +472,11 @@ async function queryReviewsInTimeBucket(
   }
 
   params.push(opts.limit);
-  const res = await pool.query<{ raw: Record<string, unknown>; reviewAt: Date | null }>(
-    `SELECT raw, "reviewAt"
+  const res = await pool.query<ReviewFetchRow>(
+    `SELECT ${APP_REVIEW_LIGHT_SELECT}
      FROM "AppReview"
      WHERE ${where}
-     ORDER BY RANDOM()
+     ORDER BY ${APP_REVIEW_SAMPLE_ORDER_SQL}
      LIMIT $${idx}`,
     params,
   );
@@ -504,11 +509,9 @@ async function topUpStratifiedReviews(
     if (batch.length === 0) break;
 
     for (const row of batch) {
-      afterId = row.id;
+      afterId = row.id ?? afterId;
       try {
-        const raw = row.raw;
-        const review = raw?.review as Record<string, unknown> | undefined;
-        const score = Math.round(Number(review?.score ?? 0));
+        const score = Math.round(Number(row.reviewScore ?? 0));
         const bucket = RATING_BUCKETS.find((b) => score >= b.min && score <= b.max);
         const bucketLabel = bucket?.label ?? "Unrated";
         const parsed = parseReviewRow(row, bucketLabel);
@@ -664,7 +667,7 @@ async function fetchStratifiedReviewsFull(
   onBatchProgress?: ReviewFetchBatchProgress,
 ): Promise<StratifiedReview[]> {
   const startMs = Date.now();
-  const rows: { raw: Record<string, unknown>; reviewAt: Date | null }[] = [];
+  const rows: ReviewFetchRow[] = [];
   let afterId = 0;
   let batchIndex = 0;
 
@@ -673,8 +676,8 @@ async function fetchStratifiedReviewsFull(
     const batch = await queryReviewBatch(appId, afterId, AI_REVIEW_FETCH_BATCH, bounds, batchIndex);
     if (batch.length === 0) break;
     for (const row of batch) {
-      rows.push({ raw: row.raw, reviewAt: row.reviewAt });
-      afterId = row.id;
+      rows.push(row);
+      if (row.id != null) afterId = row.id;
     }
     onBatchProgress?.({ batchIndex, totalRows: rows.length });
     if (batch.length < AI_REVIEW_FETCH_BATCH) break;
@@ -778,6 +781,139 @@ function buildBucketCounts(reviews: StratifiedReview[]): Record<string, number> 
   return counts;
 }
 
+/** Compact count formatter (K/M) for data-performance bullets. */
+function formatCount(n: number): string {
+  const abs = Math.abs(n);
+  if (abs >= 1_000_000) return `${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M`;
+  if (abs >= 1_000) return `${(n / 1_000).toFixed(n % 1_000 === 0 ? 0 : 1)}K`;
+  return `${Math.round(n)}`;
+}
+
+function pctOf(n: number, total: number): number {
+  return total > 0 ? Math.round((n / total) * 1000) / 10 : 0;
+}
+
+/**
+ * Data-performance bullets with interpretation — numbers are exact; each line explains why it matters.
+ */
+function buildDataPerformanceBullets(params: {
+  bucketCounts: Record<string, number>;
+  reviewsTotal: number;
+  fansCount?: number | null;
+  breakdown?: PotentialBreakdown | null;
+}): string[] {
+  const { bucketCounts, reviewsTotal, fansCount, breakdown } = params;
+  const bullets: string[] = [];
+
+  if (reviewsTotal > 0) {
+    const vneg = bucketCounts["Very Negative"] ?? 0;
+    const neg = bucketCounts["Negative"] ?? 0;
+    const mix = bucketCounts["Mixed"] ?? 0;
+    const pos = bucketCounts["Positive"] ?? 0;
+    const vpos = bucketCounts["Very Positive"] ?? 0;
+    const positive = pos + vpos;
+    const negative = vneg + neg;
+    const posPct = pctOf(positive, reviewsTotal);
+    const negPct = pctOf(negative, reviewsTotal);
+    let sentimentTake =
+      posPct >= 75
+        ? "đa số người chơi hài lòng — tín hiệu chất lượng tốt"
+        : posPct >= 55
+          ? "cảm xúc lệch tích cực nhưng vẫn còn nhóm tiêu cực đáng chú ý"
+          : negPct >= 30
+            ? "tỷ lệ tiêu cực cao — cần xem kỹ các vấn đề lặp lại trong review"
+            : "cảm xúc trung tính, chưa có đủ tín hiệu rõ ràng";
+    bullets.push(
+      `Review: ${posPct}% tích cực (4–5★), ${negPct}% tiêu cực (1–2★), ${pctOf(mix, reviewsTotal)}% trung tính trên ${reviewsTotal.toLocaleString("vi-VN")} bình luận — ${sentimentTake}.`,
+    );
+  }
+
+  const reserve = breakdown?.reserve ?? null;
+  const launched = breakdown?.launched ?? null;
+  const detail = launched ?? reserve;
+  const audience = detail?.audience ?? detail?.scale;
+
+  const rating = detail?.rating;
+  if (rating?.end != null) {
+    const deltaTxt =
+      rating.start != null
+        ? ` (${rating.delta >= 0 ? "+" : ""}${rating.delta} trong kỳ)`
+        : "";
+    let ratingTake =
+      rating.delta > 0.05
+        ? "rating đang cải thiện — được cộng đồng đón nhận tốt hơn"
+        : rating.delta < -0.05
+          ? "rating giảm nhẹ — cần theo dõi xem có vấn đề mới nổi không"
+          : rating.end >= 9
+            ? "rating cao và ổn định — chất lượng được giữ vững, không bị phạt vì không tăng thêm"
+            : "rating ổn định trong kỳ";
+    bullets.push(`Đánh giá: ${rating.end}★${deltaTxt} — ${ratingTake}.`);
+  }
+
+  if (audience?.end != null) {
+    const metricLabel = audience.metric === "download" ? "lượt tải" : "đăng ký trước";
+    const tierLabel = audience.baseTierLabel ? ` (mốc ${audience.baseTierLabel})` : "";
+    const deltaTxt =
+      audience.delta !== 0
+        ? `, tăng thêm ${audience.delta >= 0 ? "+" : ""}${formatCount(audience.delta)}`
+        : "";
+    let audienceTake =
+      audience.baseValue >= 80 && audience.delta > 0 && audience.delta < 50_000
+        ? "quy mô đã rất lớn nên tốc độ tăng chậm lại là bình thường — vẫn là game dẫn đầu, không bị trừ điểm nặng"
+        : audience.delta > 50_000
+          ? "tăng trưởng mạnh so với mặt bằng — đang thu hút người chơi tích cực"
+          : audience.delta < 0
+            ? "quy mô giảm trong kỳ — cần xem có sự kiện âm tính hay chỉ dao động ngắn hạn"
+            : audience.baseValue >= 68
+              ? "quy mô lớn, duy trì ổn định — vị thế thị trường vững"
+              : "quy mô còn khiêm tốn — cần tăng trưởng rõ hơn để leo hạng";
+    bullets.push(
+      `${metricLabel === "lượt tải" ? "Lượt tải" : "Đăng ký trước"}: ~${formatCount(audience.end)}${tierLabel}${deltaTxt} — ${audienceTake}.`,
+    );
+  }
+
+  if (fansCount != null && fansCount > 0) {
+    const fanTake =
+      audience?.end != null && fansCount >= audience.end * 0.8
+        ? "fan và quy mô chơi/đặt chỗ tương đương — cộng đồng quan tâm thật"
+        : "cộng đồng theo dõi đáng kể — bổ sung cho quy mô reserve/download";
+    bullets.push(`Fan/cộng đồng: ~${formatCount(fansCount)} — ${fanTake}.`);
+  }
+
+  if (detail?.rankQuality) {
+    const rq = detail.rankQuality;
+    let rankTake =
+      rq.rankEnd <= 10
+        ? "duy trì top 10 — vị thế BXH rất mạnh"
+        : rq.rankEnd <= 20
+          ? "nằm top 20 ổn định — game đáng chú ý trên bảng"
+          : rq.change > 0
+            ? "đang leo hạng — momentum BXH tích cực"
+            : rq.change < 0
+              ? "tụt hạng trong kỳ — cần đối chiếu với tăng trưởng số liệu"
+              : "hạng ổn định nhưng chưa ở nhóm top";
+    bullets.push(
+      `BXH: hiện #${rq.rankEnd}, tốt nhất #${rq.bestRank} (${rq.daysTracked} ngày) — ${rankTake}.`,
+    );
+  }
+
+  const compositeParts: string[] = [];
+  if (reserve?.compositeScore != null) compositeParts.push(`Reserve ${reserve.compositeScore.toFixed(1)}`);
+  if (launched?.compositeScore != null) compositeParts.push(`Launch ${launched.compositeScore.toFixed(1)}`);
+  if (compositeParts.length > 0) {
+    const top = Math.max(reserve?.compositeScore ?? 0, launched?.compositeScore ?? 0);
+    const potTake =
+      top >= 85
+        ? "tiềm năng rất cao — nằm nhóm đầu so với mặt bằng"
+        : top >= 70
+          ? "tiềm năng khá — có nhiều điểm mạnh đồng thời"
+          : "tiềm năng trung bình — còn mảnh cần cải thiện";
+    bullets.push(`Potential: ${compositeParts.join(" · ")} / 100 — ${potTake}.`);
+  }
+
+  return bullets;
+}
+
 function getDateRange(reviews: StratifiedReview[]): { start: string | null; end: string | null } {
   const dates = reviews.map((r) => r.date).filter((d) => d !== "unknown").sort();
   return { start: dates[0] ?? null, end: dates[dates.length - 1] ?? null };
@@ -795,8 +931,8 @@ function buildReviewTextBlock(
 
 const FINAL_OUTPUT_SPEC = `Trả về một object JSON đúng cấu trúc sau (toàn bộ chuỗi tiếng Việt). ĐIỂM CHÍNH là rubricCriteria — phải đủ mọi id đã liệt kê; điểm mạnh/yếu gắn với TỪNG tiêu chí trong rubricCriteria, không dùng strengths/weaknesses tổng hợp riêng.
 {
-  "summaryBullets": ["3–8 gạch đầu dòng ngắn: bức tranh tổng thể từ review"],
-  "recentTrendBullets": ["2–6 gạch đầu dòng: xu hướng theo thời gian nếu thấy trong dữ liệu"],
+  "summaryBullets": ["1–3 gạch đầu dòng NGẮN bổ sung góc nhìn định tính từ review (vấn đề lặp lại, điểm nổi bật) — KHÔNG lặp lại số liệu vì hệ thống đã chèn block Data Performance kèm nhận định ở đầu Tóm tắt."],
+  "recentTrendBullets": ["2–6 gạch đầu dòng: xu hướng trong KHOẢNG 60 NGÀY GẦN ĐÂY NHẤT (dựa trên ngày review mới nhất trong dữ liệu) — nêu rõ cảm xúc đang tăng/giảm/ổn định và vấn đề mới nổi gần đây"],
   "rubricCriteria": [ ... theo spec rubric bên dưới ... ],
   "redFlagSignals": { ... }
 }
@@ -945,16 +1081,43 @@ function bulletsFromLegacyParagraph(text: string): string[] {
 }
 
 export class AIAnalysisService {
-  async getAllAnalyses(userId: string): Promise<AIAnalysisResult[]> {
-    return listAnalysesForUser(userId);
+  async getAnalysisById(analysisId: string): Promise<AIAnalysisResult | null> {
+    return fetchStoredAnalysisById(analysisId);
   }
 
-  async getLatestAnalysis(userId: string, appId: number): Promise<AIAnalysisResult | null> {
-    return getLatestAnalysisForUser(userId, appId);
+  async getAnalysisByKey(
+    appId: number,
+    analyzedAtIso: string,
+    userId?: string,
+  ): Promise<AIAnalysisResult | null> {
+    return fetchStoredAnalysisByKey(appId, analyzedAtIso, userId);
   }
 
-  async getAnalysisHistory(userId: string, appId: number): Promise<AIAnalysisResult[]> {
-    return getAnalysisHistoryForUser(userId, appId);
+  async getAllAnalyses(
+    userId: string,
+    scope: "all" | "mine" = "all",
+  ): Promise<AIAnalysisResult[]> {
+    return scope === "mine" ? listAnalysesForUser(userId) : listAllAnalyses();
+  }
+
+  async getLatestAnalysis(
+    userId: string,
+    appId: number,
+    scope: "all" | "mine" = "all",
+  ): Promise<AIAnalysisResult | null> {
+    return scope === "mine"
+      ? getLatestAnalysisForUser(userId, appId)
+      : getLatestAnalysisForApp(appId);
+  }
+
+  async getAnalysisHistory(
+    userId: string,
+    appId: number,
+    scope: "all" | "mine" = "all",
+  ): Promise<AIAnalysisResult[]> {
+    return scope === "mine"
+      ? getAnalysisHistoryForUser(userId, appId)
+      : getAnalysisHistoryForApp(appId);
   }
 
   async deleteAnalysis(userId: string, appId: number, analyzedAt: string): Promise<boolean> {
@@ -1145,9 +1308,31 @@ export class AIAnalysisService {
     const redFlagAtAGlance = buildRedFlagAtAGlance(rubric);
     const redFlagsChecklist = buildRedFlagsChecklist(rubric);
 
+    // Deterministic Data-Performance block leads the summary; AI bullets become narrative tail.
+    let potentialBreakdown: PotentialBreakdown | null = null;
+    if ((opts.source ?? "database") === "database" && Number.isFinite(appId)) {
+      try {
+        const { rankingService } = await import("./ranking.service");
+        potentialBreakdown = await rankingService.getGamePotentialBreakdown(appId, 14, "combined");
+      } catch (err) {
+        aiVerboseLog(
+          `[AI Analysis] potential breakdown unavailable for ${appId}: ${(err as Error).message}`,
+        );
+      }
+    }
+    const dataBullets = buildDataPerformanceBullets({
+      bucketCounts,
+      reviewsTotal: reviews.length,
+      fansCount: opts.analysisContext.fansCount,
+      breakdown: potentialBreakdown,
+    });
+
     let summaryBullets = normalizeBulletArray(analysis.summaryBullets);
     if (summaryBullets.length === 0 && typeof analysis.summary === "string" && analysis.summary.trim()) {
       summaryBullets = bulletsFromLegacyParagraph(analysis.summary);
+    }
+    if (dataBullets.length > 0) {
+      summaryBullets = [...dataBullets, ...summaryBullets];
     }
     if (summaryBullets.length === 0) {
       summaryBullets = ["Không có tóm tắt."];
@@ -1192,13 +1377,13 @@ export class AIAnalysisService {
       libraryRequests,
     };
 
-    await saveAnalysisForUser(userId, result);
+    const analysisId = await saveAnalysisForUser(userId, result);
 
     aiInfoLog(`[AI Analysis] ${gameName}: saved for user ${userId}`);
 
     report(100, "Hoàn tất phân tích AI.", "done");
 
-    return result;
+    return { ...result, analyzedByUserId: userId, analysisId };
   }
 
   /** Có review trong DB → phân tích nhanh, không cần proxy TapTap. */

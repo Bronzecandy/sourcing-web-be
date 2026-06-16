@@ -14,51 +14,60 @@ import type { AnalysisContext } from "./analysis-context";
 import type { RubricCriterionDef, RubricManifest } from "./rubric-manifest";
 import { translateTags } from "../utils/tag-translator";
 
-/** Trọng số phần "Theo thể loại" khi gói base / không schema riêng. */
-export const GENRE_PART_WEIGHT_FOR_BASE_PACK = 0.04;
+/** Gói base: toàn bộ 40% gameplay+genre dồn vào Gameplay; không có phần Theo thể loại. */
+export const BASE_GAMEPLAY_PART_WEIGHT = 0.4;
 /**
- * Khi có gói thể loại (MOBA, Card RPG, …): trọng số **phần Gameplay** và **phần Theo thể loại** trong điểm tổng.
- * Các phần còn lại (Tổng quan, Hình ảnh & nội dung, Monetization, Social, LiveOps) giữ **tỷ lệ tương đối** trong manifest và chiếm phần còn lại (~62%).
+ * Gói thể loại riêng: Gameplay 26% + Theo thể loại 14% = 40% (thêm 2% từ Social so với manifest 24%+14%).
+ * Phần pool còn lại (~60%) chia theo manifest; Social bị trừ 2% tuyệt đối trước khi scale.
  */
-export const NON_BASE_GAMEPLAY_PART_WEIGHT = 0.14;
-export const NON_BASE_GENRE_PART_WEIGHT = 0.24;
+export const NON_BASE_GAMEPLAY_PART_WEIGHT = 0.26;
+export const NON_BASE_GENRE_PART_WEIGHT = 0.14;
+export const SOCIAL_WEIGHT_PENALTY = 0.02;
 
 const NON_BASE_POOL_PART_IDS = ["overview", "presentation", "monetization", "socialization", "liveops"] as const;
+
+function scalePoolParts(
+  manifest: RubricManifest,
+  remainder: number,
+  socialPenalty: number,
+): Map<string, number> {
+  const manifestById = new Map(manifest.parts.map((p) => [p.id, p.weight]));
+  let poolSum = 0;
+  const adjusted = new Map<string, number>();
+  for (const id of NON_BASE_POOL_PART_IDS) {
+    let w = manifestById.get(id) ?? 0;
+    if (id === "socialization" && socialPenalty > 0) {
+      w = Math.max(0, w - socialPenalty);
+    }
+    adjusted.set(id, w);
+    poolSum += w;
+  }
+  const out = new Map<string, number>();
+  for (const id of NON_BASE_POOL_PART_IDS) {
+    const w = adjusted.get(id) ?? 0;
+    out.set(id, poolSum > 0 ? (w / poolSum) * remainder : 0);
+  }
+  return out;
+}
 
 /** Trọng số từng phần thực tế khi tính điểm tổng (sau khi cân theo gói thể loại). */
 export function resolveEffectivePartWeights(manifest: RubricManifest, packResolved: string): Map<string, number> {
   const isBase = packResolved === "base";
-  const scored = manifest.parts.filter((p) => p.id !== "red_flag" && p.weight > 0);
-
   const out = new Map<string, number>();
 
   if (isBase) {
-    const gEff = GENRE_PART_WEIGHT_FOR_BASE_PACK;
-    const nonGenreFileSum = scored.filter((p) => p.id !== "genre_specific").reduce((s, p) => s + p.weight, 0);
-    const scale = nonGenreFileSum > 0 ? (1 - gEff) / nonGenreFileSum : 1;
-    for (const p of scored) {
-      if (p.id === "genre_specific") out.set(p.id, gEff);
-      else out.set(p.id, p.weight * scale);
-    }
+    out.set("gameplay", BASE_GAMEPLAY_PART_WEIGHT);
+    out.set("genre_specific", 0);
+    const pool = scalePoolParts(manifest, 1 - BASE_GAMEPLAY_PART_WEIGHT, 0);
+    for (const [id, w] of pool) out.set(id, w);
     return out;
   }
 
-  const manifestById = new Map(manifest.parts.map((p) => [p.id, p.weight]));
-  let poolManifestSum = 0;
-  for (const id of NON_BASE_POOL_PART_IDS) {
-    poolManifestSum += manifestById.get(id) ?? 0;
-  }
-
-  const remainder = 1 - NON_BASE_GAMEPLAY_PART_WEIGHT - NON_BASE_GENRE_PART_WEIGHT;
-
-  for (const id of NON_BASE_POOL_PART_IDS) {
-    const w = manifestById.get(id) ?? 0;
-    const eff = poolManifestSum > 0 ? (w / poolManifestSum) * remainder : 0;
-    out.set(id, eff);
-  }
+  const gameplayGenreTotal = NON_BASE_GAMEPLAY_PART_WEIGHT + NON_BASE_GENRE_PART_WEIGHT;
+  const pool = scalePoolParts(manifest, 1 - gameplayGenreTotal, SOCIAL_WEIGHT_PENALTY);
+  for (const [id, w] of pool) out.set(id, w);
   out.set("gameplay", NON_BASE_GAMEPLAY_PART_WEIGHT);
   out.set("genre_specific", NON_BASE_GENRE_PART_WEIGHT);
-
   return out;
 }
 
@@ -115,6 +124,28 @@ function severityToFlagPresent(s: RedFlagSeverity | null): boolean | null {
   return true;
 }
 
+function parsePlayerMentions(raw: unknown): RubricRedFlagBlock["playerMentions"] | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const o = raw as Record<string, unknown>;
+  const pick = (k: string): string | null | undefined => {
+    const v = o[k];
+    if (v == null) return null;
+    if (typeof v !== "string") return undefined;
+    const s = v.trim();
+    return s.length > 0 ? s : null;
+  };
+  const mentions = {
+    politics: pick("politics"),
+    religion: pick("religion"),
+    casino: pick("casino"),
+    violence: pick("violence"),
+    sexual: pick("sexual"),
+    summary: pick("summary"),
+  };
+  const hasAny = Object.values(mentions).some((v) => typeof v === "string" && v.length > 0);
+  return hasAny ? mentions : undefined;
+}
+
 function buildRedFlagBlock(raw: Record<string, unknown> | null | undefined): RubricRedFlagBlock {
   const r = raw ?? {};
   const politics = triBool(r.politics);
@@ -151,6 +182,49 @@ function buildRedFlagBlock(raw: Record<string, unknown> | null | undefined): Rub
     violenceScore: vsNum,
     sexualScore: ssNum,
     otherTaboosNote: note,
+    playerMentions: parsePlayerMentions(r.playerMentions),
+  };
+}
+
+/** Gộp bằng chứng từ rubricCriteria red_flag.* khi LLM không trả playerMentions đủ. */
+export function mergeRedFlagPlayerMentions(
+  rf: RubricRedFlagBlock,
+  criteria: RubricCriterionOutput[],
+): RubricRedFlagBlock["playerMentions"] {
+  const fromCriteria: NonNullable<RubricRedFlagBlock["playerMentions"]> = {};
+  for (const c of criteria) {
+    if (c.partId !== "red_flag") continue;
+    const parts = [c.reasoning, ...(c.weaknesses ?? [])].map((s) => s?.trim()).filter(Boolean) as string[];
+    if (parts.length === 0) continue;
+    const text = parts.join(" ");
+    switch (c.id) {
+      case "red_flag.politics":
+        fromCriteria.politics = text;
+        break;
+      case "red_flag.religion":
+        fromCriteria.religion = text;
+        break;
+      case "red_flag.casino":
+        fromCriteria.casino = text;
+        break;
+      case "red_flag.violence":
+        fromCriteria.violence = text;
+        break;
+      case "red_flag.sexual":
+        fromCriteria.sexual = text;
+        break;
+      default:
+        break;
+    }
+  }
+  const llm = rf.playerMentions ?? {};
+  return {
+    politics: llm.politics ?? fromCriteria.politics ?? null,
+    religion: llm.religion ?? fromCriteria.religion ?? null,
+    casino: llm.casino ?? fromCriteria.casino ?? null,
+    violence: llm.violence ?? fromCriteria.violence ?? null,
+    sexual: llm.sexual ?? fromCriteria.sexual ?? null,
+    summary: llm.summary ?? null,
   };
 }
 
@@ -390,9 +464,37 @@ function computeAggregate(
   };
 }
 
+function buildRedFlagDetailLines(
+  rf: RubricRedFlagBlock,
+  mentions: RubricRedFlagBlock["playerMentions"],
+): string[] {
+  const lines: string[] = [];
+  const add = (label: string, active: boolean, text: string | null | undefined) => {
+    if (!active || !text?.trim()) return;
+    lines.push(`${label}: ${text.trim()}`);
+  };
+  add("Chính trị / chủ quyền", rf.politics === true, mentions?.politics);
+  add("Tôn giáo nhạy cảm", rf.religionSensitive === true, mentions?.religion);
+  add("Casino / cờ bạc đổi thưởng", rf.casino === true, mentions?.casino);
+  const violActive = rf.violenceSeverity != null && rf.violenceSeverity !== "none";
+  const sexActive = rf.sexualSeverity != null && rf.sexualSeverity !== "none";
+  add(
+    `Bạo lực gore (${rf.violenceSeverity ?? "n/a"})`,
+    violActive,
+    mentions?.violence,
+  );
+  add(
+    `Sexual / gợi dục (${rf.sexualSeverity ?? "n/a"})`,
+    sexActive,
+    mentions?.sexual,
+  );
+  return lines;
+}
+
 /** Tóm tắt gắn đầu response API để client hiển thị red flag trước phần đánh giá chi tiết. */
 export function buildRedFlagAtAGlance(rubric: RubricBlock): RedFlagAtAGlance {
   const rf = rubric.redFlag;
+  const mentions = mergeRedFlagPlayerMentions(rf, rubric.criteria);
   const politics = rf.politics ?? null;
   const casino = rf.casino ?? null;
   const religion = rf.religionSensitive ?? null;
@@ -441,13 +543,22 @@ export function buildRedFlagAtAGlance(rubric: RubricBlock): RedFlagAtAGlance {
     headlineVi = `Chưa có hard gate politics/casino; bạo lực gore / sexual: ${viol ?? "chưa rõ"} / ${sex ?? "chưa rõ"} — tham chiếu compliance.`;
   }
 
-  if (note && !blockedByHardGate) {
-    const short = note.length > 180 ? `${note.slice(0, 180)}…` : note;
-    headlineVi += ` Taboo khác: ${short}`;
+  let detailVi = buildRedFlagDetailLines(rf, mentions);
+
+  if (mentions?.summary?.trim()) {
+    headlineVi = mentions.summary.trim();
+  } else if (detailVi.length > 0 && hasElevatedRisk) {
+    headlineVi = `${headlineVi} — ${detailVi[0]}`.trim();
+    detailVi = detailVi.slice(1);
+  } else if (note && !blockedByHardGate) {
+    const short = note.length > 220 ? `${note.slice(0, 220)}…` : note;
+    headlineVi = `${headlineVi} Taboo khác: ${short}`;
   }
 
   return {
     headlineVi: headlineVi.trim(),
+    detailVi,
+    playerMentions: mentions,
     riskLevel,
     blockedByHardGate,
     hasElevatedRisk,
@@ -536,8 +647,10 @@ export function formatRubricCriteriaForPrompt(active: RubricCriterionDef[]): str
 const RED_FLAG_OUTPUT_SPEC = `
 Red Flag — đánh giá rủi ro / phù hợp thị trường Việt Nam (KHÔNG là điểm rubric, KHÔNG làm thay đổi weightedScore; part red_flag có weight 0):
 - Trả "redFlagSignals" với politics, casino (boolean) và violenceSeverity, sexualSeverity: một trong "none" | "low" | "medium" | "high" hoặc null (null = không đủ dữ liệu để phân loại).
+- BẮT BUỘC "playerMentions" trong redFlagSignals: mô tả tiếng Việt **cách người chơi đề cập** từng vấn đề trong review (paraphrase, không bịa quote; ước lượng số review nhắc tới nếu có). Chỉ điền field tương ứng khi có bằng chứng hoặc mức rủi ro ≠ none/false; null nếu không nhắc.
+- "playerMentions.summary": 1–2 câu tóm tắt rủi ro chính cho alert UI (rõ, cụ thể, không chung chung).
 - Ưu tiên severity; không bắt buộc violenceScore/sexualScore (0–100). Nếu chỉ có số cũ, hệ thống vẫn suy ra severity.
-- Trong "rubricCriteria", các id bắt đầu bằng "red_flag.": đặt "score": null (bắt buộc); dùng reasoning và tùy chọn strengths/weaknesses để trích dẫn bằng chứng từ review/mô tả.
+- Trong "rubricCriteria", các id bắt đầu bằng "red_flag.": đặt "score": null (bắt buộc); reasoning/weaknesses phải nêu **người chơi phàn nàn / nhắc gì** (paraphrase review).
 - violenceSeverity: chỉ nâng mức khi có bạo lực mang rợ, máu me, kinh dị thể chất, tra tấn, phân thân rõ (gore). Game hành động / đối kháng / bắn súng / combat nhiều mà không có hình ảnh gây sốc như trên → coi là none hoặc low, không vì “đánh nhau nhiều” mà gán medium/high.
 - sexualSeverity: gợi dục, nội dung tình dục, nudity — mức rủi ro cho VN.
 - politics: nội dung chính trị nhạy cảm, chủ quyền, bản đồ, tuyên truyền tranh chấp với VN.
@@ -564,7 +677,15 @@ const RUBRIC_JSON_SPEC = `
   "sexualSeverity": <"none"|"low"|"medium"|"high"|null>,
   "violenceScore": <tùy chọn, legacy 0-100 hoặc null>,
   "sexualScore": <tùy chọn, legacy 0-100 hoặc null>,
-  "otherTaboosNote": <string hoặc null>
+  "otherTaboosNote": <string hoặc null>,
+  "playerMentions": {
+    "summary": <string | null — tóm tắt alert>,
+    "politics": <string | null>,
+    "religion": <string | null>,
+    "casino": <string | null>,
+    "violence": <string | null>,
+    "sexual": <string | null>
+  }
 }
 Phải có đủ một object trong rubricCriteria cho MỖI id rubric được liệt kê ở trên. Với mỗi tiêu chí: strengths/weaknesses là danh sách riêng (không gộp chung toàn game).`;
 

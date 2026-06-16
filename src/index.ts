@@ -3,6 +3,7 @@ import cron from "node-cron";
 import app from "./app";
 import { precomputeAll } from "./precompute";
 import { warmLibraryCache } from "./services/library-store";
+import { loadDistributionDiskCache } from "./services/distribution-disk-cache";
 import { installProcessDiagnostics, logDiag, logDiagError } from "./utils/process-diagnostics";
 
 installProcessDiagnostics();
@@ -41,6 +42,10 @@ cron.schedule("15 10 * * *", () => runPrecompute("cron"), {
 
 app.listen(PORT, async () => {
   await warmAppDb();
+  const distKeys = await loadDistributionDiskCache();
+  if (distKeys > 0) {
+    console.log(`[distribution] Loaded ${distKeys} overview cache file(s) from disk`);
+  }
   console.log(`Server running on http://localhost:${PORT}`);
   console.log(`Health check: http://localhost:${PORT}/api/health`);
   console.log(`Library admin UI: http://localhost:${PORT}/admin/libraries`);
@@ -49,8 +54,8 @@ app.listen(PORT, async () => {
   logDiag("server-listening", {
     port: PORT,
     skipWarmup: process.env.SKIP_WARMUP === "1",
-    pgPoolMax: process.env.PG_POOL_MAX ?? "25",
-    precomputeDbConcurrency: process.env.PRECOMPUTE_DB_CONCURRENCY ?? "8",
+    pgPoolMax: process.env.PG_POOL_MAX ?? "8",
+    precomputeDbConcurrency: process.env.PRECOMPUTE_DB_CONCURRENCY ?? "2",
     nodeEnv: process.env.NODE_ENV ?? "(unset)",
   });
   if (process.env.SKIP_WARMUP === "1") {

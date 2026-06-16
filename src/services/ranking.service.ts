@@ -1,6 +1,11 @@
 import { pool } from "../utils/prisma";
 import { getCachedOrFetch } from "../utils/cache";
-import type { PotentialScoreResult } from "../types";
+import type {
+  PotentialScoreResult,
+  PotentialScaleMetric,
+  GamePotentialDetail,
+  PotentialBreakdown,
+} from "../types";
 import {
   APP_RANK_LIGHT_SELECT_SQL,
   APP_RANK_APP_DATE_RANGE_SQL,
@@ -20,17 +25,20 @@ import {
   reserveRank,
   type AppLifecycleMeta,
 } from "../utils/app-rank";
-import type { GamePotentialDetail, PotentialBreakdown } from "../types";
 import { downloadCountFromRaw } from "../utils/taptap-raw-extract";
+import {
+  ensurePotentialScorers,
+  mergeAudienceScore,
+  ratingDeltaAdjustment,
+  ratingStartBase,
+  tierAbsScale,
+  tierGrowthDelta,
+} from "../utils/distribution-percentile";
 
-const ALGO_VERSION_RESERVE = "v6";
-const ALGO_VERSION_LAUNCHED = "v12";
-
-const LAUNCH_BOARD_WEIGHTS: Record<PrimaryLaunchBoard, number> = {
-  pop: 0.5,
-  hot: 0.3,
-  new: 0.2,
-};
+// Distribution tier pillars; bump when the formula changes so caches refresh.
+const ALGO_VERSION_RESERVE = "v9";
+const ALGO_VERSION_LAUNCHED = "v15";
+const BREAKDOWN_VERSION = "v9";
 
 /** Base chart-quality score by primary board (Pop > Hot > New). */
 const LAUNCH_CHART_BASE: Record<PrimaryLaunchBoard, number> = {
@@ -46,14 +54,37 @@ const LAUNCH_BOARD_SUB_WEIGHTS = {
   coverage: 0.15,
 } as const;
 
-/** Launched composite weights — must sum to 1.0 so raw max = 100 when all subs = 100. */
+/** Reserve composite weights — must sum to 1.0. */
+const RESERVE_COMPOSITE_WEIGHTS = {
+  audience: 0.65,
+  rating: 0.25,
+  rankQuality: 0.1,
+} as const;
+
+/** Launched composite weights — must sum to 1.0. */
 const LAUNCHED_COMPOSITE_WEIGHTS = {
-  momentum: 0.22,
-  engagement: 0.45,
-  stability: 0.13,
+  audience: 0.45,
+  rating: 0.15,
+  rankQuality: 0.2,
   launchBoard: 0.15,
   preLaunch: 0.05,
 } as const;
+
+/** Rank-quality pillar sub-weights — must sum to 1.0. */
+const RANK_QUALITY_SUB_WEIGHTS = {
+  positionQuality: 0.4,
+  presence: 0.2,
+  streak: 0.1,
+  volatility: 0.1,
+  movement: 0.2,
+} as const;
+
+const TOP_CHART = 10;
+
+/** When audience & rating are strong, rank chart cannot drag composite below core − margin. */
+const COMPOSITE_FLOOR_AUDIENCE_MIN = 70;
+const COMPOSITE_FLOOR_RATING_MIN = 55;
+const COMPOSITE_FLOOR_MARGIN = 2;
 
 export class RankingService {
   /** Multi-board coverage snapshot (0–100) for latest day. */
@@ -79,74 +110,26 @@ export class RankingService {
     return Math.round(v * 10) / 10;
   }
 
-  private scoreMomentum(ranks: number[]) {
-    const C = RankingService.clamp;
-    const R = RankingService.r1;
-    const TOP_CHART = 10;
+  /** Stricter rank tiers: rewards consistent top-10/20, not just "in top 200". */
+  private static rankTierScore(rank: number): number {
+    if (rank <= 10) return 100;
+    if (rank <= 20) return 80;
+    if (rank <= 50) return 55;
+    if (rank <= 100) return 30;
+    if (rank <= 200) return 12;
+    return 0;
+  }
 
-    const avgRank = ranks.reduce((a, b) => a + b, 0) / ranks.length;
-    const positionScore = C(100 - avgRank * 0.5);
-
-    const rankStart = ranks[0];
-    const rankEnd = ranks[ranks.length - 1];
-    const change = rankStart - rankEnd;
-
-    let climbScore: number;
-    let absoluteScore = 0;
-    let relativeScore = 0;
-    if (change > 0) {
-      absoluteScore = C(50 + change);
-      const maxClimb = Math.max(rankStart - 1, 1);
-      relativeScore = C(50 + (change / maxClimb) * 50);
-      climbScore = Math.max(absoluteScore, relativeScore);
-    } else if (change === 0) {
-      climbScore = 50;
-    } else {
-      absoluteScore = C(50 + change);
-      let softened = absoluteScore;
-      if (rankStart <= TOP_CHART && rankEnd <= TOP_CHART) {
-        softened = C(50 + change * 0.4);
-      }
-      const maxFall = Math.max(ranks.length, 1);
-      relativeScore = C(50 + (change / maxFall) * 50);
-      climbScore = Math.max(softened, relativeScore);
+  /** Renormalized weighted mean — pillars with null score are dropped from the blend. */
+  private static weightedComposite(parts: Array<{ score: number | null; weight: number }>): number {
+    let sum = 0;
+    let wsum = 0;
+    for (const p of parts) {
+      if (p.score == null || Number.isNaN(p.score)) continue;
+      sum += p.score * p.weight;
+      wsum += p.weight;
     }
-
-    let maintenanceScore = 0;
-    if (rankEnd <= TOP_CHART) {
-      maintenanceScore = C(100 - rankEnd * 0.5);
-      if (rankEnd === 1 && change === 0) {
-        maintenanceScore = 100;
-      } else if (change === 0) {
-        maintenanceScore = C(100 - rankEnd * 0.45);
-      } else if (change < 0 && rankStart <= TOP_CHART) {
-        maintenanceScore = C(maintenanceScore - Math.abs(change) * 1.25);
-        maintenanceScore = Math.max(maintenanceScore, C(92 - rankEnd * 1.2));
-      }
-    }
-
-    const rankChangeScore = C(Math.max(climbScore, maintenanceScore));
-
-    const bestRank = Math.min(...ranks);
-    const peakScore = C(100 - bestRank * 0.5);
-
-    const score = positionScore * 0.5 + rankChangeScore * 0.25 + peakScore * 0.25;
-    return {
-      score,
-      positionScore,
-      avgRank: R(avgRank),
-      avgRecentRank: R(avgRank),
-      rankChangeScore,
-      climbScore: R(climbScore),
-      maintenanceScore: R(maintenanceScore),
-      absoluteScore: R(absoluteScore),
-      relativeScore: R(relativeScore),
-      peakScore,
-      bestRank,
-      rankStart,
-      rankEnd,
-      change,
-    };
+    return wsum > 0 ? RankingService.clamp(sum / wsum) : 50;
   }
 
   private static absThreshold(days: number): number {
@@ -155,157 +138,147 @@ export class RankingService {
     return 200_000;
   }
 
-  private scoreEngagement(
-    ratings: (string | null)[],
-    fansCounts: (number | null)[],
-    reserveCounts: (number | null)[],
-    days: number = 14,
-    opts?: { includeReserve?: boolean; downloadCounts?: (number | null)[] },
-  ) {
-    const includeReserve = opts?.includeReserve !== false;
-    const downloadCounts = opts?.downloadCounts;
-    const subs: Array<{ name: string; score: number }> = [];
-    const C = RankingService.clamp;
-    const T = RankingService.absThreshold(days);
+  // --------------------------------------------------------------------------
+  // Pillars
+  // --------------------------------------------------------------------------
 
-    const validRatings = ratings.filter((r): r is string => r !== null).map(Number).filter((n) => !isNaN(n));
-    const ratingStart = validRatings.length >= 2 ? validRatings[0] : null;
-    const ratingEnd = validRatings.length >= 2 ? validRatings[validRatings.length - 1] : null;
-    const ratingDelta = ratingStart != null && ratingEnd != null ? ratingEnd - ratingStart : 0;
-    let ratingBaseScore: number | null = null;
-    let ratingChangeScore: number | null = null;
-    let ratingScore: number | null = null;
-    if (ratingEnd != null) {
-      ratingBaseScore = C((ratingEnd - 5) * 20);
-      ratingChangeScore = ratingStart != null ? C(50 + ratingDelta * 20) : 50;
-      ratingScore = ratingBaseScore * 0.6 + ratingChangeScore * 0.4;
-      subs.push({ name: "rating", score: ratingScore });
-    }
+  /** Merged audience: scale base tier + growth bonus (forgiving when base is large). */
+  private scoreAudience(values: (number | null)[], metric: PotentialScaleMetric) {
+    const valid = values.filter((v): v is number => v != null && v > 0);
+    const start = valid.length >= 2 ? valid[0]! : valid.length === 1 ? valid[0]! : null;
+    const end = valid.length >= 1 ? valid[valid.length - 1]! : null;
+    const delta = start != null && end != null ? end - start : 0;
 
-    const validFans = fansCounts.filter((f): f is number => f !== null && f > 0);
-    const fansStart = validFans.length >= 2 ? validFans[0] : null;
-    const fansEnd = validFans.length >= 2 ? validFans[validFans.length - 1] : null;
-    const fansGrowth = fansStart != null && fansEnd != null ? fansEnd - fansStart : 0;
-    const fansRate = fansStart != null && fansStart >= 100 ? fansGrowth / fansStart : null;
-    const fansRateScore = fansRate != null ? C(fansRate * 200) : null;
-    const fansAbsScore = fansGrowth > 0 ? C((fansGrowth / T) * 100) : null;
-    const fansScore =
-      fansRateScore != null && fansAbsScore != null
-        ? Math.max(fansRateScore, fansAbsScore)
-        : fansRateScore ?? fansAbsScore;
-    if (fansScore != null) subs.push({ name: "fans", score: fansScore });
-
-    let resStart: number | null = null;
-    let resEnd: number | null = null;
-    let resGrowth = 0;
-    let resRate: number | null = null;
-    let resRateScore: number | null = null;
-    let resAbsScore: number | null = null;
-    let resScore: number | null = null;
-    if (includeReserve) {
-      const validRes = reserveCounts.filter((r): r is number => r !== null && r > 0);
-      resStart = validRes.length >= 2 ? validRes[0] : null;
-      resEnd = validRes.length >= 2 ? validRes[validRes.length - 1] : null;
-      resGrowth = resStart != null && resEnd != null ? resEnd - resStart : 0;
-      resRate = resStart != null && resStart >= 50 ? resGrowth / resStart : null;
-      resRateScore = resRate != null ? C(resRate * 200) : null;
-      resAbsScore = resGrowth > 0 ? C((resGrowth / T) * 100) : null;
-      resScore =
-        resRateScore != null && resAbsScore != null
-          ? Math.max(resRateScore, resAbsScore)
-          : resRateScore ?? resAbsScore;
-      if (resScore != null) subs.push({ name: "reserve", score: resScore });
-    }
-
-    let dlStart: number | null = null;
-    let dlEnd: number | null = null;
-    let dlGrowth = 0;
-    let dlRate: number | null = null;
-    let dlRateScore: number | null = null;
-    let dlAbsScore: number | null = null;
-    let dlScore: number | null = null;
-    if (downloadCounts) {
-      const validDl = downloadCounts.filter((d): d is number => d !== null && d > 0);
-      dlStart = validDl.length >= 2 ? validDl[0] : null;
-      dlEnd = validDl.length >= 2 ? validDl[validDl.length - 1] : null;
-      dlGrowth = dlStart != null && dlEnd != null ? dlEnd - dlStart : 0;
-      dlRate = dlStart != null && dlStart >= 1000 ? dlGrowth / dlStart : null;
-      dlRateScore = dlRate != null ? C(dlRate * 200) : null;
-      dlAbsScore = dlGrowth > 0 ? C((dlGrowth / T) * 100) : null;
-      dlScore =
-        dlRateScore != null && dlAbsScore != null
-          ? Math.max(dlRateScore, dlAbsScore)
-          : dlRateScore ?? dlAbsScore;
-      if (dlScore != null) subs.push({ name: "download", score: dlScore });
-    }
-
-    const score = subs.length > 0 ? subs.reduce((a, s) => a + s.score, 0) / subs.length : 50;
-    const R = RankingService.r1;
+    const absTier = tierAbsScale(end ?? start);
+    const growthTier = tierGrowthDelta(start != null && end != null ? delta : 0);
+    const baseValue = absTier?.points ?? 0;
+    const growthBonus = growthTier?.points ?? 0;
+    const merged = mergeAudienceScore(baseValue, growthBonus);
 
     return {
-      score,
-      ratingStart,
-      ratingEnd,
-      ratingDelta,
-      ratingBaseScore: ratingBaseScore != null ? R(ratingBaseScore) : null,
-      ratingChangeScore: ratingChangeScore != null ? R(ratingChangeScore) : null,
-      ratingScore: ratingScore != null ? R(ratingScore) : null,
-      fansStart,
-      fansEnd,
-      fansGrowth,
-      fansRate: fansRate != null ? R(fansRate * 100) : null,
-      fansRateScore: fansRateScore != null ? R(fansRateScore) : null,
-      fansAbsScore: fansAbsScore != null ? R(fansAbsScore) : null,
-      fansScore: fansScore != null ? R(fansScore) : null,
-      resStart,
-      resEnd,
-      resGrowth,
-      resRate: resRate != null ? R(resRate * 100) : null,
-      resRateScore: resRateScore != null ? R(resRateScore) : null,
-      resAbsScore: resAbsScore != null ? R(resAbsScore) : null,
-      resScore: resScore != null ? R(resScore) : null,
-      dlStart,
-      dlEnd,
-      dlGrowth,
-      dlRate: dlRate != null ? R(dlRate * 100) : null,
-      dlRateScore: dlRateScore != null ? R(dlRateScore) : null,
-      dlAbsScore: dlAbsScore != null ? R(dlAbsScore) : null,
-      dlScore: dlScore != null ? R(dlScore) : null,
-      subsCount: subs.length,
-      absThreshold: T,
+      score: merged.score,
+      metric,
+      start,
+      end,
+      delta,
+      baseValue,
+      baseTierLabel: absTier?.label ?? null,
+      growthBonus,
+      growthTierLabel: growthTier?.label ?? null,
+      growthWeight: merged.growthWeight,
     };
   }
 
-  private scoreStability(ranks: number[], analysisDays: number, topN = 200) {
-    const daysInTop = Math.min(ranks.filter((r) => r <= topN).length, analysisDays);
-    const presenceScore = RankingService.clamp((daysInTop / analysisDays) * 100);
+  /** Rating: base from period-start level + ±5 per 0.1 change. */
+  private scoreRating(ratings: (string | null)[]) {
+    const R = RankingService.r1;
+    const valid = ratings
+      .filter((r): r is string => r !== null)
+      .map(Number)
+      .filter((n) => !Number.isNaN(n));
+    const start = valid.length >= 2 ? valid[0]! : valid.length === 1 ? valid[0]! : null;
+    const end = valid.length >= 1 ? valid[valid.length - 1]! : null;
+    const delta = start != null && end != null ? end - start : 0;
 
-    const mean = ranks.reduce((a, b) => a + b, 0) / ranks.length;
-    const variance = ranks.reduce((a, b) => a + (b - mean) ** 2, 0) / ranks.length;
-    const stdDev = Math.sqrt(variance);
-    const volatilityScore = RankingService.clamp(100 - stdDev * 2);
+    const baseValue = start != null ? ratingStartBase(start) : end != null ? ratingStartBase(end) : 0;
+    const deltaAdj = start != null && end != null ? ratingDeltaAdjustment(delta) : 0;
+    const score = start != null ? RankingService.clamp(baseValue + deltaAdj) : null;
 
-    let maxStreak = 0,
-      cur = 0;
+    return {
+      score: score != null ? R(score) : null,
+      start,
+      end,
+      delta: R(delta),
+      baseValue: R(baseValue),
+      deltaAdjustment: R(deltaAdj),
+    };
+  }
+
+  /** Consolidated rank quality + stability. */
+  private scoreRankQuality(ranks: number[], analysisDays: number) {
+    const C = RankingService.clamp;
+    const R = RankingService.r1;
+    const n = ranks.length;
+
+    const positionQuality = ranks.reduce((a, r) => a + RankingService.rankTierScore(r), 0) / n;
+
+    const top10 = ranks.filter((r) => r <= 10).length;
+    const top20 = ranks.filter((r) => r <= 20).length;
+    const top50 = ranks.filter((r) => r <= 50).length;
+    const top10Rate = (top10 / n) * 100;
+    const top20Rate = (top20 / n) * 100;
+    const top50Rate = (top50 / n) * 100;
+
+    let longest = 0;
+    let cur = 0;
     for (const r of ranks) {
-      if (r <= topN) {
+      if (r <= 20) {
         cur++;
-        maxStreak = Math.max(maxStreak, cur);
+        longest = Math.max(longest, cur);
       } else cur = 0;
     }
-    maxStreak = Math.min(maxStreak, analysisDays);
-    const streakScore = RankingService.clamp((maxStreak / analysisDays) * 100);
+    const longestTop20Streak = Math.min(longest, analysisDays);
+    const streakScore = C((longestTop20Streak / analysisDays) * 100);
 
-    const score = presenceScore * 0.5 + volatilityScore * 0.3 + streakScore * 0.2;
+    const mean = ranks.reduce((a, b) => a + b, 0) / n;
+    const variance = ranks.reduce((a, b) => a + (b - mean) ** 2, 0) / n;
+    const stdDev = Math.sqrt(variance);
+    const volatilityScore = C(100 - stdDev * 2);
+
+    const rankStart = ranks[0]!;
+    const rankEnd = ranks[ranks.length - 1]!;
+    const change = rankStart - rankEnd;
+
+    let climbScore: number;
+    if (change > 0) {
+      const abs = C(50 + change);
+      const rel = C(50 + (change / Math.max(rankStart - 1, 1)) * 50);
+      climbScore = Math.max(abs, rel);
+    } else if (change === 0) {
+      climbScore = 50;
+    } else {
+      let abs = C(50 + change);
+      if (rankStart <= TOP_CHART && rankEnd <= TOP_CHART) abs = C(50 + change * 0.4);
+      const rel = C(50 + (change / Math.max(n, 1)) * 50);
+      climbScore = Math.max(abs, rel);
+    }
+    let maintenanceScore = 0;
+    if (rankEnd <= TOP_CHART) {
+      maintenanceScore = C(100 - rankEnd * 0.5);
+      if (rankEnd === 1 && change === 0) maintenanceScore = 100;
+      else if (change === 0) maintenanceScore = C(100 - rankEnd * 0.45);
+    }
+    const movementScore = C(Math.max(climbScore, maintenanceScore));
+
+    const bestRank = Math.min(...ranks);
+
+    const w = RANK_QUALITY_SUB_WEIGHTS;
+    const score = C(
+      positionQuality * w.positionQuality +
+        top20Rate * w.presence +
+        streakScore * w.streak +
+        volatilityScore * w.volatility +
+        movementScore * w.movement,
+    );
+
     return {
       score,
-      presenceScore,
-      volatilityScore,
-      streakScore,
-      daysInTop,
-      stdDev: RankingService.r1(stdDev),
-      maxStreak,
-      analysisDays,
+      positionQuality: R(positionQuality),
+      top10Rate: R(top10Rate),
+      top20Rate: R(top20Rate),
+      top50Rate: R(top50Rate),
+      presenceScore: R(top20Rate),
+      streakScore: R(streakScore),
+      volatilityScore: R(volatilityScore),
+      movementScore: R(movementScore),
+      avgRank: R(mean),
+      bestRank,
+      rankStart,
+      rankEnd,
+      change,
+      stdDev: R(stdDev),
+      longestTop20Streak,
+      daysTracked: n,
     };
   }
 
@@ -320,6 +293,10 @@ export class RankingService {
     };
   }
 
+  // --------------------------------------------------------------------------
+  // Helpers
+  // --------------------------------------------------------------------------
+
   private getRankForSegment(
     row: AppRankRow,
     segment: PotentialSegment,
@@ -330,6 +307,10 @@ export class RankingService {
 
   private algoVersion(segment: PotentialSegment): string {
     return segment === "launched" ? ALGO_VERSION_LAUNCHED : ALGO_VERSION_RESERVE;
+  }
+
+  private scaleMetricForSegment(segment: PotentialSegment): PotentialScaleMetric {
+    return segment === "launched" ? "download" : "reserve";
   }
 
   /** Reserve-only apps: has reserve history and no hot/pop/new on latest snapshot in window. */
@@ -426,73 +407,16 @@ export class RankingService {
     return downloadCountFromRaw(row.raw);
   }
 
-  /** Weighted launched raw score; all inputs 0–100 → output 0–100. */
-  private computeLaunchedRawComposite(
-    momentumScore: number,
-    engagementScore: number,
-    stabilityScore: number,
-    launchBoardScore: number,
-    preLaunchRaw: number,
-  ): number {
-    const C = RankingService.clamp;
-    const preLaunchScore = C((preLaunchRaw / 3) * 100);
-    const w = LAUNCHED_COMPOSITE_WEIGHTS;
-    return C(
-      momentumScore * w.momentum +
-        engagementScore * w.engagement +
-        stabilityScore * w.stability +
-        launchBoardScore * w.launchBoard +
-        preLaunchScore * w.preLaunch,
-      0,
-      100,
-    );
-  }
-
-  /**
-   * Launched (v11): momentum/stability blend per board; launch-board score = 3 simple parts (0–100).
-   */
-  private scoreLaunchedBoardMetrics(
+  /** Launch-board breadth pillar (chart quality + consistency + coverage). */
+  private scoreLaunchBoard(
     validRows: AppRankRow[],
     platform: "combined" | "android" | "ios",
-    analysisDays: number,
   ) {
     const C = RankingService.clamp;
     const R = RankingService.r1;
-    const boards = ["pop", "hot", "new"] as const;
     const latest = validRows[validRows.length - 1]!;
     const primaryBoard = primaryLaunchBoard(latest, platform);
     const primaryRank = primaryBoard ? launchedPriorityRank(latest, platform) : null;
-
-    let weightedMom = 0;
-    let weightedStab = 0;
-    let weightSum = 0;
-
-    for (const board of boards) {
-      const ranks: number[] = [];
-      for (const row of validRows) {
-        const rank = rankForLaunchBoard(row, board, platform);
-        if (rank != null) ranks.push(rank);
-      }
-      if (ranks.length < 2) continue;
-
-      const w = LAUNCH_BOARD_WEIGHTS[board];
-      weightedMom += this.scoreMomentum(ranks).score * w;
-      weightedStab += this.scoreStability(ranks, analysisDays).score * w;
-      weightSum += w;
-    }
-
-    const priorityRanks = validRows.map((r) => launchedPriorityRank(r, platform)!);
-    const priorityMomentum = this.scoreMomentum(priorityRanks);
-    const priorityStability = this.scoreStability(priorityRanks, analysisDays);
-
-    const momentum =
-      weightSum > 0
-        ? { ...priorityMomentum, score: weightedMom / weightSum }
-        : priorityMomentum;
-    const stability =
-      weightSum > 0
-        ? { ...priorityStability, score: weightedStab / weightSum }
-        : priorityStability;
 
     let chartQuality = 0;
     if (primaryBoard) {
@@ -523,21 +447,17 @@ export class RankingService {
     );
 
     return {
-      momentum,
-      stability,
-      launchBoard: {
-        primaryBoard,
-        primaryRank,
-        score: R(score),
-        chartQuality: R(chartQuality),
-        consistency: R(consistency),
-        coverage: R(coverage),
-        popDayRate: R((popDays / n) * 100),
-        hotDayRate: R((hotDays / n) * 100),
-        newDayRate: R((newDays / n) * 100),
-        activeBoardCount: active.size,
-        activeBoards: activeLaunchBoards(latest, platform),
-      },
+      primaryBoard,
+      primaryRank,
+      score: R(score),
+      chartQuality: R(chartQuality),
+      consistency: R(consistency),
+      coverage: R(coverage),
+      popDayRate: R((popDays / n) * 100),
+      hotDayRate: R((hotDays / n) * 100),
+      newDayRate: R((newDays / n) * 100),
+      activeBoardCount: active.size,
+      activeBoards: activeLaunchBoards(latest, platform),
     };
   }
 
@@ -554,6 +474,159 @@ export class RankingService {
     return "established_launch";
   }
 
+  // --------------------------------------------------------------------------
+  // Core scoring (shared by list + detail)
+  // --------------------------------------------------------------------------
+
+  private computePillars(
+    appRows: AppRankRow[],
+    days: number,
+    platform: "combined" | "android" | "ios",
+    segment: PotentialSegment,
+  ): {
+    detail: GamePotentialDetail;
+    validRows: AppRankRow[];
+  } | null {
+    const getRank = (r: AppRankRow) => this.getRankForSegment(r, segment, platform);
+    const rowsForScore = segment === "launched" ? this.slicePostLaunchRows(appRows) : appRows;
+    const validRows = rowsForScore.filter((r) => getRank(r) != null);
+
+    const rel = releaseDateFromRaw(appRows[appRows.length - 1]?.raw);
+    const releaseRecent = rel != null && (Date.now() - rel.getTime()) / 86400000 <= 60;
+    const minPoints = segment === "launched" && releaseRecent ? 2 : 3;
+    if (validRows.length < minPoints) return null;
+
+    const analysisDays = days;
+    const scaleMetric = this.scaleMetricForSegment(segment);
+
+    const ranks = validRows.map((r) => getRank(r)!);
+    const ratings = validRows.map((r) => r.rating ?? null);
+    const scaleValues =
+      segment === "launched"
+        ? validRows.map((r) => this.downloadCountForRow(r))
+        : validRows.map((r) => r.reserveCount ?? null);
+
+    const audience = this.scoreAudience(scaleValues, scaleMetric);
+    const rating = this.scoreRating(ratings);
+    const rankQuality = this.scoreRankQuality(ranks, analysisDays);
+
+    let confidence = this.scoreConfidence(validRows.length, analysisDays);
+    if (segment === "launched" && validRows.length < 3) {
+      confidence = { ...confidence, multiplier: Math.min(confidence.multiplier, 0.85) };
+    }
+
+    let launchBoard: ReturnType<RankingService["scoreLaunchBoard"]> | undefined;
+    let preLaunchRaw = 0;
+    let rawComposite: number;
+    let floorApplied = false;
+
+    const coreComposite = RankingService.weightedComposite([
+      { score: audience.score, weight: 1 },
+      { score: rating.score, weight: 1 },
+    ]);
+
+    const applyCompositeFloor = (composite: number): number => {
+      if (
+        audience.score >= COMPOSITE_FLOOR_AUDIENCE_MIN &&
+        rating.score != null &&
+        rating.score >= COMPOSITE_FLOOR_RATING_MIN
+      ) {
+        const floor = coreComposite - COMPOSITE_FLOOR_MARGIN;
+        if (composite < floor) {
+          floorApplied = true;
+          return RankingService.clamp(floor);
+        }
+      }
+      return composite;
+    };
+
+    if (segment === "launched") {
+      launchBoard = this.scoreLaunchBoard(validRows, platform);
+      preLaunchRaw = this.scorePreLaunchReserveBonus(appRows);
+      const preLaunchScore = RankingService.clamp((preLaunchRaw / 3) * 100);
+      const w = LAUNCHED_COMPOSITE_WEIGHTS;
+      rawComposite = applyCompositeFloor(
+        RankingService.weightedComposite([
+          { score: audience.score, weight: w.audience },
+          { score: rating.score, weight: w.rating },
+          { score: rankQuality.score, weight: w.rankQuality },
+          { score: launchBoard.score, weight: w.launchBoard },
+          { score: preLaunchScore, weight: w.preLaunch },
+        ]),
+      );
+    } else {
+      const w = RESERVE_COMPOSITE_WEIGHTS;
+      rawComposite = applyCompositeFloor(
+        RankingService.weightedComposite([
+          { score: audience.score, weight: w.audience },
+          { score: rating.score, weight: w.rating },
+          { score: rankQuality.score, weight: w.rankQuality },
+        ]),
+      );
+    }
+
+    const compositeScore = RankingService.clamp(rawComposite * confidence.multiplier, 0, 100);
+    const R = RankingService.r1;
+    const preLaunchScoreOut =
+      segment === "launched" ? R(RankingService.clamp((preLaunchRaw / 3) * 100)) : undefined;
+
+    const audienceBlock = {
+      score: R(audience.score),
+      metric: audience.metric,
+      start: audience.start,
+      end: audience.end,
+      delta: audience.delta,
+      baseValue: R(audience.baseValue),
+      baseTierLabel: audience.baseTierLabel,
+      growthBonus: R(audience.growthBonus),
+      growthTierLabel: audience.growthTierLabel,
+      growthWeight: audience.growthWeight,
+    };
+
+    const detail: GamePotentialDetail = {
+      audience: audienceBlock,
+      scale: audienceBlock,
+      growth: audienceBlock,
+      rating: {
+        score: rating.score != null ? R(rating.score) : 0,
+        start: rating.start,
+        end: rating.end,
+        delta: rating.delta,
+        baseValue: rating.baseValue,
+        deltaAdjustment: rating.deltaAdjustment,
+      },
+      rankQuality: {
+        score: R(rankQuality.score),
+        positionQuality: rankQuality.positionQuality,
+        top10Rate: rankQuality.top10Rate,
+        top20Rate: rankQuality.top20Rate,
+        top50Rate: rankQuality.top50Rate,
+        presenceScore: rankQuality.presenceScore,
+        streakScore: rankQuality.streakScore,
+        volatilityScore: rankQuality.volatilityScore,
+        movementScore: rankQuality.movementScore,
+        avgRank: rankQuality.avgRank,
+        bestRank: rankQuality.bestRank,
+        rankStart: rankQuality.rankStart,
+        rankEnd: rankQuality.rankEnd,
+        change: rankQuality.change,
+        stdDev: rankQuality.stdDev,
+        longestTop20Streak: rankQuality.longestTop20Streak,
+        daysTracked: rankQuality.daysTracked,
+      },
+      confidence,
+      compositeScore: R(compositeScore),
+      rawComposite: R(rawComposite),
+      floorApplied,
+      segment,
+      preLaunchBonus: segment === "launched" ? R(preLaunchRaw) : undefined,
+      preLaunchScore: preLaunchScoreOut,
+      launchBoard,
+    };
+
+    return { detail, validRows };
+  }
+
   private scoreAppRows(
     appId: number,
     appRows: AppRankRow[],
@@ -561,82 +634,30 @@ export class RankingService {
     platform: "combined" | "android" | "ios",
     segment: PotentialSegment,
   ): PotentialScoreResult | null {
-    const getRank = (r: AppRankRow) => this.getRankForSegment(r, segment, platform);
-    const rowsForScore =
-      segment === "launched" ? this.slicePostLaunchRows(appRows) : appRows;
-    const validRows = rowsForScore.filter((r) => getRank(r) != null);
-
-    const rel = releaseDateFromRaw(appRows[appRows.length - 1]?.raw);
-    const releaseRecent =
-      rel != null && (Date.now() - rel.getTime()) / 86400000 <= 60;
-    const minPoints = segment === "launched" && releaseRecent ? 2 : 3;
-    if (validRows.length < minPoints) return null;
-
-    const analysisDays = days;
-    const ranks = validRows.map((r) => getRank(r)!);
-    const ratings = validRows.map((r) => r.rating ?? null);
-    const fans = validRows.map((r) => r.fansCount ?? null);
-    const reserves = validRows.map((r) => r.reserveCount ?? null);
-    const downloads = validRows.map((r) => this.downloadCountForRow(r));
-
-    let momentum = this.scoreMomentum(ranks);
-    const engagement =
-      segment === "launched"
-        ? this.scoreEngagement(ratings, fans, reserves, analysisDays, {
-            includeReserve: false,
-            downloadCounts: downloads,
-          })
-        : this.scoreEngagement(ratings, fans, reserves, analysisDays, { includeReserve: true });
-    let stability = this.scoreStability(ranks, analysisDays);
-    let launchBoardMetrics: ReturnType<RankingService["scoreLaunchedBoardMetrics"]> | undefined;
-    let confidence = this.scoreConfidence(validRows.length, analysisDays);
-    if (segment === "launched" && validRows.length < 3) {
-      confidence = {
-        ...confidence,
-        multiplier: Math.min(confidence.multiplier, 0.85),
-      };
-    }
-
-    let rawComposite: number;
-    let preLaunchRaw = 0;
-    if (segment === "launched") {
-      launchBoardMetrics = this.scoreLaunchedBoardMetrics(validRows, platform, analysisDays);
-      momentum = launchBoardMetrics.momentum;
-      stability = launchBoardMetrics.stability;
-      preLaunchRaw = this.scorePreLaunchReserveBonus(appRows);
-      rawComposite = this.computeLaunchedRawComposite(
-        momentum.score,
-        engagement.score,
-        stability.score,
-        launchBoardMetrics.launchBoard.score,
-        preLaunchRaw,
-      );
-    } else {
-      rawComposite = RankingService.clamp(
-        momentum.score * 0.2 + engagement.score * 0.6 + stability.score * 0.2,
-        0,
-        100,
-      );
-    }
-    const compositeScore = RankingService.clamp(rawComposite * confidence.multiplier, 0, 100);
-
+    const computed = this.computePillars(appRows, days, platform, segment);
+    if (!computed) return null;
+    const { detail, validRows } = computed;
     const latest = validRows[validRows.length - 1]!;
-    const firstRank = ranks[0];
-    const lastRank = ranks[ranks.length - 1];
-    const threshold = Math.max(2, Math.ceil(ranks.length * 0.15));
+    const R = RankingService.r1;
+
+    const firstRank = detail.rankQuality.rankStart;
+    const lastRank = detail.rankQuality.rankEnd;
+    const threshold = Math.max(2, Math.ceil(detail.rankQuality.daysTracked * 0.15));
     const trend: "up" | "down" | "stable" =
       lastRank < firstRank - threshold ? "up" : lastRank > firstRank + threshold ? "down" : "stable";
 
-    const R = RankingService.r1;
     const out: PotentialScoreResult = {
       appId,
       title: latest.title ?? `App #${appId}`,
       iconUrl: latest.iconUrl ?? null,
-      momentumScore: R(momentum.score),
-      engagementScore: R(engagement.score),
-      stabilityScore: R(stability.score),
-      dataConfidence: R(confidence.coverage),
-      compositeScore: R(compositeScore),
+      audienceScore: detail.audience.score,
+      scaleScore: detail.audience.score,
+      growthScore: detail.audience.score,
+      ratingScore: detail.rating.score,
+      rankQualityScore: detail.rankQuality.score,
+      launchBoardScore: detail.launchBoard ? detail.launchBoard.score : undefined,
+      dataConfidence: R(detail.confidence.coverage),
+      compositeScore: detail.compositeScore,
       currentRank: lastRank,
       androidRank: latest.reserveAndroidRank,
       iosRank: latest.reserveIosRank,
@@ -671,133 +692,8 @@ export class RankingService {
     segment: PotentialSegment,
   ): GamePotentialDetail | null {
     if (appRows.length < 2) return null;
-
-    const getRank = (r: AppRankRow) => this.getRankForSegment(r, segment, platform);
-    const rowsForScore =
-      segment === "launched" ? this.slicePostLaunchRows(appRows) : appRows;
-    const validRows = rowsForScore.filter((r) => getRank(r) != null);
-
-    const rel = releaseDateFromRaw(appRows[appRows.length - 1]?.raw);
-    const releaseRecent =
-      rel != null && (Date.now() - rel.getTime()) / 86400000 <= 60;
-    const minPoints = segment === "launched" && releaseRecent ? 2 : 3;
-    if (validRows.length < minPoints) return null;
-
-    const analysisDays = days;
-    const ranks = validRows.map((r) => getRank(r)!);
-    const ratings = validRows.map((r) => r.rating ?? null);
-    const fans = validRows.map((r) => r.fansCount ?? null);
-    const reserves = validRows.map((r) => r.reserveCount ?? null);
-    const downloads = validRows.map((r) => this.downloadCountForRow(r));
-
-    let momentum = this.scoreMomentum(ranks);
-    const engagement =
-      segment === "launched"
-        ? this.scoreEngagement(ratings, fans, reserves, analysisDays, {
-            includeReserve: false,
-            downloadCounts: downloads,
-          })
-        : this.scoreEngagement(ratings, fans, reserves, analysisDays, { includeReserve: true });
-    let stability = this.scoreStability(ranks, analysisDays);
-    let confidence = this.scoreConfidence(validRows.length, analysisDays);
-    let launchBoardMetrics: ReturnType<RankingService["scoreLaunchedBoardMetrics"]> | undefined;
-
-    let rawComposite: number;
-    let preLaunchRaw = 0;
-    if (segment === "launched") {
-      launchBoardMetrics = this.scoreLaunchedBoardMetrics(validRows, platform, analysisDays);
-      momentum = launchBoardMetrics.momentum;
-      stability = launchBoardMetrics.stability;
-      preLaunchRaw = this.scorePreLaunchReserveBonus(appRows);
-      rawComposite = this.computeLaunchedRawComposite(
-        momentum.score,
-        engagement.score,
-        stability.score,
-        launchBoardMetrics.launchBoard.score,
-        preLaunchRaw,
-      );
-      if (validRows.length < 3) {
-        confidence = { ...confidence, multiplier: Math.min(confidence.multiplier, 0.85) };
-      }
-    } else {
-      rawComposite = RankingService.clamp(
-        momentum.score * 0.2 + engagement.score * 0.6 + stability.score * 0.2,
-        0,
-        100,
-      );
-    }
-    const compositeScore = RankingService.clamp(rawComposite * confidence.multiplier, 0, 100);
-
-    const R = RankingService.r1;
-    const preLaunchScore =
-      segment === "launched" ? R(RankingService.clamp((preLaunchRaw / 3) * 100)) : undefined;
-    return {
-      momentum: {
-        score: R(momentum.score),
-        positionScore: R(momentum.positionScore),
-        avgRank: momentum.avgRank,
-        avgRecentRank: momentum.avgRecentRank,
-        rankChangeScore: R(momentum.rankChangeScore),
-        climbScore: momentum.climbScore,
-        maintenanceScore: momentum.maintenanceScore,
-        absoluteScore: R(momentum.absoluteScore),
-        relativeScore: R(momentum.relativeScore),
-        peakScore: R(momentum.peakScore),
-        bestRank: momentum.bestRank,
-        rankStart: momentum.rankStart,
-        rankEnd: momentum.rankEnd,
-        change: momentum.change,
-      },
-      engagement: {
-        score: R(engagement.score),
-        ratingStart: engagement.ratingStart,
-        ratingEnd: engagement.ratingEnd,
-        ratingDelta: R(engagement.ratingDelta),
-        ratingBaseScore: engagement.ratingBaseScore,
-        ratingChangeScore: engagement.ratingChangeScore,
-        ratingScore: engagement.ratingScore,
-        fansStart: engagement.fansStart,
-        fansEnd: engagement.fansEnd,
-        fansGrowth: engagement.fansGrowth,
-        fansRate: engagement.fansRate,
-        fansRateScore: engagement.fansRateScore,
-        fansAbsScore: engagement.fansAbsScore,
-        fansScore: engagement.fansScore,
-        resStart: engagement.resStart,
-        resEnd: engagement.resEnd,
-        resGrowth: engagement.resGrowth,
-        resRate: engagement.resRate,
-        resRateScore: engagement.resRateScore,
-        resAbsScore: engagement.resAbsScore,
-        resScore: engagement.resScore,
-        dlStart: engagement.dlStart,
-        dlEnd: engagement.dlEnd,
-        dlGrowth: engagement.dlGrowth,
-        dlRate: engagement.dlRate,
-        dlRateScore: engagement.dlRateScore,
-        dlAbsScore: engagement.dlAbsScore,
-        dlScore: engagement.dlScore,
-        subsCount: engagement.subsCount,
-        absThreshold: engagement.absThreshold,
-      },
-      stability: {
-        score: R(stability.score),
-        presenceScore: R(stability.presenceScore),
-        volatilityScore: R(stability.volatilityScore),
-        streakScore: R(stability.streakScore),
-        daysInTop: stability.daysInTop,
-        stdDev: stability.stdDev,
-        maxStreak: stability.maxStreak,
-        analysisDays: stability.analysisDays,
-      },
-      confidence,
-      compositeScore: R(compositeScore),
-      rawComposite: R(rawComposite),
-      segment,
-      preLaunchBonus: segment === "launched" ? R(preLaunchRaw) : undefined,
-      preLaunchScore,
-      launchBoard: launchBoardMetrics?.launchBoard,
-    };
+    const computed = this.computePillars(appRows, days, platform, segment);
+    return computed ? computed.detail : null;
   }
 
   async getGamePotentialDetail(
@@ -811,6 +707,7 @@ export class RankingService {
     return getCachedOrFetch(
       `potential-detail-${this.algoVersion(segment)}-${segment}-${appId}-${platform}-${days}-${launchKey}`,
       async () => {
+        await ensurePotentialScorers();
         const appRows = await this.resolveAppRowsForScoring(appId, days, segment);
         return this.buildGamePotentialDetailFromRows(appRows, days, platform, segment);
       },
@@ -825,8 +722,9 @@ export class RankingService {
     const firstLaunch = await this.fetchFirstLaunchDate(appId);
     const launchKey = firstLaunch ? firstLaunch.toISOString().split("T")[0] : "none";
     return getCachedOrFetch(
-      `potential-breakdown-v6-${appId}-${platform}-${days}-${launchKey}`,
+      `potential-breakdown-${BREAKDOWN_VERSION}-${appId}-${platform}-${days}-${launchKey}`,
       async () => {
+        await ensurePotentialScorers();
         const recentRows = await this.fetchLightRows(days);
         const recentApp = recentRows.filter((r) => r.appId === appId);
         const lifecycle: AppLifecycleMeta = {
@@ -860,6 +758,7 @@ export class RankingService {
     return getCachedOrFetch(
       `potential-${this.algoVersion(segment)}-${segment}-${platform}-${days}`,
       async () => {
+        await ensurePotentialScorers();
         const rows = await this.fetchLightRows(days);
 
         const grouped = new Map<number, AppRankRow[]>();

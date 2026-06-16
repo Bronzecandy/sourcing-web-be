@@ -37,6 +37,7 @@ model AppReview {
 
   @@index([appId], map: "appreview_appid_index")
   @@index([reviewAt], map: "appreview_reviewat_index")
+  @@index([appId, reviewAt], map: "appreview_appid_reviewat_idx")
 }
 
 model admin_Group {

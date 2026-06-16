@@ -21,6 +21,8 @@
     "seed": "tsx src/seed.ts",
     "smoke:rubric": "tsx src/scripts/smoke-rubric.ts",
     "smoke:distribution": "tsx src/scripts/smoke-distribution.ts",
+    "smoke:local": "tsx src/scripts/smoke-local.ts",
+    "apply:crawl-indexes": "tsx src/scripts/apply-crawl-db-indexes.ts",
     "peek:tags": "tsx src/scripts/peek-app-raw-tags.ts"
   },
   "keywords": [],

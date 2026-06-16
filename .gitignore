@@ -8,3 +8,5 @@ generated/
 # Bộ nhớ local (không commit). Nếu file đã từng commit: git rm --cached -- .ai-analysis-store.json .translation-cache.json
 .ai-analysis-store.json
 .translation-cache.json
+data/distribution-cohort/
+data/distribution-cache/

@@ -69,3 +69,17 @@ export function releaseDateIsoFromRaw(raw: unknown): string | null {
   const d = releaseDateFromRaw(raw);
   return d ? d.toISOString().split("T")[0]! : null;
 }
+
+/** Prefer SQL-extracted releaseDate; fall back to parsing raw when present. */
+export function releaseDateFromRow(row: {
+  releaseDate?: Date | string | null;
+  raw?: unknown;
+}): Date | null {
+  const d = row.releaseDate;
+  if (d instanceof Date && !Number.isNaN(d.getTime())) return d;
+  if (typeof d === "string" && d.trim()) {
+    const parsed = new Date(d);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+  }
+  return releaseDateFromRaw(row.raw);
+}
