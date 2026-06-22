@@ -43,6 +43,20 @@ function parseAnalysisScope(raw: unknown): "all" | "mine" {
   return v === "mine" ? "mine" : "all";
 }
 
+function parseOverridePackIds(body: unknown): string[] | undefined {
+  let raw = (body as { overridePackIds?: unknown })?.overridePackIds;
+  if (typeof raw === "string") {
+    try {
+      raw = JSON.parse(raw) as unknown;
+    } catch {
+      return undefined;
+    }
+  }
+  if (!Array.isArray(raw)) return undefined;
+  const ids = raw.map((x) => String(x).trim()).filter(Boolean);
+  return ids.length > 0 ? ids : undefined;
+}
+
 function actorUserId(req: AuthedRequest, res: Response): string | null {
   const id = req.authUser?.id;
   if (!id) {
@@ -180,6 +194,76 @@ router.get("/all", async (req: AuthedRequest, res) => {
   }
 });
 
+router.post("/prepare", async (req: AuthedRequest, res) => {
+  try {
+    const userId = actorUserId(req, res);
+    if (!userId) return;
+    const source = String(req.body?.source ?? "database").toLowerCase();
+    const overridePackIds = parseOverridePackIds(req.body);
+
+    if (source === "database") {
+      const appId = parseInt(String(req.body?.appId ?? ""), 10);
+      if (!Number.isFinite(appId) || appId <= 0) {
+        res.status(400).json({ success: false, error: "Invalid appId" });
+        return;
+      }
+      const data = await aiAnalysisService.prepareAnalysis(userId, {
+        source: "database",
+        appId,
+        overridePackIds,
+      });
+      res.json({ success: true, data });
+      return;
+    }
+
+    if (source === "external") {
+      const input = String(req.body?.input ?? "").trim();
+      const platformRaw = String(req.body?.platform ?? "taptap").toLowerCase();
+      const platform = platformRaw === "steam" ? "steam" : "taptap";
+      if (!input) {
+        res.status(400).json({ success: false, error: "Missing input" });
+        return;
+      }
+      const data = await aiAnalysisService.prepareAnalysis(userId, {
+        source: "external",
+        input,
+        platform,
+        overridePackIds,
+      });
+      res.json({ success: true, data });
+      return;
+    }
+
+    res.status(400).json({ success: false, error: "Invalid source (database|external)" });
+  } catch (err) {
+    console.error("[analysis route] POST prepare:", err);
+    const message = err instanceof Error ? err.message : "Prepare failed";
+    res.status(500).json({ success: false, error: message });
+  }
+});
+
+router.post("/prepare-csv", upload.single("file"), async (req: AuthedRequest, res) => {
+  try {
+    const userId = actorUserId(req, res);
+    if (!userId) return;
+    if (!req.file) {
+      res.status(400).json({ success: false, error: "No file uploaded" });
+      return;
+    }
+    const overridePackIds = parseOverridePackIds(req.body);
+    const data = await aiAnalysisService.prepareAnalysis(userId, {
+      source: "csv",
+      csvBuffer: req.file.buffer,
+      overridePackIds,
+    });
+    res.json({ success: true, data });
+  } catch (err) {
+    console.error("[analysis route] POST prepare-csv:", err);
+    const message = err instanceof Error ? err.message : "Prepare failed";
+    res.status(500).json({ success: false, error: message });
+  }
+});
+
 router.post("/analyze-external", async (req: AuthedRequest, res) => {
   const userId = actorUserId(req, res);
   if (!userId) return;
@@ -188,6 +272,7 @@ router.post("/analyze-external", async (req: AuthedRequest, res) => {
   const platform = platformRaw === "steam" ? "steam" : "taptap";
   const reviewWindow = parseReviewWindow(req.body?.reviewWindow);
   const stream = wantsAnalysisStream(req.body);
+  const genrePackPlan = aiAnalysisService.parseGenrePacksFromRequest(req.body);
 
   if (stream) {
     beginAnalysisStream("analyze-external");
@@ -243,6 +328,7 @@ router.post("/analyze-external", async (req: AuthedRequest, res) => {
           reviewWindow,
           progress,
           10,
+          genrePackPlan,
         );
         out.done(result);
         return;
@@ -270,6 +356,7 @@ router.post("/analyze-external", async (req: AuthedRequest, res) => {
             reviewWindow,
             progress,
             8,
+            genrePackPlan,
           );
           out.done(result);
           return;
@@ -321,6 +408,7 @@ router.post("/analyze-external", async (req: AuthedRequest, res) => {
         reviewWindow,
         progress,
         12,
+        genrePackPlan,
       );
       out.done(result);
     } catch (err) {
@@ -392,6 +480,9 @@ router.post("/analyze-external", async (req: AuthedRequest, res) => {
         "steam",
         detailRaw,
         reviewWindow,
+        undefined,
+        0,
+        genrePackPlan,
       );
 
       clearInterval(keepAlive);
@@ -412,7 +503,14 @@ router.post("/analyze-external", async (req: AuthedRequest, res) => {
         `[analyze-external] appId=${appId}: ${dbReviewCount} reviews in DB — skipping TapTap proxy`,
       );
       try {
-        const result = await aiAnalysisService.analyzeGameReviews(userId, appId, reviewWindow);
+        const result = await aiAnalysisService.analyzeGameReviews(
+          userId,
+          appId,
+          reviewWindow,
+          undefined,
+          0,
+          genrePackPlan,
+        );
         clearInterval(keepAlive);
         res.end(JSON.stringify({ success: true, data: result }));
         return;
@@ -475,6 +573,9 @@ router.post("/analyze-external", async (req: AuthedRequest, res) => {
       "external",
       detailRaw,
       reviewWindow,
+      undefined,
+      0,
+      genrePackPlan,
     );
 
     clearInterval(keepAlive);
@@ -493,6 +594,7 @@ router.post("/analyze-csv", upload.single("file"), async (req: AuthedRequest, re
   const reviewWindow = parseReviewWindow(
     req.body?.reviewWindow ?? (req.query.reviewWindow as string | undefined),
   );
+  const genrePackPlan = aiAnalysisService.parseGenrePacksFromRequest(req.body);
   const stream =
     req.body?.stream === "true" ||
     req.body?.stream === true ||
@@ -535,6 +637,7 @@ router.post("/analyze-csv", upload.single("file"), async (req: AuthedRequest, re
         reviewWindow,
         progress,
         8,
+        genrePackPlan,
       );
       out.done(result);
     } catch (err) {
@@ -582,6 +685,9 @@ router.post("/analyze-csv", upload.single("file"), async (req: AuthedRequest, re
       "csv-upload",
       null,
       reviewWindow,
+      undefined,
+      0,
+      genrePackPlan,
     );
 
     clearInterval(keepAlive);
@@ -599,6 +705,7 @@ router.post("/analyze/:appId", async (req: AuthedRequest, res) => {
   if (!userId) return;
   const appId = parseInt(String(req.params.appId));
   const reviewWindow = parseReviewWindow(req.body?.reviewWindow);
+  const genrePackPlan = aiAnalysisService.parseGenrePacksFromRequest(req.body);
   logDiagBrief("api-ai-analyze", { appId, stream: wantsAnalysisStream(req.body) });
 
   if (wantsAnalysisStream(req.body)) {
@@ -612,6 +719,8 @@ router.post("/analyze/:appId", async (req: AuthedRequest, res) => {
         appId,
         reviewWindow,
         progress,
+        0,
+        genrePackPlan,
       );
       out.done(result);
     } catch (err) {
@@ -626,7 +735,14 @@ router.post("/analyze/:appId", async (req: AuthedRequest, res) => {
 
   const keepAlive = startKeepAlive(res);
   try {
-    const result = await aiAnalysisService.analyzeGameReviews(userId, appId, reviewWindow);
+    const result = await aiAnalysisService.analyzeGameReviews(
+      userId,
+      appId,
+      reviewWindow,
+      undefined,
+      0,
+      genrePackPlan,
+    );
     clearInterval(keepAlive);
     res.end(JSON.stringify({ success: true, data: result }));
   } catch (err) {

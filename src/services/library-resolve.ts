@@ -66,36 +66,48 @@ interface KeywordLib {
   keywordPatterns: Array<{ match: string[]; score: number }>;
 }
 
-export function inferGenrePack(tagValues: string[]): string | null {
+/** Tất cả gói rubric khớp tag (không dừng ở pack đầu tiên). */
+export function inferAllGenrePacks(tagValues: string[]): string[] {
   const tags = tagsForLibraryMatching(tagValues);
   const blob = normalizeName(tags.join(" "));
-  if (!blob) return null;
-  /** Genre chỉ là "Card" / 卡牌 / TCG (snapshot TapTap + DB) — blob regex cũ cần thêm "rpg"|"deck"... nên không khớp. */
+  if (!blob) return [];
+
+  const packs = new Set<string>();
+
   for (const tag of tags) {
     const n = normalizeName(tag);
     if (n === "card" || n === "卡牌" || n === "tcg" || n === "ccg" || n === "集换式卡牌") {
-      return "cardRpg";
+      packs.add("cardRpg");
     }
   }
-  // Extraction / looter trước (tránh “extraction” bị ăn vào nhánh card)
   if (
     /\bextraction\b|extraction shooter|tarkov|dark zone|looter|loot &|loots|evac|搜打撤|撤离|marathon|escape from|dmz mode|hunt: showdown|arena breakout|delta force/.test(
       blob,
     )
   ) {
-    return "extraction";
+    packs.add("extraction");
   }
-  if (/moba|arena|aov|wild rift|honor of kings|league|王者|liên quân|vainglory/.test(blob)) return "moba";
+  if (/moba|arena|aov|wild rift|honor of kings|league|王者|liên quân|vainglory/.test(blob)) {
+    packs.add("moba");
+  }
   if (/fps|shooter|battle royale|tps|gunplay|shooter game|shoot'em up|third-person shooter|first-person/.test(blob)) {
-    return "shooter";
+    packs.add("shooter");
   }
   if (
     /card.?rpg|gacha rpg|idle.?rpg|trading card|ccg|tcg|deck builder|loot.?shoot|auto chess|squad rpg/.test(blob) ||
     (blob.includes("card") && (blob.includes("rpg") || blob.includes("battle") || blob.includes("deck")))
   ) {
-    return "cardRpg";
+    packs.add("cardRpg");
   }
-  return null;
+
+  const priority = ["cardRpg", "extraction", "moba", "shooter"] as const;
+  return priority.filter((p) => packs.has(p));
+}
+
+/** Gói đầu tiên theo thứ tự ưu tiên cũ (backward compat). */
+export function inferGenrePack(tagValues: string[]): string | null {
+  const all = inferAllGenrePacks(tagValues);
+  return all[0] ?? null;
 }
 
 export function scoreGenreFromTags(

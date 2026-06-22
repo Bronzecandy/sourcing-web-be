@@ -9,6 +9,9 @@ import type {
   RedFlagSeverity,
   RedFlagAtAGlance,
   RedFlagsChecklist,
+  GenrePackPlan,
+  GenrePackRollup,
+  GenrePackResolvedItem,
 } from "../types";
 import type { AnalysisContext } from "./analysis-context";
 import type { RubricCriterionDef, RubricManifest } from "./rubric-manifest";
@@ -17,11 +20,11 @@ import { translateTags } from "../utils/tag-translator";
 /** Gói base: toàn bộ 40% gameplay+genre dồn vào Gameplay; không có phần Theo thể loại. */
 export const BASE_GAMEPLAY_PART_WEIGHT = 0.4;
 /**
- * Gói thể loại riêng: Gameplay 26% + Theo thể loại 14% = 40% (thêm 2% từ Social so với manifest 24%+14%).
+ * Gói thể loại riêng: Gameplay 10% + Theo thể loại 30% = 40% (thêm 2% từ Social so với manifest 24%+14%).
  * Phần pool còn lại (~60%) chia theo manifest; Social bị trừ 2% tuyệt đối trước khi scale.
  */
-export const NON_BASE_GAMEPLAY_PART_WEIGHT = 0.26;
-export const NON_BASE_GENRE_PART_WEIGHT = 0.14;
+export const NON_BASE_GAMEPLAY_PART_WEIGHT = 0.1;
+export const NON_BASE_GENRE_PART_WEIGHT = 0.3;
 export const SOCIAL_WEIGHT_PENALTY = 0.02;
 
 const NON_BASE_POOL_PART_IDS = ["overview", "presentation", "monetization", "socialization", "liveops"] as const;
@@ -78,7 +81,7 @@ export function resolveGenrePackForWeights(
   return inferredPack ?? manifest.genrePackDefault ?? "base";
 }
 
-export { resolveLibraryScores, normalizeName, scoreGenreFromTags, matchStudioName, inferGenrePack, buildLibraryRequests, persistLibraryRequests } from "./library-resolve";
+export { resolveLibraryScores, normalizeName, scoreGenreFromTags, matchStudioName, inferGenrePack, inferAllGenrePacks, buildLibraryRequests, persistLibraryRequests } from "./library-resolve";
 
 export interface LlmRubricRow {
   id: string;
@@ -252,8 +255,8 @@ export function mergeRubricFromLlm(
   llmRows: LlmRubricRow[] | null | undefined,
   redFlagRaw: Record<string, unknown> | null | undefined,
   reviewCount: number,
-  /** Tag → gói rubric; ảnh hưởng trọng số phần "Theo thể loại" so với các phần khác. */
-  genrePackForWeights?: string | null,
+  /** Gói rubric + trọng số; null → base. */
+  genrePackPlan?: GenrePackPlan | null,
 ): RubricBlock {
   const libById = new Map(libraryEntries.map((e) => [e.criterionId, e]));
   const llmById = new Map((llmRows ?? []).map((r) => [r.id, r]));
@@ -307,6 +310,7 @@ export function mergeRubricFromLlm(
       elementVi: def.elementVi,
       input: def.input,
       weightInPart: def.weightInPart,
+      genrePack: def.genrePack ?? undefined,
       score,
       reasoning,
       mentionCount,
@@ -358,22 +362,217 @@ export function mergeRubricFromLlm(
   }
 
   const threshold = 10;
-  const packResolved = resolveGenrePackForWeights(genrePackForWeights, manifest);
-  const effectivePartWeights = resolveEffectivePartWeights(manifest, packResolved);
-  const aggregate = computeAggregate(manifest, criteriaOut, redFlag, effectivePartWeights);
+  const plan =
+    genrePackPlan ??
+    ({
+      packs: [{ packId: resolveGenrePackForWeights(null, manifest), weight: 1 }],
+      reasoning: "",
+      ratioPreset: null,
+    } satisfies GenrePackPlan);
+
+  const nonBasePacks = plan.packs.filter((p) => p.packId !== "base");
+  const primaryPack =
+    nonBasePacks.length > 0
+      ? [...nonBasePacks].sort((a, b) => b.weight - a.weight)[0].packId
+      : resolveGenrePackForWeights(null, manifest);
+
+  const criteriaDefsById = new Map(activeCriteria.map((d) => [d.id, d]));
+  const aggregate =
+    nonBasePacks.length > 1
+      ? computeMultiPackAggregate(manifest, criteriaOut, criteriaDefsById, redFlag, plan)
+      : computeAggregate(
+          manifest,
+          criteriaOut,
+          redFlag,
+          resolveEffectivePartWeights(manifest, primaryPack),
+        );
+
   const dataConfidence = {
     reviewCount,
     meetsThreshold: reviewCount >= threshold,
     threshold,
   };
 
+  const genrePackRollups =
+    nonBasePacks.length > 0
+      ? buildGenrePackRollups(criteriaOut, nonBasePacks, criteriaDefsById)
+      : undefined;
+
   return {
     manifestVersion: manifest.version,
-    genrePackResolved: packResolved,
+    genrePackResolved: primaryPack,
+    genrePacksResolved: plan.packs.map((p) => ({ packId: p.packId, weight: p.weight, labelVi: p.labelVi })),
+    genrePackBlendReasoning: plan.reasoning || undefined,
+    genrePackRollups,
     criteria: criteriaOut,
     aggregate,
     redFlag,
     dataConfidence,
+  };
+}
+
+function partScoreFromCriteria(list: RubricCriterionOutput[]): { score: number | null; den: number } {
+  let num = 0;
+  let den = 0;
+  for (const c of list) {
+    if (c.score == null) continue;
+    num += c.score * c.weightInPart;
+    den += c.weightInPart;
+  }
+  return { score: den > 0 ? num / den : null, den };
+}
+
+function buildGenrePackRollups(
+  criteria: RubricCriterionOutput[],
+  packs: GenrePackResolvedItem[],
+  criteriaDefsById: Map<string, RubricCriterionDef>,
+): GenrePackRollup[] {
+  const genreByPack = new Map<string, RubricCriterionOutput[]>();
+  for (const p of packs) genreByPack.set(p.packId, []);
+  for (const c of criteria) {
+    if (c.partId !== "genre_specific") continue;
+    const def = criteriaDefsById.get(c.id);
+    const packId = def?.genrePack ?? c.genrePack;
+    if (packId && genreByPack.has(packId)) {
+      genreByPack.get(packId)!.push(c);
+    }
+  }
+  return packs.map(({ packId, weight, labelVi }) => {
+    const { score } = partScoreFromCriteria(genreByPack.get(packId) ?? []);
+    return {
+      packId,
+      weight,
+      labelVi,
+      averageScore: score != null ? Math.round(score * 100) / 100 : null,
+    };
+  });
+}
+
+function computeMultiPackAggregate(
+  manifest: RubricManifest,
+  criteria: RubricCriterionOutput[],
+  criteriaDefsById: Map<string, RubricCriterionDef>,
+  redFlag: RubricRedFlagBlock,
+  plan: GenrePackPlan,
+): RubricAggregate {
+  const nonBasePacks = plan.packs.filter((p) => p.packId !== "base");
+  const templatePack = nonBasePacks[0]?.packId ?? "base";
+  const effectivePartWeights = resolveEffectivePartWeights(manifest, templatePack);
+
+  const byPart = new Map<string, RubricCriterionOutput[]>();
+  for (const c of criteria) {
+    if (c.partId === "red_flag") continue;
+    if (!byPart.has(c.partId)) byPart.set(c.partId, []);
+    byPart.get(c.partId)!.push(c);
+  }
+
+  const genreByPack = new Map<string, RubricCriterionOutput[]>();
+  for (const p of nonBasePacks) genreByPack.set(p.packId, []);
+  for (const c of byPart.get("genre_specific") ?? []) {
+    const def = criteriaDefsById.get(c.id);
+    const packId = def?.genrePack ?? c.genrePack;
+    if (packId && genreByPack.has(packId)) {
+      genreByPack.get(packId)!.push(c);
+    }
+  }
+
+  let blendNum = 0;
+  let blendWeightSum = 0;
+  for (const { packId, weight } of nonBasePacks) {
+    const { score, den } = partScoreFromCriteria(genreByPack.get(packId) ?? []);
+    if (score != null && den > 0) {
+      blendNum += score * weight;
+      blendWeightSum += weight;
+    }
+  }
+  const blendedGenreScore = blendWeightSum > 0 ? blendNum / blendWeightSum : null;
+
+  let sumParts = 0;
+  let weightSum = 0;
+  const partRollups: RubricPartRollup[] = [];
+
+  for (const part of manifest.parts) {
+    if (part.id === "red_flag") continue;
+    const wEff = effectivePartWeights.get(part.id) ?? 0;
+    if (wEff <= 0) continue;
+
+    let partScore: number | null;
+    let den = 0;
+    if (part.id === "genre_specific") {
+      partScore = blendedGenreScore;
+      if (partScore != null) {
+        for (const p of nonBasePacks) {
+          den += partScoreFromCriteria(genreByPack.get(p.packId) ?? []).den;
+        }
+      }
+    } else {
+      const scored = partScoreFromCriteria(byPart.get(part.id) ?? []);
+      partScore = scored.score;
+      den = scored.den;
+    }
+
+    const includedInGlobalScore = part.id === "genre_specific" ? partScore != null : den > 0;
+    const numeratorContribution =
+      includedInGlobalScore && partScore != null ? partScore * wEff : null;
+
+    partRollups.push({
+      partId: part.id,
+      labelVi: part.labelVi,
+      weightInTotal: wEff,
+      manifestWeightInTotal: part.weight,
+      partAverageScore: partScore != null ? Math.round(partScore * 100) / 100 : null,
+      scoredWeightSumInPart: den,
+      includedInGlobalScore,
+      numeratorContribution,
+    });
+
+    if (!includedInGlobalScore) continue;
+    sumParts += partScore! * wEff;
+    weightSum += wEff;
+  }
+
+  return finalizeAggregate(partRollups, sumParts, weightSum, criteria, redFlag);
+}
+
+function finalizeAggregate(
+  partRollups: RubricPartRollup[],
+  sumParts: number,
+  weightSum: number,
+  criteria: RubricCriterionOutput[],
+  redFlag: RubricRedFlagBlock,
+): RubricAggregate {
+  const redHard = redFlag.politics === true || redFlag.casino === true;
+  const weightedScore = weightSum > 0 ? Math.round(sumParts / weightSum) : null;
+  const band5 =
+    weightedScore == null ? null : Math.max(1, Math.min(5, Math.ceil(weightedScore / 20)));
+
+  let decision: RubricAggregate["decision"];
+  if (redHard) {
+    decision = "blocked_red_flag";
+  } else if (weightedScore == null) {
+    decision = "no_test";
+  } else if (weightedScore < 50) {
+    decision = "no_test";
+  } else if (weightedScore < 75) {
+    decision = "consider_test";
+  } else if (weightedScore <= 90) {
+    decision = "suitable_test";
+  } else {
+    decision = "must_test";
+  }
+
+  const lowScoreCriteriaCount = criteria.filter(
+    (c) => c.partId !== "red_flag" && c.score != null && c.score < 30,
+  ).length;
+
+  return {
+    weightedScore,
+    band5,
+    decision,
+    lowScoreCriteriaCount,
+    redFlagHardGate: redHard,
+    partRollups,
+    globalWeightDenominator: weightSum > 0 ? weightSum : undefined,
   };
 }
 
@@ -383,8 +582,6 @@ function computeAggregate(
   redFlag: RubricRedFlagBlock,
   effectivePartWeights: Map<string, number>,
 ): RubricAggregate {
-  const redHard = redFlag.politics === true || redFlag.casino === true;
-
   const byPart = new Map<string, RubricCriterionOutput[]>();
   for (const c of criteria) {
     if (c.partId === "red_flag") continue;
@@ -430,38 +627,7 @@ function computeAggregate(
     weightSum += wEff;
   }
 
-  const weightedScore = weightSum > 0 ? Math.round(sumParts / weightSum) : null;
-  const band5 =
-    weightedScore == null ? null : Math.max(1, Math.min(5, Math.ceil(weightedScore / 20)));
-
-  let decision: RubricAggregate["decision"];
-  if (redHard) {
-    decision = "blocked_red_flag";
-  } else if (weightedScore == null) {
-    decision = "no_test";
-  } else if (weightedScore < 50) {
-    decision = "no_test";
-  } else if (weightedScore < 75) {
-    decision = "consider_test";
-  } else if (weightedScore <= 90) {
-    decision = "suitable_test";
-  } else {
-    decision = "must_test";
-  }
-
-  const lowScoreCriteriaCount = criteria.filter(
-    (c) => c.partId !== "red_flag" && c.score != null && c.score < 30,
-  ).length;
-
-  return {
-    weightedScore,
-    band5,
-    decision,
-    lowScoreCriteriaCount,
-    redFlagHardGate: redHard,
-    partRollups,
-    globalWeightDenominator: weightSum,
-  };
+  return finalizeAggregate(partRollups, sumParts, weightSum, criteria, redFlag);
 }
 
 function buildRedFlagDetailLines(

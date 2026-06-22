@@ -509,6 +509,8 @@ export interface RubricCriterionOutput {
   elementVi: string;
   input: string;
   weightInPart: number;
+  /** Gói thể loại (chỉ tiêu chí genre_specific). */
+  genrePack?: string | null;
   score: number | null;
   /** Chỉ dùng khi partId === "red_flag": mức rủi ro, không phải điểm 0–100 */
   severity?: RedFlagSeverity | null;
@@ -599,6 +601,12 @@ export interface RubricBlock {
   manifestVersion: number;
   /** Gói thể loại dùng để cân trọng số các phần (base | cardRpg | moba | …). */
   genrePackResolved?: string | null;
+  /** Nhiều gói thể loại có trọng số (multi-genre blend). */
+  genrePacksResolved?: GenrePackResolvedItem[];
+  /** Giải thích AI về phân bổ gói thể loại. */
+  genrePackBlendReasoning?: string;
+  /** Điểm trung bình từng gói thể loại (khi có gói non-base). */
+  genrePackRollups?: GenrePackRollup[];
   criteria: RubricCriterionOutput[];
   aggregate: RubricAggregate;
   redFlag: RubricRedFlagBlock;
@@ -607,6 +615,46 @@ export interface RubricBlock {
     meetsThreshold: boolean;
     threshold: number;
   };
+}
+
+export interface GenrePackResolvedItem {
+  packId: string;
+  weight: number;
+  labelVi?: string;
+}
+
+/** Điểm trung bình có trọng số trong phần Theo thể loại, theo từng gói genre. */
+export interface GenrePackRollup {
+  packId: string;
+  weight: number;
+  labelVi?: string;
+  averageScore: number | null;
+}
+
+export interface GenrePackPlan {
+  packs: GenrePackResolvedItem[];
+  reasoning: string;
+  ratioPreset?: "7:3" | "6:4" | null;
+}
+
+export interface AnalysisPrepareExistingItem {
+  appId: number;
+  gameName?: string;
+  analyzedAt?: string;
+  reviewsAnalyzed?: number;
+  score?: number | null;
+  genrePacks?: GenrePackResolvedItem[];
+  genrePackResolved?: string | null;
+}
+
+export interface AnalysisPrepareResult {
+  appId: number;
+  gameName: string;
+  iconUrl: string | null;
+  tagInferredPacks: string[];
+  availablePackIds: string[];
+  genrePackPlan: GenrePackPlan;
+  existingAnalyses: AnalysisPrepareExistingItem[];
 }
 
 /** Bảng Có/Không nhanh cho FE (đặt ngay sau redFlagAtAGlance) */

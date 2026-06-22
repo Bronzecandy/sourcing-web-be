@@ -1,7 +1,7 @@
 import { callLLM, getModel } from "../utils/ai-client";
 import { pool } from "../utils/prisma";
 import { prisma } from "../utils/prisma";
-import type { AIAnalysisResult, TapTapRawApp, PotentialBreakdown } from "../types";
+import type { AIAnalysisResult, TapTapRawApp, PotentialBreakdown, AnalysisPrepareResult, AnalysisPrepareExistingItem, GenrePackPlan } from "../types";
 import type { AnalysisProgressReporter } from "../types/analysis-progress";
 import {
   createProgressStepReporter,
@@ -13,8 +13,8 @@ import {
   reviewWindowMeta,
   reviewWindowSqlBounds,
 } from "../utils/review-window";
-import { buildAnalysisContextFromRaw, type AnalysisContext } from "./analysis-context";
-import { getActiveCriteria, loadRubricManifest } from "./rubric-manifest";
+import { buildAnalysisContextFromRaw, loadAnalysisContext, type AnalysisContext } from "./analysis-context";
+import { getActiveCriteriaForPacks, loadRubricManifest } from "./rubric-manifest";
 import {
   appendRubricSpec,
   formatContextForPrompt,
@@ -23,7 +23,7 @@ import {
   parseLlmRubricRows,
   parseRedFlagSignals,
   resolveLibraryScores,
-  inferGenrePack,
+  inferAllGenrePacks,
   buildLibraryRequests,
   persistLibraryRequests,
   buildRedFlagAtAGlance,
@@ -49,6 +49,22 @@ import { classifyPgError, serializePgError } from "../utils/pg-error";
 import { aiInfoLog, aiVerboseLog } from "../utils/ai-logger";
 import { logDiag, logDiagBrief, logDiagVerbose, logDbError } from "../utils/process-diagnostics";
 import {
+  inferGenrePackPlanWithAI,
+  getDistinctGenrePackIds,
+  genrePackPlanFromBody,
+} from "./genre-pack-inference";
+import {
+  parseAppIdFromInput,
+  fetchAppInfo,
+  fetchAppDetailRaw,
+} from "./taptap-client.service";
+import {
+  parseSteamAppIdFromInput,
+  fetchSteamAppDetails,
+  buildSteamDetailRaw,
+} from "./steam-client.service";
+import { parseCsvBuffer } from "../utils/csv-parser";
+import {
   APP_REVIEW_LIGHT_SELECT,
   APP_REVIEW_SAMPLE_ORDER_SQL,
 } from "../utils/app-review-sql";
@@ -71,6 +87,14 @@ const RATING_BUCKETS = [
   { label: "Positive", min: 4, max: 4 },
   { label: "Very Positive", min: 5, max: 5 },
 ] as const;
+
+function hashStringToNumber(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash);
+}
 
 function intEnv(name: string, def: number): number {
   const v = process.env[name];
@@ -1139,6 +1163,7 @@ export class AIAnalysisService {
       analysisContext: AnalysisContext;
       reviewWindow?: ReviewWindow;
       onProgress?: AnalysisProgressReporter;
+      genrePackPlan?: GenrePackPlan | null;
     },
   ): Promise<AIAnalysisResult> {
     const { step: report, emit: reportEmit } = createProgressStepReporter(opts.onProgress);
@@ -1150,8 +1175,13 @@ export class AIAnalysisService {
     report(15, `Đang chuẩn bị rubric và thư viện chấm điểm (${reviews.length} bình luận)…`, "prepare");
 
     const manifest = loadRubricManifest();
-    const inferredPack = inferGenrePack(opts.analysisContext.tagValues);
-    const activeCriteria = getActiveCriteria(manifest, inferredPack);
+    const tagPacks = inferAllGenrePacks(opts.analysisContext.tagValues);
+    let genrePackPlan = opts.genrePackPlan ?? null;
+    if (!genrePackPlan) {
+      genrePackPlan = await inferGenrePackPlanWithAI(opts.analysisContext, tagPacks);
+    }
+    const packIds = genrePackPlan.packs.map((p) => p.packId);
+    const activeCriteria = getActiveCriteriaForPacks(manifest, packIds);
     const finalSpec = appendRubricSpec(FINAL_OUTPUT_SPEC, activeCriteria);
     const contextBlock = formatContextForPrompt(opts.analysisContext);
     const libraryEntries = resolveLibraryScores(opts.analysisContext, manifest);
@@ -1295,7 +1325,7 @@ export class AIAnalysisService {
       parseLlmRubricRows(analysis as Record<string, unknown>),
       parseRedFlagSignals(analysis as Record<string, unknown>),
       reviews.length,
-      inferredPack,
+      genrePackPlan,
     );
 
     const libraryRequests = buildLibraryRequests(opts.analysisContext, libraryEntries, rubric);
@@ -1387,6 +1417,120 @@ export class AIAnalysisService {
   }
 
   /** Có review trong DB → phân tích nhanh, không cần proxy TapTap. */
+  private toPrepareExistingItem(a: AIAnalysisResult): AnalysisPrepareExistingItem {
+    return {
+      appId: a.appId,
+      gameName: a.gameName,
+      analyzedAt: a.analyzedAt,
+      reviewsAnalyzed: a.reviewsAnalyzed,
+      score: a.rubric?.aggregate?.weightedScore ?? a.sentimentScore ?? null,
+      genrePacks: a.rubric?.genrePacksResolved,
+      genrePackResolved: a.rubric?.genrePackResolved ?? null,
+    };
+  }
+
+  async prepareAnalysis(
+    _userId: string,
+    opts: {
+      source: "database" | "external" | "csv";
+      appId?: number;
+      input?: string;
+      platform?: "taptap" | "steam";
+      gameName?: string;
+      overridePackIds?: string[];
+      csvBuffer?: Buffer;
+    },
+  ): Promise<AnalysisPrepareResult> {
+    const manifest = loadRubricManifest();
+    const availablePackIds = getDistinctGenrePackIds(manifest);
+
+    let appId = opts.appId ?? 0;
+    let gameName = opts.gameName ?? "";
+    let iconUrl: string | null = null;
+    let analysisContext: AnalysisContext;
+
+    if (opts.source === "database") {
+      if (!appId || appId <= 0) throw new Error("appId required for database prepare");
+      const ctx = await loadAnalysisContext(appId);
+      if (!ctx) throw new Error(`Game not found (appId: ${appId})`);
+      analysisContext = ctx;
+      gameName = ctx.gameName;
+      iconUrl = ctx.iconUrl;
+    } else if (opts.source === "csv") {
+      if (!opts.csvBuffer) throw new Error("CSV file required for csv prepare");
+      const { gameName: csvName, appId: csvAppId } = parseCsvBuffer(opts.csvBuffer);
+      gameName = csvName;
+      appId = /^\d+$/.test(csvAppId) ? Number(csvAppId) : hashStringToNumber(csvAppId);
+      analysisContext = buildAnalysisContextFromRaw(appId, gameName, null, null);
+    } else {
+      const input = String(opts.input ?? "").trim();
+      if (!input) throw new Error("input required for external prepare");
+      const platform = opts.platform === "steam" ? "steam" : "taptap";
+
+      if (platform === "steam") {
+        const steamAppId = parseSteamAppIdFromInput(input);
+        if (!steamAppId || steamAppId <= 0) throw new Error("Invalid Steam URL or App ID");
+        appId = steamAppId;
+        const appData = await fetchSteamAppDetails(steamAppId);
+        gameName =
+          appData && typeof appData.name === "string" && appData.name.trim()
+            ? appData.name.trim()
+            : `Steam App ${steamAppId}`;
+        iconUrl = appData && typeof appData.header_image === "string" ? appData.header_image : null;
+        const detailRaw = appData ? buildSteamDetailRaw(appData, steamAppId) : null;
+        analysisContext = buildAnalysisContextFromRaw(appId, gameName, iconUrl, detailRaw);
+      } else {
+        const tapAppId = parseAppIdFromInput(input);
+        if (!tapAppId || tapAppId <= 0) throw new Error("Invalid TapTap URL or App ID");
+        appId = tapAppId;
+        const dbCtx = await loadAnalysisContext(appId);
+        if (dbCtx) {
+          analysisContext = dbCtx;
+          gameName = dbCtx.gameName;
+          iconUrl = dbCtx.iconUrl;
+        } else {
+          const appInfo = await fetchAppInfo(appId);
+          const detailRaw = await fetchAppDetailRaw(appId);
+          gameName = appInfo.title;
+          iconUrl = appInfo.iconUrl;
+          analysisContext = buildAnalysisContextFromRaw(appId, gameName, iconUrl, detailRaw);
+        }
+      }
+    }
+
+    const tagInferredPacks = inferAllGenrePacks(analysisContext.tagValues);
+    const genrePackPlan = await inferGenrePackPlanWithAI(
+      analysisContext,
+      tagInferredPacks,
+      opts.overridePackIds,
+    );
+
+    const history = await getAnalysisHistoryForApp(appId);
+    const existingAnalyses = history.map((h) => this.toPrepareExistingItem(h));
+
+    return {
+      appId,
+      gameName,
+      iconUrl,
+      tagInferredPacks,
+      availablePackIds,
+      genrePackPlan,
+      existingAnalyses,
+    };
+  }
+
+  parseGenrePacksFromRequest(body: unknown): GenrePackPlan | null {
+    let raw = (body as { genrePacks?: unknown })?.genrePacks;
+    if (typeof raw === "string") {
+      try {
+        raw = JSON.parse(raw) as unknown;
+      } catch {
+        return null;
+      }
+    }
+    return genrePackPlanFromBody(raw);
+  }
+
   async countDatabaseReviews(appId: number): Promise<number> {
     return withDbRetry(
       () => prisma.appReview.count({ where: { appId } }),
@@ -1400,6 +1544,7 @@ export class AIAnalysisService {
     reviewWindow: ReviewWindow = { mode: "all" },
     onProgress?: AnalysisProgressReporter,
     progressFloor = 0,
+    genrePackPlan?: GenrePackPlan | null,
   ): Promise<AIAnalysisResult> {
     const { step: report, emit: reportEmit } = createProgressStepReporter(onProgress, progressFloor);
 
@@ -1507,6 +1652,7 @@ export class AIAnalysisService {
         analysisContext,
         reviewWindow,
         onProgress: reportEmit,
+        genrePackPlan,
       });
       logDiagBrief("ai-analysis-done", { appId, reviewCount: reviews.length, capped: capMeta.capped });
       return applyCapNoteToResult(result, capMeta);
@@ -1527,6 +1673,7 @@ export class AIAnalysisService {
     reviewWindow: ReviewWindow = { mode: "all" },
     onProgress?: AnalysisProgressReporter,
     progressFloor = 0,
+    genrePackPlan?: GenrePackPlan | null,
   ): Promise<AIAnalysisResult> {
     const { step: report, emit: reportEmit } = createProgressStepReporter(onProgress, progressFloor);
 
@@ -1584,6 +1731,7 @@ export class AIAnalysisService {
         analysisContext,
         reviewWindow,
         onProgress: reportEmit,
+        genrePackPlan,
       });
       logDiagBrief("ai-analysis-done", { appId, reviewCount: filtered.length, source, capped: capMeta.capped });
       return applyCapNoteToResult(result, capMeta);
