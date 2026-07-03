@@ -322,6 +322,18 @@ export interface PotentialScoreResult {
   audienceGrowthRate?: number | null;
   /** Growth-table ranking score (delta tier + rank movement). */
   momentumScore?: number;
+  /** Chuẩn hóa tăng trưởng 0–100 (trước ×60%). */
+  momentumGrowthNorm?: number;
+  /** Percentile delta tuyệt đối trong cohort cùng kỳ (0–100). */
+  momentumGrowthPercentile?: number;
+  /** Trần từ tốc độ tăng/ngày so phân phối 7/14/30 ngày (0–100). */
+  momentumGrowthAbsCap?: number;
+  /** Số game trong cohort percentile cùng kỳ. */
+  momentumGrowthCohortSize?: number;
+  /** Mốc tăng/ngày p50/p75/p90/p95 từ hiệu chỉnh 7/14/30 ngày. */
+  momentumGrowthPerDayAnchors?: { p50: number; p75: number; p90: number; p95: number };
+  /** Điểm đà leo hạng 0–100 (trước ×25%). */
+  momentumMovementScore?: number;
   launchCategory?: LaunchCategory;
   releaseDate?: string | null;
   primaryLaunchBoard?: "pop" | "hot" | "new" | null;
@@ -445,6 +457,12 @@ export interface GamePotentialDetail {
   audienceGrowthAbsolute?: number | null;
   audienceGrowthRate?: number | null;
   momentumScore?: number;
+  momentumGrowthNorm?: number;
+  momentumGrowthPercentile?: number;
+  momentumGrowthAbsCap?: number;
+  momentumGrowthCohortSize?: number;
+  momentumGrowthPerDayAnchors?: { p50: number; p75: number; p90: number; p95: number };
+  momentumMovementScore?: number;
   /** 1-based rank on growth/momentum potential board. */
   potentialRankGrowth?: number | null;
   /** 1-based rank on stable/composite potential board. */

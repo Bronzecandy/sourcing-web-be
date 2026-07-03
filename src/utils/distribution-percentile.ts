@@ -136,6 +136,52 @@ export function tierGrowthDelta(delta: number | null | undefined): TierLookupRes
   return tierFromDefs(delta, GROWTH_BUCKET_DEFS, GROWTH_TIER_BONUS, { points: 0, label: "Không đổi" });
 }
 
+/** Percentile rank 0–100 (mid-rank within ties). `sortedAsc` must be ascending. */
+export function percentileRankOf(value: number, sortedAsc: number[]): number {
+  const n = sortedAsc.length;
+  if (n === 0) return 50;
+  if (n === 1) return value >= sortedAsc[0]! ? 100 : 0;
+
+  let below = 0;
+  let equal = 0;
+  for (const v of sortedAsc) {
+    if (v < value) below++;
+    else if (v === value) equal++;
+    else break;
+  }
+  return clamp(((below + equal / 2) / n) * 100);
+}
+
+export interface PercentileAnchors {
+  p50: number;
+  p75: number;
+  p90: number;
+  p95: number;
+}
+
+/** Interpolate value at percentile p (0–100) from a sorted ascending sample. */
+function valueAtPercentile(sortedAsc: number[], p: number): number {
+  const n = sortedAsc.length;
+  if (n === 0) return 0;
+  if (n === 1) return sortedAsc[0]!;
+  const idx = (p / 100) * (n - 1);
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  if (lo === hi) return sortedAsc[lo]!;
+  const t = idx - lo;
+  return sortedAsc[lo]! + t * (sortedAsc[hi]! - sortedAsc[lo]!);
+}
+
+export function percentileAnchorsFromSample(
+  sortedAsc: number[],
+  percentiles: number[] = [50, 75, 90, 95],
+): PercentileAnchors {
+  const [p50, p75, p90, p95] = percentiles.map((p) =>
+    Math.round(valueAtPercentile(sortedAsc, p) * 10) / 10,
+  );
+  return { p50: p50!, p75: p75!, p90: p90!, p95: p95! };
+}
+
 /**
  * Rating base from period-start level: 8★→60, 10★→90 (linear from 5★).
  * Stable high ratings keep a high score without a separate "change" penalty.

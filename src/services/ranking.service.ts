@@ -29,16 +29,34 @@ import { downloadCountFromRaw } from "../utils/taptap-raw-extract";
 import {
   ensurePotentialScorers,
   mergeAudienceScore,
+  percentileAnchorsFromSample,
+  percentileRankOf,
   ratingDeltaAdjustment,
   ratingStartBase,
   tierAbsScale,
   tierGrowthDelta,
+  type PercentileAnchors,
 } from "../utils/distribution-percentile";
 
 // Distribution tier pillars; bump when the formula changes so caches refresh.
-const ALGO_VERSION_RESERVE = "v11";
-const ALGO_VERSION_LAUNCHED = "v17";
-const BREAKDOWN_VERSION = "v11";
+const ALGO_VERSION_RESERVE = "v12";
+const ALGO_VERSION_LAUNCHED = "v18";
+const BREAKDOWN_VERSION = "v12";
+
+const GROWTH_CALIBRATION_WINDOWS = [7, 14, 30] as const;
+const GROWTH_CALIBRATION_TTL_MS = Math.max(
+  60_000,
+  parseInt(process.env.GROWTH_CALIBRATION_TTL_MS ?? "21600000", 10) || 21_600_000,
+);
+
+interface GrowthCalibration {
+  sortedPerDay: number[];
+  anchors: PercentileAnchors;
+}
+
+const growthCalibrationCache = new Map<string, GrowthCalibration>();
+let growthCalibrationBuiltAt = 0;
+let growthCalibrationInFlight: Promise<void> | null = null;
 
 /** Base chart-quality score by primary board (Pop > Hot > New). */
 const LAUNCH_CHART_BASE: Record<PrimaryLaunchBoard, number> = {
@@ -110,17 +128,214 @@ export class RankingService {
     return Math.round(v * 10) / 10;
   }
 
-  /** Growth-table score: absolute audience delta tier (75%) + rank movement (25%). */
+  /** Growth-table score: 60% growth norm + 20% rating + 20% rank quality. */
   private static computeMomentumScore(
-    audience: { start: number | null; end: number | null; delta: number },
-    movementScore: number,
+    growthNorm: number,
+    ratingScore: number,
+    rankQualityScore: number,
   ): number {
     const C = RankingService.clamp;
     const R = RankingService.r1;
-    const hasWindow = audience.start != null && audience.end != null;
-    const growthTier = tierGrowthDelta(hasWindow ? audience.delta : 0);
-    const growthNorm = C(50 + (growthTier?.points ?? 0));
-    return R(0.75 * growthNorm + 0.25 * movementScore);
+    return R(0.6 * C(growthNorm) + 0.2 * C(ratingScore) + 0.2 * C(rankQualityScore));
+  }
+
+  private static calibrationKey(
+    segment: PotentialSegment,
+    platform: "combined" | "android" | "ios",
+  ): string {
+    return `${segment}-${platform}`;
+  }
+
+  private deltaPerDayForAppRows(
+    appRows: AppRankRow[],
+    windowDays: number,
+    platform: "combined" | "android" | "ios",
+    segment: PotentialSegment,
+  ): number | null {
+    const getRank = (r: AppRankRow) => this.getRankForSegment(r, segment, platform);
+    const rowsForScore = segment === "launched" ? this.slicePostLaunchRows(appRows) : appRows;
+    const validRows = rowsForScore.filter((r) => getRank(r) != null);
+    if (validRows.length < 2) return null;
+
+    const scaleValues =
+      segment === "launched"
+        ? validRows.map((r) => this.downloadCountForRow(r))
+        : validRows.map((r) => r.reserveCount ?? null);
+
+    const valid = scaleValues.filter((v): v is number => v != null && v > 0);
+    if (valid.length < 2) return null;
+
+    const start = valid[0]!;
+    const end = valid[valid.length - 1]!;
+    const delta = end - start;
+    return delta / windowDays;
+  }
+
+  private async buildGrowthCalibrationForSegment(
+    segment: PotentialSegment,
+    platform: "combined" | "android" | "ios",
+  ): Promise<GrowthCalibration> {
+    const perDaySamples: number[] = [];
+
+    for (const windowDays of GROWTH_CALIBRATION_WINDOWS) {
+      const rows = await this.fetchLightRows(windowDays);
+      const grouped = new Map<number, AppRankRow[]>();
+      for (const row of rows) {
+        if (!grouped.has(row.appId)) grouped.set(row.appId, []);
+        grouped.get(row.appId)!.push(row);
+      }
+
+      for (const [appId, appRows] of grouped) {
+        if (segment === "reserve" && !this.isReserveOnlyApp(appRows)) continue;
+        if (segment === "launched" && !this.isLaunchedApp(appRows)) continue;
+        const perDay = this.deltaPerDayForAppRows(appRows, windowDays, platform, segment);
+        if (perDay != null && Number.isFinite(perDay)) perDaySamples.push(perDay);
+      }
+    }
+
+    perDaySamples.sort((a, b) => a - b);
+    return {
+      sortedPerDay: perDaySamples,
+      anchors: percentileAnchorsFromSample(perDaySamples),
+    };
+  }
+
+  private async ensureGrowthCalibration(
+    platform: "combined" | "android" | "ios",
+    force = false,
+  ): Promise<void> {
+    const stale = Date.now() - growthCalibrationBuiltAt > GROWTH_CALIBRATION_TTL_MS;
+    if (!force && !stale && growthCalibrationCache.size >= 2) return;
+    if (growthCalibrationInFlight) return growthCalibrationInFlight;
+
+    growthCalibrationInFlight = (async () => {
+      for (const segment of ["reserve", "launched"] as const) {
+        const key = RankingService.calibrationKey(segment, platform);
+        growthCalibrationCache.set(
+          key,
+          await this.buildGrowthCalibrationForSegment(segment, platform),
+        );
+      }
+      growthCalibrationBuiltAt = Date.now();
+    })().finally(() => {
+      growthCalibrationInFlight = null;
+    });
+
+    return growthCalibrationInFlight;
+  }
+
+  private static absoluteGrowthCap(
+    deltaPerDay: number,
+    segment: PotentialSegment,
+    platform: "combined" | "android" | "ios",
+  ): number {
+    const key = RankingService.calibrationKey(segment, platform);
+    const cal = growthCalibrationCache.get(key);
+    if (!cal || cal.sortedPerDay.length === 0) {
+      const bonus = tierGrowthDelta(deltaPerDay * 14)?.points ?? 0;
+      return RankingService.clamp(50 + bonus);
+    }
+    return percentileRankOf(deltaPerDay, cal.sortedPerDay);
+  }
+
+  private static growthCalibrationAnchors(
+    segment: PotentialSegment,
+    platform: "combined" | "android" | "ios",
+  ): PercentileAnchors | undefined {
+    return growthCalibrationCache.get(RankingService.calibrationKey(segment, platform))?.anchors;
+  }
+
+  private applyGrowthMomentumPostPass(
+    results: PotentialScoreResult[],
+    days: number,
+    platform: "combined" | "android" | "ios",
+    segment: PotentialSegment,
+  ): PotentialScoreResult[] {
+    const R = RankingService.r1;
+    const C = RankingService.clamp;
+    const anchors = RankingService.growthCalibrationAnchors(segment, platform);
+
+    const sortedDeltas = results
+      .map((r) => r.audienceGrowthAbsolute ?? 0)
+      .sort((a, b) => a - b);
+    const cohortSize = results.length;
+
+    return results.map((r) => {
+      const delta = r.audienceGrowthAbsolute ?? 0;
+      const cohortPct = percentileRankOf(delta, sortedDeltas);
+      const deltaPerDay = delta / Math.max(days, 1);
+      const absCap = RankingService.absoluteGrowthCap(deltaPerDay, segment, platform);
+      const growthNorm = C(Math.min(cohortPct, absCap));
+      const momentumScore = RankingService.computeMomentumScore(
+        growthNorm,
+        r.ratingScore,
+        r.rankQualityScore,
+      );
+
+      return {
+        ...r,
+        momentumScore,
+        momentumGrowthNorm: R(growthNorm),
+        momentumGrowthPercentile: R(cohortPct),
+        momentumGrowthAbsCap: R(absCap),
+        momentumGrowthCohortSize: cohortSize,
+        momentumGrowthPerDayAnchors: anchors,
+      };
+    });
+  }
+
+  private momentumFieldsFromListEntry(
+    entry: PotentialScoreResult | undefined,
+    detail: GamePotentialDetail,
+    days: number,
+    platform: "combined" | "android" | "ios",
+    segment: PotentialSegment,
+  ): Pick<
+    GamePotentialDetail,
+    | "momentumScore"
+    | "momentumGrowthNorm"
+    | "momentumGrowthPercentile"
+    | "momentumGrowthAbsCap"
+    | "momentumGrowthCohortSize"
+    | "momentumGrowthPerDayAnchors"
+    | "momentumMovementScore"
+  > {
+    const R = RankingService.r1;
+    if (entry?.momentumScore != null && entry.momentumGrowthNorm != null) {
+      return {
+        momentumScore: entry.momentumScore,
+        momentumGrowthNorm: entry.momentumGrowthNorm,
+        momentumGrowthPercentile: entry.momentumGrowthPercentile,
+        momentumGrowthAbsCap: entry.momentumGrowthAbsCap,
+        momentumGrowthCohortSize: entry.momentumGrowthCohortSize,
+        momentumGrowthPerDayAnchors: entry.momentumGrowthPerDayAnchors,
+        momentumMovementScore: entry.momentumMovementScore,
+      };
+    }
+
+    const aud = detail.audience;
+    const audienceDelta = aud.start != null && aud.end != null ? aud.delta : 0;
+    const deltaPerDay = audienceDelta / Math.max(days, 1);
+    const absCap = RankingService.absoluteGrowthCap(
+      deltaPerDay,
+      segment,
+      platform,
+    );
+    const growthNorm = RankingService.clamp(absCap);
+    const momentumScore = RankingService.computeMomentumScore(
+      growthNorm,
+      detail.rating.score,
+      detail.rankQuality.score,
+    );
+    return {
+      momentumScore,
+      momentumGrowthNorm: R(growthNorm),
+      momentumGrowthPercentile: undefined,
+      momentumGrowthAbsCap: R(absCap),
+      momentumGrowthCohortSize: undefined,
+      momentumGrowthPerDayAnchors: RankingService.growthCalibrationAnchors(segment, platform),
+      momentumMovementScore: R(detail.rankQuality.movementScore),
+    };
   }
 
   /** Stricter rank tiers: rewards consistent top-10/20, not just "in top 200". */
@@ -662,10 +877,6 @@ export class RankingService {
       audienceDelta != null && detail.audience.start != null && detail.audience.start > 0
         ? R((audienceDelta / detail.audience.start) * 1000) / 10
         : null;
-    const momentumScore = RankingService.computeMomentumScore(
-      detail.audience,
-      detail.rankQuality.movementScore,
-    );
 
     const out: PotentialScoreResult = {
       appId,
@@ -694,7 +905,7 @@ export class RankingService {
       segment,
       audienceGrowthAbsolute: audienceDelta,
       audienceGrowthRate,
-      momentumScore,
+      momentumMovementScore: R(detail.rankQuality.movementScore),
     };
 
     if (segment === "launched") {
@@ -714,14 +925,21 @@ export class RankingService {
     days: number,
     platform: "combined" | "android" | "ios",
     segment: PotentialSegment,
+    listEntry?: PotentialScoreResult,
   ): GamePotentialDetail | null {
     if (appRows.length < 2) return null;
     const computed = this.computePillars(appRows, days, platform, segment);
     if (!computed) return null;
-    return this.enrichGamePotentialDetail(computed.detail);
+    return this.enrichGamePotentialDetail(computed.detail, days, platform, segment, listEntry);
   }
 
-  private enrichGamePotentialDetail(detail: GamePotentialDetail): GamePotentialDetail {
+  private enrichGamePotentialDetail(
+    detail: GamePotentialDetail,
+    days: number,
+    platform: "combined" | "android" | "ios",
+    segment: PotentialSegment,
+    listEntry?: PotentialScoreResult,
+  ): GamePotentialDetail {
     const R = RankingService.r1;
     const aud = detail.audience;
     const audienceDelta = aud.start != null && aud.end != null ? aud.delta : null;
@@ -729,12 +947,12 @@ export class RankingService {
       audienceDelta != null && aud.start != null && aud.start > 0
         ? R((audienceDelta / aud.start) * 1000) / 10
         : null;
-    const momentumScore = RankingService.computeMomentumScore(aud, detail.rankQuality.movementScore);
+    const momentum = this.momentumFieldsFromListEntry(listEntry, detail, days, platform, segment);
     return {
       ...detail,
       audienceGrowthAbsolute: audienceDelta,
       audienceGrowthRate,
-      momentumScore,
+      ...momentum,
     };
   }
 
@@ -759,10 +977,24 @@ export class RankingService {
   private attachPotentialRanks(
     detail: GamePotentialDetail | null,
     ranks: { growth: number | null; stable: number | null; total: number },
+    listEntry?: PotentialScoreResult,
   ): GamePotentialDetail | null {
     if (!detail) return null;
+    const momentumFromList =
+      listEntry?.momentumScore != null
+        ? {
+            momentumScore: listEntry.momentumScore,
+            momentumGrowthNorm: listEntry.momentumGrowthNorm,
+            momentumGrowthPercentile: listEntry.momentumGrowthPercentile,
+            momentumGrowthAbsCap: listEntry.momentumGrowthAbsCap,
+            momentumGrowthCohortSize: listEntry.momentumGrowthCohortSize,
+            momentumGrowthPerDayAnchors: listEntry.momentumGrowthPerDayAnchors,
+            momentumMovementScore: listEntry.momentumMovementScore,
+          }
+        : {};
     return {
       ...detail,
+      ...momentumFromList,
       potentialRankGrowth: ranks.growth,
       potentialRankStable: ranks.stable,
       potentialListSize: ranks.total,
@@ -781,6 +1013,7 @@ export class RankingService {
       `potential-detail-${this.algoVersion(segment)}-${segment}-${appId}-${platform}-${days}-${launchKey}`,
       async () => {
         await ensurePotentialScorers();
+        await this.ensureGrowthCalibration(platform);
         const appRows = await this.resolveAppRowsForScoring(appId, days, segment);
         return this.buildGamePotentialDetailFromRows(appRows, days, platform, segment);
       },
@@ -798,6 +1031,7 @@ export class RankingService {
       `potential-breakdown-${BREAKDOWN_VERSION}-${appId}-${platform}-${days}-${launchKey}`,
       async () => {
         await ensurePotentialScorers();
+        await this.ensureGrowthCalibration(platform);
         const recentRows = await this.fetchLightRows(days);
         const recentApp = recentRows.filter((r) => r.appId === appId);
         const lifecycle: AppLifecycleMeta = {
@@ -811,17 +1045,33 @@ export class RankingService {
           this.calculatePotentialScores(days, platform, "reserve"),
           this.calculatePotentialScores(days, platform, "launched"),
         ]);
+        const reserveEntry = reserveList.find((s) => s.appId === appId);
+        const launchedEntry = launchedList.find((s) => s.appId === appId);
         const reserveRanks = this.findPotentialRanks(appId, reserveList);
         const launchedRanks = this.findPotentialRanks(appId, launchedList);
         return {
           lifecycle,
           reserve: this.attachPotentialRanks(
-            this.buildGamePotentialDetailFromRows(reserveRows, days, platform, "reserve"),
+            this.buildGamePotentialDetailFromRows(
+              reserveRows,
+              days,
+              platform,
+              "reserve",
+              reserveEntry,
+            ),
             reserveRanks,
+            reserveEntry,
           ),
           launched: this.attachPotentialRanks(
-            this.buildGamePotentialDetailFromRows(launchRows, days, platform, "launched"),
+            this.buildGamePotentialDetailFromRows(
+              launchRows,
+              days,
+              platform,
+              "launched",
+              launchedEntry,
+            ),
             launchedRanks,
+            launchedEntry,
           ),
         };
       },
@@ -844,6 +1094,7 @@ export class RankingService {
       `potential-${this.algoVersion(segment)}-${segment}-${platform}-${days}`,
       async () => {
         await ensurePotentialScorers();
+        await this.ensureGrowthCalibration(platform);
         const rows = await this.fetchLightRows(days);
 
         const grouped = new Map<number, AppRankRow[]>();
@@ -861,8 +1112,9 @@ export class RankingService {
           if (scored) results.push(scored);
         }
 
-        results.sort((a, b) => b.compositeScore - a.compositeScore);
-        return results;
+        const withMomentum = this.applyGrowthMomentumPostPass(results, days, platform, segment);
+        withMomentum.sort((a, b) => b.compositeScore - a.compositeScore);
+        return withMomentum;
       },
     );
   }
