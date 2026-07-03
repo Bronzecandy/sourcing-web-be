@@ -171,24 +171,31 @@ export class RankingService {
     return delta / windowDays;
   }
 
+  private sliceAppRowsForWindow(appRows: AppRankRow[], windowDays: number): AppRankRow[] {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - windowDays);
+    return appRows.filter((r) => r.date >= cutoff);
+  }
+
   private async buildGrowthCalibrationForSegment(
     segment: PotentialSegment,
     platform: "combined" | "android" | "ios",
   ): Promise<GrowthCalibration> {
     const perDaySamples: number[] = [];
+    const maxWindow = Math.max(...GROWTH_CALIBRATION_WINDOWS);
+    const rows = await this.fetchLightRows(maxWindow);
+    const grouped = new Map<number, AppRankRow[]>();
+    for (const row of rows) {
+      if (!grouped.has(row.appId)) grouped.set(row.appId, []);
+      grouped.get(row.appId)!.push(row);
+    }
 
     for (const windowDays of GROWTH_CALIBRATION_WINDOWS) {
-      const rows = await this.fetchLightRows(windowDays);
-      const grouped = new Map<number, AppRankRow[]>();
-      for (const row of rows) {
-        if (!grouped.has(row.appId)) grouped.set(row.appId, []);
-        grouped.get(row.appId)!.push(row);
-      }
-
-      for (const [appId, appRows] of grouped) {
+      for (const [, appRows] of grouped) {
         if (segment === "reserve" && !this.isReserveOnlyApp(appRows)) continue;
         if (segment === "launched" && !this.isLaunchedApp(appRows)) continue;
-        const perDay = this.deltaPerDayForAppRows(appRows, windowDays, platform, segment);
+        const windowRows = this.sliceAppRowsForWindow(appRows, windowDays);
+        const perDay = this.deltaPerDayForAppRows(windowRows, windowDays, platform, segment);
         if (perDay != null && Number.isFinite(perDay)) perDaySamples.push(perDay);
       }
     }

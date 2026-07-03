@@ -205,6 +205,15 @@ function removeJsonTrailingCommas(text: string): string {
   return out;
 }
 
+/**
+ * LLM đôi khi cắt đầu số: `",.0]"` thay vì `, 0]` hoặc giá trị hợp lệ.
+ */
+function repairBrokenJsonNumberFragments(text: string): string {
+  return text
+    .replace(/",\s*\.\d+(\s*[\],}])/g, '"$1')
+    .replace(/,\s*\.\d+(\s*[\],}])/g, "$1");
+}
+
 function parseLlmJsonOutput(content: string): Record<string, unknown> {
   let cleaned = content.trim();
   if (cleaned.startsWith("```")) {
@@ -213,9 +222,14 @@ function parseLlmJsonOutput(content: string): Record<string, unknown> {
 
   const variants: string[] = [
     cleaned,
+    repairBrokenJsonNumberFragments(cleaned),
     escapeControlCharsInJsonStringLiterals(cleaned),
     removeJsonTrailingCommas(cleaned),
+    removeJsonTrailingCommas(repairBrokenJsonNumberFragments(cleaned)),
     removeJsonTrailingCommas(escapeControlCharsInJsonStringLiterals(cleaned)),
+    removeJsonTrailingCommas(
+      repairBrokenJsonNumberFragments(escapeControlCharsInJsonStringLiterals(cleaned)),
+    ),
     // hai lần — đôi khi có nhiều cấp phẩy thừa lồng nhau
     removeJsonTrailingCommas(removeJsonTrailingCommas(cleaned)),
     removeJsonTrailingCommas(removeJsonTrailingCommas(escapeControlCharsInJsonStringLiterals(cleaned))),
@@ -232,9 +246,14 @@ function parseLlmJsonOutput(content: string): Record<string, unknown> {
 
   const repairBases = [
     cleaned,
+    repairBrokenJsonNumberFragments(cleaned),
     escapeControlCharsInJsonStringLiterals(cleaned),
     removeJsonTrailingCommas(cleaned),
+    removeJsonTrailingCommas(repairBrokenJsonNumberFragments(cleaned)),
     removeJsonTrailingCommas(escapeControlCharsInJsonStringLiterals(cleaned)),
+    removeJsonTrailingCommas(
+      repairBrokenJsonNumberFragments(escapeControlCharsInJsonStringLiterals(cleaned)),
+    ),
   ];
   for (const base of repairBases) {
     try {

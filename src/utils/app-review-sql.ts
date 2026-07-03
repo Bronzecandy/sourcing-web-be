@@ -2,12 +2,15 @@
  * SQL fragments for AppReview — extract review text/score without full `raw` JSON.
  */
 
+/** Strip \\u0000 from JSON text before path extraction — PG cannot cast null bytes to text (22P05). */
+export const APP_REVIEW_RAW_SANITIZED_SQL = `(regexp_replace(raw::text, '\\\\u0000', '', 'g'))::jsonb`;
+
 export const APP_REVIEW_TEXT_SQL = `COALESCE(
-  raw->'review'->'contents'->>'text',
-  raw->'sharing'->>'description'
+  ${APP_REVIEW_RAW_SANITIZED_SQL}->'review'->'contents'->>'text',
+  ${APP_REVIEW_RAW_SANITIZED_SQL}->'sharing'->>'description'
 )`;
 
-export const APP_REVIEW_SCORE_SQL = `COALESCE((raw->'review'->>'score')::float, 0)`;
+export const APP_REVIEW_SCORE_SQL = `COALESCE((${APP_REVIEW_RAW_SANITIZED_SQL}->'review'->>'score')::float, 0)`;
 
 /** Lightweight row for AI review fetch / stratified sampling. */
 export const APP_REVIEW_LIGHT_SELECT = `
