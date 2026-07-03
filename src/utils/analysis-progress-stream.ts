@@ -75,9 +75,9 @@ export function createAnalysisStreamWriter(res: Response) {
       writeLine({ type: "done", success: true, data });
       res.end();
     },
-    fail(error: string) {
+    fail(error: string, extra?: Record<string, unknown>) {
       stop();
-      writeLine({ type: "done", success: false, error });
+      writeLine({ type: "done", success: false, error, ...extra });
       res.end();
     },
   };

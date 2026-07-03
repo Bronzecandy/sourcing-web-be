@@ -316,6 +316,12 @@ export interface PotentialScoreResult {
   fansCount: number | null;
   trend: "up" | "down" | "stable";
   segment?: PotentialSegment;
+  /** Absolute reserve/download delta over the analysis window. */
+  audienceGrowthAbsolute?: number | null;
+  /** Percent growth over the window (display only). */
+  audienceGrowthRate?: number | null;
+  /** Growth-table ranking score (delta tier + rank movement). */
+  momentumScore?: number;
   launchCategory?: LaunchCategory;
   releaseDate?: string | null;
   primaryLaunchBoard?: "pop" | "hot" | "new" | null;
@@ -436,6 +442,14 @@ export interface GamePotentialDetail {
     activeBoardCount: number;
     activeBoards: Array<{ board: "pop" | "hot" | "new"; rank: number | null }>;
   };
+  audienceGrowthAbsolute?: number | null;
+  audienceGrowthRate?: number | null;
+  momentumScore?: number;
+  /** 1-based rank on growth/momentum potential board. */
+  potentialRankGrowth?: number | null;
+  /** 1-based rank on stable/composite potential board. */
+  potentialRankStable?: number | null;
+  potentialListSize?: number;
 }
 
 export interface PotentialBreakdown {
@@ -728,4 +742,84 @@ export interface AIAnalysisResult {
   rubric?: RubricBlock;
   /** Gợi ý bổ sung thư viện JSON khi thiếu khớp Genre/Developer/... */
   libraryRequests?: LibraryRequestItem[];
+}
+
+/** Rút gọn kết quả AI cho trang so sánh. */
+export interface CompareAnalysisSummary {
+  available: boolean;
+  analyzedAt?: string;
+  weightedScore?: number | null;
+  band5?: number | null;
+  decision?: RubricTestDecision | null;
+  partRollups?: RubricPartRollup[];
+  redFlagAtAGlance?: RedFlagAtAGlance | null;
+}
+
+/** Một game trong overview so sánh. */
+export interface CompareGameEntry {
+  appId: number;
+  detail: {
+    appId: number;
+    title: string;
+    iconUrl: string | null;
+    rating: string | null;
+    reviewCount: number | null;
+    fansCount: number | null;
+    reserveCount: number | null;
+    hitsTotal: number | null;
+    releaseDate?: string | null;
+    androidRank: number | null;
+    iosRank: number | null;
+    actualReviewCount: number;
+    reviewDistribution: Record<string, number>;
+    history: Array<{
+      date: string;
+      androidRank: number | null;
+      iosRank: number | null;
+      rating: string | null;
+      reviewCount: number | null;
+      fansCount: number | null;
+      reserveCount: number | null;
+    }>;
+  };
+  potential: PotentialBreakdown;
+  analysisSummary: CompareAnalysisSummary;
+}
+
+export interface CompareOverview {
+  appIds: number[];
+  days: number;
+  platform: "combined" | "android" | "ios";
+  games: CompareGameEntry[];
+}
+
+export interface ComparePartGameVerdict {
+  score: number | null;
+  verdict: string;
+}
+
+export interface ComparePartResult {
+  partId: string;
+  labelVi: string;
+  byGame: Record<number, ComparePartGameVerdict>;
+  winnerAppId: number | null;
+  note: string;
+}
+
+export interface GameComparisonAI {
+  summaryBullets: string[];
+  perPart: ComparePartResult[];
+  strengthsByGame: Record<number, string[]>;
+  weaknessesByGame: Record<number, string[]>;
+  overallRecommendation: string;
+  bestForTestAppId: number | null;
+  genrePackNote?: string | null;
+}
+
+/** Kết quả so sánh AI đã lưu DB. */
+export interface SavedGameComparison {
+  compareId: string;
+  appIds: number[];
+  comparedAt: string;
+  comparison: GameComparisonAI;
 }

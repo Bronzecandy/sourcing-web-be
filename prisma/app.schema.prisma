@@ -31,6 +31,7 @@ model User {
   updatedAt   DateTime         @updatedAt @db.Timestamptz(6)
   permissions  UserPermission[]
   aiAnalyses   UserAiAnalysis[]
+  aiCompares   UserAiCompare[]
 }
 
 model UserPermission {
@@ -83,4 +84,19 @@ model UserAiAnalysis {
   @@index([userId])
   @@index([userId, appId])
   @@index([appId, analyzedAt(sort: Desc)])
+}
+
+/// Kết quả so sánh AI nhiều game (theo bộ appIds).
+model UserAiCompare {
+  id         String   @id @default(cuid())
+  userId     String
+  appIdsKey  String
+  appIds     Json
+  comparedAt DateTime @db.Timestamptz(6)
+  payload    Json
+  createdAt  DateTime @default(now()) @db.Timestamptz(6)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([appIdsKey, comparedAt(sort: Desc)])
+  @@index([userId])
 }

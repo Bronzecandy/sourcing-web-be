@@ -1,6 +1,6 @@
 import { Router } from "express";
 import multer from "multer";
-import { aiAnalysisService } from "../services/ai-analysis.service";
+import { aiAnalysisService, CompareMissingAnalysisError } from "../services/ai-analysis.service";
 import {
   parseAppIdFromInput,
   fetchAppInfo,
@@ -35,6 +35,11 @@ import type { AuthedRequest } from "../middleware/auth";
 import type { Response } from "express";
 import { beginAnalysisStream, endAnalysisStream } from "../utils/analysis-active-guard";
 import { logDiagBrief, logDiagError } from "../utils/process-diagnostics";
+import {
+  getCompareHistoryForAppIds,
+  getLatestCompareForAppIds,
+  saveCompareResult,
+} from "../services/ai-compare-store";
 
 const router = Router();
 
@@ -696,6 +701,109 @@ router.post("/analyze-csv", upload.single("file"), async (req: AuthedRequest, re
     clearInterval(keepAlive);
     console.error("[analysis route] POST analyze-csv:", err);
     const message = err instanceof Error ? err.message : "CSV analysis failed";
+    res.end(JSON.stringify({ success: false, error: message }));
+  }
+});
+
+function parseCompareAppIds(raw: unknown): number[] | null {
+  const idsStr = String(raw ?? "");
+  const ids = [...new Set(idsStr.split(",").map(Number).filter((n) => Number.isFinite(n) && n > 0))];
+  if (ids.length < 2 || ids.length > 4) return null;
+  return ids;
+}
+
+router.get("/compare/latest", async (req: AuthedRequest, res) => {
+  if (!actorUserId(req, res)) return;
+  const appIds = parseCompareAppIds(req.query.ids);
+  if (!appIds) {
+    res.status(400).json({ success: false, error: "Provide 2 to 4 app ids" });
+    return;
+  }
+  try {
+    const latest = await getLatestCompareForAppIds(appIds);
+    res.json({ success: true, data: latest });
+  } catch (err) {
+    console.error("[analysis route] GET compare/latest:", err);
+    res.status(500).json({ success: false, error: "Failed to load compare result" });
+  }
+});
+
+router.get("/compare/history", async (req: AuthedRequest, res) => {
+  if (!actorUserId(req, res)) return;
+  const appIds = parseCompareAppIds(req.query.ids);
+  if (!appIds) {
+    res.status(400).json({ success: false, error: "Provide 2 to 4 app ids" });
+    return;
+  }
+  const limit = parseInt(String(req.query.limit ?? "10"), 10) || 10;
+  try {
+    const rows = await getCompareHistoryForAppIds(appIds, limit);
+    res.json({ success: true, data: rows });
+  } catch (err) {
+    console.error("[analysis route] GET compare/history:", err);
+    res.status(500).json({ success: false, error: "Failed to load compare history" });
+  }
+});
+
+router.post("/compare", async (req: AuthedRequest, res) => {
+  const userId = actorUserId(req, res);
+  if (!userId) return;
+
+  const rawIds = req.body?.appIds;
+  const appIds = Array.isArray(rawIds)
+    ? rawIds.map((x) => Number(x)).filter((n) => Number.isFinite(n) && n > 0)
+    : [];
+
+  if (appIds.length < 2 || appIds.length > 4) {
+    res.status(400).json({ success: false, error: "Provide 2 to 4 app ids" });
+    return;
+  }
+
+  logDiagBrief("api-ai-compare", { appIds: appIds.join(","), stream: wantsAnalysisStream(req.body) });
+
+  if (wantsAnalysisStream(req.body)) {
+    beginAnalysisStream(`compare-${appIds.join("-")}`);
+    const out = createAnalysisStreamWriter(res);
+    const progress = streamProgressReporter((e) => out.report(e));
+    try {
+      progress({ percent: 1, phase: "start", message: "Bắt đầu so sánh AI…" });
+      const result = await aiAnalysisService.compareStoredAnalyses(appIds, progress);
+      const saved = await saveCompareResult(userId, appIds, result);
+      out.done(saved);
+    } catch (err) {
+      console.error("[analysis route] POST compare (stream):", err);
+      if (err instanceof CompareMissingAnalysisError) {
+        out.fail(err.message, { code: err.code, missing: err.missing });
+      } else {
+        out.fail(err instanceof Error ? err.message : "Compare failed");
+      }
+    } finally {
+      endAnalysisStream(`compare-${appIds.join("-")}`);
+    }
+    return;
+  }
+
+  const keepAlive = startKeepAlive(res);
+  try {
+    const result = await aiAnalysisService.compareStoredAnalyses(appIds);
+    const saved = await saveCompareResult(userId, appIds, result);
+    clearInterval(keepAlive);
+    res.end(JSON.stringify({ success: true, data: saved }));
+  } catch (err) {
+    clearInterval(keepAlive);
+    console.error("[analysis route] POST compare:", err);
+    if (err instanceof CompareMissingAnalysisError) {
+      res.end(
+        JSON.stringify({
+          success: false,
+          error: err.message,
+          code: err.code,
+          missing: err.missing,
+        }),
+      );
+      return;
+    }
+    const message = err instanceof Error ? err.message : "Compare failed";
     res.end(JSON.stringify({ success: false, error: message }));
   }
 });

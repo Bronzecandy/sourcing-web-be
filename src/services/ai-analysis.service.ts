@@ -1,7 +1,7 @@
 import { callLLM, getModel } from "../utils/ai-client";
 import { pool } from "../utils/prisma";
 import { prisma } from "../utils/prisma";
-import type { AIAnalysisResult, TapTapRawApp, PotentialBreakdown, AnalysisPrepareResult, AnalysisPrepareExistingItem, GenrePackPlan } from "../types";
+import type { AIAnalysisResult, TapTapRawApp, PotentialBreakdown, AnalysisPrepareResult, AnalysisPrepareExistingItem, GenrePackPlan, GameComparisonAI } from "../types";
 import type { AnalysisProgressReporter } from "../types/analysis-progress";
 import {
   createProgressStepReporter,
@@ -43,6 +43,7 @@ import {
   listAnalysesForUser,
   saveAnalysisForUser,
 } from "./ai-analysis-store";
+import { gameService } from "./game.service";
 import { isRetryableDbError, withDbRetry } from "../utils/db-retry";
 import { runDbQuery } from "../utils/db-diagnostics";
 import { classifyPgError, serializePgError } from "../utils/pg-error";
@@ -1104,6 +1105,120 @@ function bulletsFromLegacyParagraph(text: string): string[] {
   return sentences.length > 0 ? sentences : [t];
 }
 
+export class CompareMissingAnalysisError extends Error {
+  readonly code = "MISSING_ANALYSIS" as const;
+
+  constructor(public readonly missing: Array<{ appId: number; gameName?: string }>) {
+    super(
+      `Missing AI analysis for: ${missing.map((m) => m.gameName ?? `appId ${m.appId}`).join(", ")}`,
+    );
+    this.name = "CompareMissingAnalysisError";
+  }
+}
+
+const SYSTEM_COMPARE = `Bạn là chuyên gia sourcing game mobile. So sánh các game dựa trên rubric đã phân tích sẵn (điểm, điểm mạnh/yếu theo tiêu chí).
+Trả về JSON thuần (không markdown) đúng schema:
+{
+  "summaryBullets": ["..."],
+  "perPart": [{ "partId": "...", "labelVi": "...", "byGame": { "<appId>": { "score": number|null, "verdict": "..." } }, "winnerAppId": number|null, "note": "..." }],
+  "strengthsByGame": { "<appId>": ["..."] },
+  "weaknessesByGame": { "<appId>": ["..."] },
+  "overallRecommendation": "...",
+  "bestForTestAppId": number|null,
+  "genrePackNote": "..." | null
+}
+Viết tiếng Việt. So sánh công bằng theo các part/tiêu chí chung. Ghi chú nếu genre pack khác nhau giữa các game.`;
+
+function buildComparePrompt(analyses: AIAnalysisResult[]): string {
+  const blocks = analyses.map((a) => {
+    const rubric = a.rubric;
+    const criteria = rubric?.criteria ?? [];
+    const criteriaLines = criteria
+      .filter((c) => c.partId !== "red_flag")
+      .map((c) => {
+        const strengths = (c.strengths ?? []).join("; ") || "—";
+        const weaknesses = (c.weaknesses ?? []).join("; ") || "—";
+        return `  - [${c.partId}] ${c.elementVi}: score=${c.score ?? "null"} | mạnh: ${strengths} | yếu: ${weaknesses}`;
+      })
+      .join("\n");
+    const packs =
+      rubric?.genrePacksResolved?.map((p) => `${p.packId}(${p.weight})`).join(", ") ??
+      rubric?.genrePackResolved ??
+      "base";
+    return `### Game appId=${a.appId} "${a.gameName ?? "?"}"
+Genre packs: ${packs}
+Điểm tổng rubric: ${rubric?.aggregate.weightedScore ?? a.sentimentScore} | band5: ${rubric?.aggregate.band5 ?? "—"} | quyết định: ${rubric?.aggregate.decision ?? "—"}
+Red flag: ${a.redFlagAtAGlance?.headlineVi ?? "—"} (risk=${a.redFlagAtAGlance?.riskLevel ?? "—"})
+Tiêu chí:
+${criteriaLines}`;
+  });
+
+  const partIds = new Set<string>();
+  for (const a of analyses) {
+    for (const c of a.rubric?.criteria ?? []) {
+      if (c.partId !== "red_flag") partIds.add(c.partId);
+    }
+  }
+
+  return `So sánh ${analyses.length} game theo rubric đã lưu. Ưu tiên các part: ${[...partIds].join(", ")}.
+
+${blocks.join("\n\n")}
+
+Yêu cầu:
+1. summaryBullets: 3–6 ý tổng quan so sánh.
+2. perPart: mỗi part chung có winnerAppId (appId số) và note ngắn.
+3. strengthsByGame / weaknessesByGame: 3–5 bullet mỗi game, tổng hợp từ rubric.
+4. overallRecommendation: khuyến nghị sourcing ngắn gọn.
+5. bestForTestAppId: game nên ưu tiên test (appId số) hoặc null.`;
+}
+
+function parseCompareResult(raw: Record<string, unknown>, appIds: number[]): GameComparisonAI {
+  const toNumRecord = (obj: unknown): Record<number, string[]> => {
+    if (!obj || typeof obj !== "object") return {};
+    const out: Record<number, string[]> = {};
+    for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+      const id = Number(k);
+      if (!Number.isFinite(id)) continue;
+      out[id] = Array.isArray(v) ? v.map(String) : [];
+    }
+    return out;
+  };
+
+  const perPartRaw = Array.isArray(raw.perPart) ? raw.perPart : [];
+  const perPart = perPartRaw.map((p) => {
+    const row = p as Record<string, unknown>;
+    const byGameRaw = (row.byGame ?? {}) as Record<string, unknown>;
+    const byGame: GameComparisonAI["perPart"][0]["byGame"] = {};
+    for (const id of appIds) {
+      const cell = byGameRaw[String(id)] as Record<string, unknown> | undefined;
+      byGame[id] = {
+        score: cell?.score != null ? Number(cell.score) : null,
+        verdict: String(cell?.verdict ?? ""),
+      };
+    }
+    const winner = row.winnerAppId != null ? Number(row.winnerAppId) : null;
+    return {
+      partId: String(row.partId ?? ""),
+      labelVi: String(row.labelVi ?? row.partId ?? ""),
+      byGame,
+      winnerAppId: winner != null && Number.isFinite(winner) ? winner : null,
+      note: String(row.note ?? ""),
+    };
+  });
+
+  const best = raw.bestForTestAppId != null ? Number(raw.bestForTestAppId) : null;
+
+  return {
+    summaryBullets: Array.isArray(raw.summaryBullets) ? raw.summaryBullets.map(String) : [],
+    perPart,
+    strengthsByGame: toNumRecord(raw.strengthsByGame),
+    weaknessesByGame: toNumRecord(raw.weaknessesByGame),
+    overallRecommendation: String(raw.overallRecommendation ?? ""),
+    bestForTestAppId: best != null && Number.isFinite(best) ? best : null,
+    genrePackNote: raw.genrePackNote != null ? String(raw.genrePackNote) : null,
+  };
+}
+
 export class AIAnalysisService {
   async getAnalysisById(analysisId: string): Promise<AIAnalysisResult | null> {
     return fetchStoredAnalysisById(analysisId);
@@ -1150,6 +1265,52 @@ export class AIAnalysisService {
 
   async deleteAllAnalyses(userId: string, appId: number): Promise<number> {
     return deleteAllAnalysesForUser(userId, appId);
+  }
+
+  async compareStoredAnalyses(
+    appIds: number[],
+    onProgress?: AnalysisProgressReporter,
+  ): Promise<GameComparisonAI> {
+    const report = onProgress ?? (() => {});
+    report({ percent: 5, phase: "load", message: "Đang tải kết quả phân tích đã lưu…" });
+
+    const loaded = await Promise.all(
+      appIds.map(async (appId) => ({
+        appId,
+        analysis: await getLatestAnalysisForApp(appId),
+      })),
+    );
+
+    const missing: Array<{ appId: number; gameName?: string }> = [];
+    for (const row of loaded) {
+      if (!row.analysis) {
+        const detail = await gameService.getGameDetail(row.appId, { kind: "days", days: 7 });
+        missing.push({ appId: row.appId, gameName: detail?.title });
+      }
+    }
+    if (missing.length > 0) {
+      throw new CompareMissingAnalysisError(missing);
+    }
+
+    const analyses = loaded.map((r) => r.analysis!);
+    report({ percent: 25, phase: "prompt", message: "Đang soạn prompt so sánh…" });
+
+    const userPrompt = buildComparePrompt(analyses);
+    report({ percent: 40, phase: "llm", message: "Đang chạy AI so sánh…" });
+
+    const response = await runWithLlmHeartbeat(
+      onProgress,
+      45,
+      82,
+      "AI so sánh game",
+      () => callLLM(SYSTEM_COMPARE, userPrompt, 8_192),
+    );
+
+    report({ percent: 85, phase: "parse", message: "Đang xử lý kết quả…" });
+    const parsed = parseLlmJsonOutput(response.content);
+    const result = parseCompareResult(parsed, appIds);
+    report({ percent: 100, phase: "done", message: "Hoàn tất so sánh AI" });
+    return result;
   }
 
   private async runLLMAnalysis(

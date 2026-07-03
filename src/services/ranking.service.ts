@@ -36,9 +36,9 @@ import {
 } from "../utils/distribution-percentile";
 
 // Distribution tier pillars; bump when the formula changes so caches refresh.
-const ALGO_VERSION_RESERVE = "v9";
-const ALGO_VERSION_LAUNCHED = "v15";
-const BREAKDOWN_VERSION = "v9";
+const ALGO_VERSION_RESERVE = "v11";
+const ALGO_VERSION_LAUNCHED = "v17";
+const BREAKDOWN_VERSION = "v11";
 
 /** Base chart-quality score by primary board (Pop > Hot > New). */
 const LAUNCH_CHART_BASE: Record<PrimaryLaunchBoard, number> = {
@@ -108,6 +108,19 @@ export class RankingService {
 
   private static r1(v: number) {
     return Math.round(v * 10) / 10;
+  }
+
+  /** Growth-table score: absolute audience delta tier (75%) + rank movement (25%). */
+  private static computeMomentumScore(
+    audience: { start: number | null; end: number | null; delta: number },
+    movementScore: number,
+  ): number {
+    const C = RankingService.clamp;
+    const R = RankingService.r1;
+    const hasWindow = audience.start != null && audience.end != null;
+    const growthTier = tierGrowthDelta(hasWindow ? audience.delta : 0);
+    const growthNorm = C(50 + (growthTier?.points ?? 0));
+    return R(0.75 * growthNorm + 0.25 * movementScore);
   }
 
   /** Stricter rank tiers: rewards consistent top-10/20, not just "in top 200". */
@@ -284,10 +297,10 @@ export class RankingService {
 
   private scoreConfidence(dataPoints: number, analysisDays: number) {
     const coverage = Math.min(dataPoints / analysisDays, 1);
-    const multiplier = RankingService.clamp(coverage, 0.3, 1);
     return {
       coverage: RankingService.r1(coverage * 100),
-      multiplier: Math.round(multiplier * 1000) / 1000,
+      /** @deprecated Not applied to scores — informational coverage only. */
+      multiplier: 1,
       dataPoints: Math.min(dataPoints, analysisDays),
       analysisDays,
     };
@@ -510,10 +523,7 @@ export class RankingService {
     const rating = this.scoreRating(ratings);
     const rankQuality = this.scoreRankQuality(ranks, analysisDays);
 
-    let confidence = this.scoreConfidence(validRows.length, analysisDays);
-    if (segment === "launched" && validRows.length < 3) {
-      confidence = { ...confidence, multiplier: Math.min(confidence.multiplier, 0.85) };
-    }
+    const confidence = this.scoreConfidence(validRows.length, analysisDays);
 
     let launchBoard: ReturnType<RankingService["scoreLaunchBoard"]> | undefined;
     let preLaunchRaw = 0;
@@ -565,7 +575,7 @@ export class RankingService {
       );
     }
 
-    const compositeScore = RankingService.clamp(rawComposite * confidence.multiplier, 0, 100);
+    const compositeScore = RankingService.clamp(rawComposite, 0, 100);
     const R = RankingService.r1;
     const preLaunchScoreOut =
       segment === "launched" ? R(RankingService.clamp((preLaunchRaw / 3) * 100)) : undefined;
@@ -646,6 +656,17 @@ export class RankingService {
     const trend: "up" | "down" | "stable" =
       lastRank < firstRank - threshold ? "up" : lastRank > firstRank + threshold ? "down" : "stable";
 
+    const audienceDelta =
+      detail.audience.start != null && detail.audience.end != null ? detail.audience.delta : null;
+    const audienceGrowthRate =
+      audienceDelta != null && detail.audience.start != null && detail.audience.start > 0
+        ? R((audienceDelta / detail.audience.start) * 1000) / 10
+        : null;
+    const momentumScore = RankingService.computeMomentumScore(
+      detail.audience,
+      detail.rankQuality.movementScore,
+    );
+
     const out: PotentialScoreResult = {
       appId,
       title: latest.title ?? `App #${appId}`,
@@ -671,6 +692,9 @@ export class RankingService {
       fansCount: latest.fansCount ?? null,
       trend,
       segment,
+      audienceGrowthAbsolute: audienceDelta,
+      audienceGrowthRate,
+      momentumScore,
     };
 
     if (segment === "launched") {
@@ -693,7 +717,56 @@ export class RankingService {
   ): GamePotentialDetail | null {
     if (appRows.length < 2) return null;
     const computed = this.computePillars(appRows, days, platform, segment);
-    return computed ? computed.detail : null;
+    if (!computed) return null;
+    return this.enrichGamePotentialDetail(computed.detail);
+  }
+
+  private enrichGamePotentialDetail(detail: GamePotentialDetail): GamePotentialDetail {
+    const R = RankingService.r1;
+    const aud = detail.audience;
+    const audienceDelta = aud.start != null && aud.end != null ? aud.delta : null;
+    const audienceGrowthRate =
+      audienceDelta != null && aud.start != null && aud.start > 0
+        ? R((audienceDelta / aud.start) * 1000) / 10
+        : null;
+    const momentumScore = RankingService.computeMomentumScore(aud, detail.rankQuality.movementScore);
+    return {
+      ...detail,
+      audienceGrowthAbsolute: audienceDelta,
+      audienceGrowthRate,
+      momentumScore,
+    };
+  }
+
+  private findPotentialRanks(
+    appId: number,
+    list: PotentialScoreResult[],
+  ): { growth: number | null; stable: number | null; total: number } {
+    if (list.length === 0) return { growth: null, stable: null, total: 0 };
+    const growthSorted = [...list].sort(
+      (a, b) => (b.momentumScore ?? -Infinity) - (a.momentumScore ?? -Infinity),
+    );
+    const stableSorted = [...list].sort((a, b) => b.compositeScore - a.compositeScore);
+    const gi = growthSorted.findIndex((s) => s.appId === appId);
+    const si = stableSorted.findIndex((s) => s.appId === appId);
+    return {
+      growth: gi >= 0 ? gi + 1 : null,
+      stable: si >= 0 ? si + 1 : null,
+      total: list.length,
+    };
+  }
+
+  private attachPotentialRanks(
+    detail: GamePotentialDetail | null,
+    ranks: { growth: number | null; stable: number | null; total: number },
+  ): GamePotentialDetail | null {
+    if (!detail) return null;
+    return {
+      ...detail,
+      potentialRankGrowth: ranks.growth,
+      potentialRankStable: ranks.stable,
+      potentialListSize: ranks.total,
+    };
   }
 
   async getGamePotentialDetail(
@@ -734,10 +807,22 @@ export class RankingService {
         };
         const reserveRows = await this.resolveAppRowsForScoring(appId, days, "reserve");
         const launchRows = await this.resolveAppRowsForScoring(appId, days, "launched");
+        const [reserveList, launchedList] = await Promise.all([
+          this.calculatePotentialScores(days, platform, "reserve"),
+          this.calculatePotentialScores(days, platform, "launched"),
+        ]);
+        const reserveRanks = this.findPotentialRanks(appId, reserveList);
+        const launchedRanks = this.findPotentialRanks(appId, launchedList);
         return {
           lifecycle,
-          reserve: this.buildGamePotentialDetailFromRows(reserveRows, days, platform, "reserve"),
-          launched: this.buildGamePotentialDetailFromRows(launchRows, days, platform, "launched"),
+          reserve: this.attachPotentialRanks(
+            this.buildGamePotentialDetailFromRows(reserveRows, days, platform, "reserve"),
+            reserveRanks,
+          ),
+          launched: this.attachPotentialRanks(
+            this.buildGamePotentialDetailFromRows(launchRows, days, platform, "launched"),
+            launchedRanks,
+          ),
         };
       },
     );

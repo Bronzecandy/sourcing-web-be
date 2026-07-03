@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { gameService } from "../services/game.service";
+import { compareService } from "../services/compare.service";
 import type { RankingQuery } from "../types";
 
 const router = Router();
@@ -35,6 +36,35 @@ router.get("/tags", async (req, res) => {
   const date = req.query.date ? String(req.query.date) : undefined;
   const tags = await gameService.getTags(date);
   res.json({ success: true, data: tags });
+});
+
+router.get("/compare-overview", async (req, res) => {
+  const idsStr = String(req.query.ids ?? "");
+  const ids = idsStr
+    .split(",")
+    .map(Number)
+    .filter(Boolean);
+  const days = parseInt(String(req.query.days ?? "30"), 10) || 30;
+  const platformRaw = String(req.query.platform ?? "combined");
+  const platform =
+    platformRaw === "android" || platformRaw === "ios" ? platformRaw : "combined";
+
+  if (ids.length < 2 || ids.length > 4) {
+    res.status(400).json({ success: false, error: "Provide 2 to 4 app ids" });
+    return;
+  }
+
+  try {
+    const result = await compareService.buildCompareOverview(ids, days, platform);
+    if (result.games.length < 2) {
+      res.status(404).json({ success: false, error: "Not enough games found for comparison" });
+      return;
+    }
+    res.json({ success: true, data: result });
+  } catch (err) {
+    console.error("[game route] GET compare-overview:", err);
+    res.status(500).json({ success: false, error: "Failed to build compare overview" });
+  }
 });
 
 router.get("/compare", async (req, res) => {
