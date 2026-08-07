@@ -39,11 +39,26 @@ import {
 } from "../utils/distribution-percentile";
 
 // Distribution tier pillars; bump when the formula changes so caches refresh.
-const ALGO_VERSION_RESERVE = "v12";
-const ALGO_VERSION_LAUNCHED = "v18";
-const BREAKDOWN_VERSION = "v12";
+const ALGO_VERSION_RESERVE = "v13";
+const ALGO_VERSION_LAUNCHED = "v19";
+const BREAKDOWN_VERSION = "v13";
 
+/** Window lengths used when sampling historical Δ/day for absCap. */
 const GROWTH_CALIBRATION_WINDOWS = [7, 14, 30] as const;
+/** Space sliding end-dates when scanning full AppRank history (days). */
+const GROWTH_CALIBRATION_STEP_DAYS = Math.max(
+  1,
+  parseInt(process.env.GROWTH_CALIBRATION_STEP_DAYS ?? "7", 10) || 7,
+);
+/**
+ * How far back to build absCap distribution.
+ * `0` (default) = toàn bộ AppRank từ trước tới giờ.
+ * >0 = chỉ N ngày gần nhất (dev / giảm tải DB).
+ */
+const GROWTH_CALIBRATION_LOOKBACK_DAYS = Math.max(
+  0,
+  parseInt(process.env.GROWTH_CALIBRATION_LOOKBACK_DAYS ?? "0", 10) || 0,
+);
 const GROWTH_CALIBRATION_TTL_MS = Math.max(
   60_000,
   parseInt(process.env.GROWTH_CALIBRATION_TTL_MS ?? "21600000", 10) || 21_600_000,
@@ -171,32 +186,65 @@ export class RankingService {
     return delta / windowDays;
   }
 
-  private sliceAppRowsForWindow(appRows: AppRankRow[], windowDays: number): AppRankRow[] {
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - windowDays);
-    return appRows.filter((r) => r.date >= cutoff);
+  private sliceAppRowsEndingAt(
+    appRows: AppRankRow[],
+    windowDays: number,
+    endDate: Date,
+  ): AppRankRow[] {
+    const endMs = endDate.getTime();
+    const cutoffMs = endMs - windowDays * 86_400_000;
+    return appRows.filter((r) => {
+      const t = r.date.getTime();
+      return t > cutoffMs && t <= endMs;
+    });
   }
 
+  /**
+   * absCap distribution: Δ/day samples across AppRank history (not same-period cohort).
+   * Slides 7/14/30-day windows over each app's timeline so the ceiling reflects
+   * "từ trước tới giờ", independent of who happens to be on the board this week.
+   */
   private async buildGrowthCalibrationForSegment(
     segment: PotentialSegment,
     platform: "combined" | "android" | "ios",
   ): Promise<GrowthCalibration> {
     const perDaySamples: number[] = [];
-    const maxWindow = Math.max(...GROWTH_CALIBRATION_WINDOWS);
-    const rows = await this.fetchLightRows(maxWindow);
+    const rows =
+      GROWTH_CALIBRATION_LOOKBACK_DAYS > 0
+        ? await this.fetchLightRows(GROWTH_CALIBRATION_LOOKBACK_DAYS)
+        : await this.fetchAllLightRows();
     const grouped = new Map<number, AppRankRow[]>();
     for (const row of rows) {
       if (!grouped.has(row.appId)) grouped.set(row.appId, []);
       grouped.get(row.appId)!.push(row);
     }
 
-    for (const windowDays of GROWTH_CALIBRATION_WINDOWS) {
-      for (const [, appRows] of grouped) {
-        if (segment === "reserve" && !this.isReserveOnlyApp(appRows)) continue;
-        if (segment === "launched" && !this.isLaunchedApp(appRows)) continue;
-        const windowRows = this.sliceAppRowsForWindow(appRows, windowDays);
-        const perDay = this.deltaPerDayForAppRows(windowRows, windowDays, platform, segment);
-        if (perDay != null && Number.isFinite(perDay)) perDaySamples.push(perDay);
+    const stepMs = GROWTH_CALIBRATION_STEP_DAYS * 86_400_000;
+
+    for (const [, appRows] of grouped) {
+      if (appRows.length < 2) continue;
+
+      for (const windowDays of GROWTH_CALIBRATION_WINDOWS) {
+        let lastSampleEndMs = Number.NEGATIVE_INFINITY;
+
+        for (let endIdx = 1; endIdx < appRows.length; endIdx++) {
+          const endRow = appRows[endIdx]!;
+          const endMs = endRow.date.getTime();
+          if (endMs - lastSampleEndMs < stepMs) continue;
+
+          const windowRows = this.sliceAppRowsEndingAt(appRows, windowDays, endRow.date);
+          if (windowRows.length < 2) continue;
+
+          // Classify by state inside this historical window (not only "today").
+          if (segment === "reserve" && !this.isReserveOnlyApp(windowRows)) continue;
+          if (segment === "launched" && !this.isLaunchedApp(windowRows)) continue;
+
+          const perDay = this.deltaPerDayForAppRows(windowRows, windowDays, platform, segment);
+          if (perDay != null && Number.isFinite(perDay)) {
+            perDaySamples.push(perDay);
+            lastSampleEndMs = endMs;
+          }
+        }
       }
     }
 
@@ -1089,6 +1137,15 @@ export class RankingService {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - days);
     const { rows } = await pool.query<AppRankRow>(APP_RANK_LIGHT_SELECT_SQL, [cutoff]);
+    return rows;
+  }
+
+  /** Full AppRank light history — used for absCap calibration (từ trước tới giờ). */
+  private async fetchAllLightRows(): Promise<AppRankRow[]> {
+    const { rows } = await pool.query<AppRankRow>(
+      APP_RANK_LIGHT_SELECT_SQL,
+      [new Date(0)],
+    );
     return rows;
   }
 
