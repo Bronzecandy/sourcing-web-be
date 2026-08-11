@@ -9,28 +9,46 @@ function parseSegment(raw: unknown): "reserve" | "launched" {
 }
 
 router.get("/potential", async (req, res) => {
-  const days = parseInt(String(req.query.days ?? "14"));
-  const platform = (req.query.platform as "combined" | "android" | "ios") || "combined";
-  const segment = parseSegment(req.query.segment);
-  const scores = await rankingService.calculatePotentialScores(days, platform, segment);
-  res.json({ success: true, data: scores });
+  try {
+    const days = parseInt(String(req.query.days ?? "14"));
+    const platform = (req.query.platform as "combined" | "android" | "ios") || "combined";
+    const segment = parseSegment(req.query.segment);
+    const scores = await rankingService.calculatePotentialScores(days, platform, segment);
+    res.json({ success: true, data: scores });
+  } catch (err) {
+    console.error("[ranking route] GET /potential:", err);
+    const message = err instanceof Error ? err.message : "Failed to load potential";
+    res.status(503).json({ success: false, error: message });
+  }
 });
 
 router.get("/potential/:appId/breakdown", async (req, res) => {
-  const appId = parseInt(req.params.appId);
-  const days = parseInt(String(req.query.days ?? "14"));
-  const platform = (req.query.platform as "combined" | "android" | "ios") || "combined";
-  const data = await rankingService.getGamePotentialBreakdown(appId, days, platform);
-  res.json({ success: true, data });
+  try {
+    const appId = parseInt(req.params.appId);
+    const days = parseInt(String(req.query.days ?? "14"));
+    const platform = (req.query.platform as "combined" | "android" | "ios") || "combined";
+    const data = await rankingService.getGamePotentialBreakdown(appId, days, platform);
+    res.json({ success: true, data });
+  } catch (err) {
+    console.error("[ranking route] GET /potential/:appId/breakdown:", err);
+    const message = err instanceof Error ? err.message : "Failed to load potential breakdown";
+    res.status(503).json({ success: false, error: message });
+  }
 });
 
 router.get("/potential/:appId", async (req, res) => {
-  const appId = parseInt(req.params.appId);
-  const days = parseInt(String(req.query.days ?? "14"));
-  const platform = (req.query.platform as "combined" | "android" | "ios") || "combined";
-  const segment = parseSegment(req.query.segment);
-  const detail = await rankingService.getGamePotentialDetail(appId, days, platform, segment);
-  res.json({ success: true, data: detail });
+  try {
+    const appId = parseInt(req.params.appId);
+    const days = parseInt(String(req.query.days ?? "14"));
+    const platform = (req.query.platform as "combined" | "android" | "ios") || "combined";
+    const segment = parseSegment(req.query.segment);
+    const detail = await rankingService.getGamePotentialDetail(appId, days, platform, segment);
+    res.json({ success: true, data: detail });
+  } catch (err) {
+    console.error("[ranking route] GET /potential/:appId:", err);
+    const message = err instanceof Error ? err.message : "Failed to load potential detail";
+    res.status(503).json({ success: false, error: message });
+  }
 });
 
 router.get("/reserve-growth", async (req, res) => {

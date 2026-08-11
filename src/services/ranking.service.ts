@@ -1,5 +1,6 @@
 import { pool } from "../utils/prisma";
-import { getCachedOrFetch } from "../utils/cache";
+import { getCachedOrFetch, pruneCacheKeyPrefix } from "../utils/cache";
+import { withDbRetry } from "../utils/db-retry";
 import type {
   PotentialScoreResult,
   PotentialScaleMetric,
@@ -45,19 +46,26 @@ const BREAKDOWN_VERSION = "v13";
 
 /** Window lengths used when sampling historical Δ/day for absCap. */
 const GROWTH_CALIBRATION_WINDOWS = [7, 14, 30] as const;
-/** Space sliding end-dates when scanning full AppRank history (days). */
+/** Space sliding end-dates when scanning AppRank history (days). */
 const GROWTH_CALIBRATION_STEP_DAYS = Math.max(
   1,
   parseInt(process.env.GROWTH_CALIBRATION_STEP_DAYS ?? "7", 10) || 7,
 );
 /**
  * How far back to build absCap distribution.
- * `0` (default) = toàn bộ AppRank từ trước tới giờ.
- * >0 = chỉ N ngày gần nhất (dev / giảm tải DB).
+ * Default 365 days = long historical spectrum (not same-period cohort).
+ * `0` = toàn bộ AppRank (nặng — dễ treo API / OOM trên VM).
  */
-const GROWTH_CALIBRATION_LOOKBACK_DAYS = Math.max(
+const GROWTH_CALIBRATION_LOOKBACK_DAYS = (() => {
+  const raw = process.env.GROWTH_CALIBRATION_LOOKBACK_DAYS;
+  if (raw === undefined || raw === "") return 365;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 0 ? n : 365;
+})();
+/** Max time request path waits for calibration before using tier fallback. */
+const GROWTH_CALIBRATION_WAIT_MS = Math.max(
   0,
-  parseInt(process.env.GROWTH_CALIBRATION_LOOKBACK_DAYS ?? "0", 10) || 0,
+  parseInt(process.env.GROWTH_CALIBRATION_WAIT_MS ?? "2500", 10) || 2500,
 );
 const GROWTH_CALIBRATION_TTL_MS = Math.max(
   60_000,
@@ -186,33 +194,15 @@ export class RankingService {
     return delta / windowDays;
   }
 
-  private sliceAppRowsEndingAt(
-    appRows: AppRankRow[],
-    windowDays: number,
-    endDate: Date,
-  ): AppRankRow[] {
-    const endMs = endDate.getTime();
-    const cutoffMs = endMs - windowDays * 86_400_000;
-    return appRows.filter((r) => {
-      const t = r.date.getTime();
-      return t > cutoffMs && t <= endMs;
-    });
-  }
-
   /**
-   * absCap distribution: Δ/day samples across AppRank history (not same-period cohort).
-   * Slides 7/14/30-day windows over each app's timeline so the ceiling reflects
-   * "từ trước tới giờ", independent of who happens to be on the board this week.
+   * absCap samples from a preloaded AppRank light window (shared across segments).
    */
-  private async buildGrowthCalibrationForSegment(
+  private collectGrowthCalibrationSamples(
+    rows: AppRankRow[],
     segment: PotentialSegment,
     platform: "combined" | "android" | "ios",
-  ): Promise<GrowthCalibration> {
+  ): GrowthCalibration {
     const perDaySamples: number[] = [];
-    const rows =
-      GROWTH_CALIBRATION_LOOKBACK_DAYS > 0
-        ? await this.fetchLightRows(GROWTH_CALIBRATION_LOOKBACK_DAYS)
-        : await this.fetchAllLightRows();
     const grouped = new Map<number, AppRankRow[]>();
     for (const row of rows) {
       if (!grouped.has(row.appId)) grouped.set(row.appId, []);
@@ -225,6 +215,8 @@ export class RankingService {
       if (appRows.length < 2) continue;
 
       for (const windowDays of GROWTH_CALIBRATION_WINDOWS) {
+        const windowMs = windowDays * 86_400_000;
+        let startIdx = 0;
         let lastSampleEndMs = Number.NEGATIVE_INFINITY;
 
         for (let endIdx = 1; endIdx < appRows.length; endIdx++) {
@@ -232,10 +224,13 @@ export class RankingService {
           const endMs = endRow.date.getTime();
           if (endMs - lastSampleEndMs < stepMs) continue;
 
-          const windowRows = this.sliceAppRowsEndingAt(appRows, windowDays, endRow.date);
-          if (windowRows.length < 2) continue;
+          const cutoffMs = endMs - windowMs;
+          while (startIdx < endIdx && appRows[startIdx]!.date.getTime() <= cutoffMs) {
+            startIdx++;
+          }
+          if (endIdx - startIdx < 1) continue;
 
-          // Classify by state inside this historical window (not only "today").
+          const windowRows = appRows.slice(startIdx, endIdx + 1);
           if (segment === "reserve" && !this.isReserveOnlyApp(windowRows)) continue;
           if (segment === "launched" && !this.isLaunchedApp(windowRows)) continue;
 
@@ -255,28 +250,73 @@ export class RankingService {
     };
   }
 
+  private async loadGrowthCalibrationRows(): Promise<AppRankRow[]> {
+    return withDbRetry(async () => {
+      if (GROWTH_CALIBRATION_LOOKBACK_DAYS > 0) {
+        return this.fetchLightRows(GROWTH_CALIBRATION_LOOKBACK_DAYS);
+      }
+      return this.fetchAllLightRows();
+    }, "growth-calibration-rows", { maxAttempts: 4, delayMs: 2000 });
+  }
+
+  /**
+   * Warm absCap cache. Request path waits at most GROWTH_CALIBRATION_WAIT_MS then
+   * proceeds with tier fallback so Potential never hangs on heavy calibration.
+   */
   private async ensureGrowthCalibration(
     platform: "combined" | "android" | "ios",
     force = false,
   ): Promise<void> {
     const stale = Date.now() - growthCalibrationBuiltAt > GROWTH_CALIBRATION_TTL_MS;
     if (!force && !stale && growthCalibrationCache.size >= 2) return;
-    if (growthCalibrationInFlight) return growthCalibrationInFlight;
 
-    growthCalibrationInFlight = (async () => {
-      for (const segment of ["reserve", "launched"] as const) {
-        const key = RankingService.calibrationKey(segment, platform);
-        growthCalibrationCache.set(
-          key,
-          await this.buildGrowthCalibrationForSegment(segment, platform),
-        );
-      }
-      growthCalibrationBuiltAt = Date.now();
-    })().finally(() => {
-      growthCalibrationInFlight = null;
-    });
+    if (!growthCalibrationInFlight) {
+      growthCalibrationInFlight = (async () => {
+        const t0 = Date.now();
+        try {
+          const rows = await this.loadGrowthCalibrationRows();
+          for (const segment of ["reserve", "launched"] as const) {
+            const key = RankingService.calibrationKey(segment, platform);
+            const cal = this.collectGrowthCalibrationSamples(rows, segment, platform);
+            growthCalibrationCache.set(key, cal);
+            console.log(
+              `[growth-calib] ${segment}/${platform}: samples=${cal.sortedPerDay.length} rows=${rows.length} lookback=${GROWTH_CALIBRATION_LOOKBACK_DAYS || "all"} ${Date.now() - t0}ms`,
+            );
+          }
+          growthCalibrationBuiltAt = Date.now();
+          // Rebuild potential lists with real absCap on next request.
+          pruneCacheKeyPrefix(`potential-${ALGO_VERSION_RESERVE}-`);
+          pruneCacheKeyPrefix(`potential-${ALGO_VERSION_LAUNCHED}-`);
+          pruneCacheKeyPrefix(`potential-detail-${ALGO_VERSION_RESERVE}-`);
+          pruneCacheKeyPrefix(`potential-detail-${ALGO_VERSION_LAUNCHED}-`);
+        } catch (err) {
+          console.error(`[growth-calib] failed ${platform}:`, err);
+          for (const segment of ["reserve", "launched"] as const) {
+            const key = RankingService.calibrationKey(segment, platform);
+            if (!growthCalibrationCache.has(key)) {
+              growthCalibrationCache.set(key, {
+                sortedPerDay: [],
+                anchors: percentileAnchorsFromSample([]),
+              });
+            }
+          }
+        }
+      })().finally(() => {
+        growthCalibrationInFlight = null;
+      });
+    }
 
-    return growthCalibrationInFlight;
+    if (force || GROWTH_CALIBRATION_WAIT_MS <= 0) {
+      await growthCalibrationInFlight;
+      return;
+    }
+
+    if (growthCalibrationCache.size >= 2) return;
+
+    await Promise.race([
+      growthCalibrationInFlight,
+      new Promise<void>((resolve) => setTimeout(resolve, GROWTH_CALIBRATION_WAIT_MS)),
+    ]);
   }
 
   private static absoluteGrowthCap(
