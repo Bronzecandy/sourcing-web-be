@@ -88,6 +88,75 @@ async function ensurePermissionRows(userId: string): Promise<void> {
   }
 }
 
+export function normalizeInviteEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+export function isValidInviteEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+export async function createInvitedUser(input: {
+  email: string;
+  name?: string | null;
+  status: "PENDING" | "ACTIVE";
+  role: UserRole;
+  permissions?: Partial<Record<PermissionKey, boolean>>;
+}): Promise<{
+  id: string;
+  email: string;
+  name: string | null;
+  avatarUrl: string | null;
+  status: "PENDING" | "ACTIVE";
+  role: PrismaUserRole;
+  createdAt: Date;
+  permissions: Array<{ permissionKey: string; granted: boolean }>;
+  googleSub: string | null;
+}> {
+  const email = normalizeInviteEmail(input.email);
+  const existing = await prismaApp.user.findUnique({ where: { email } });
+  if (existing) {
+    const err = new Error("EMAIL_EXISTS");
+    throw err;
+  }
+
+  const name = input.name?.trim() || null;
+  const user = await prismaApp.user.create({
+    data: {
+      googleSub: null,
+      email,
+      name,
+      status: input.status,
+      role: input.role as PrismaUserRole,
+    },
+    include: { permissions: true },
+  });
+
+  await ensurePermissionRows(user.id);
+  if (input.role === "SUPER_ADMIN") {
+    await grantAllPermissions(user.id);
+  } else if (input.permissions) {
+    for (const permissionKey of PERMISSION_KEYS) {
+      if (typeof input.permissions[permissionKey] === "boolean") {
+        await prismaApp.userPermission.upsert({
+          where: { userId_permissionKey: { userId: user.id, permissionKey } },
+          create: {
+            userId: user.id,
+            permissionKey,
+            granted: input.permissions[permissionKey]!,
+          },
+          update: { granted: input.permissions[permissionKey]! },
+        });
+      }
+    }
+  }
+
+  return prismaApp.user.findUniqueOrThrow({
+    where: { id: user.id },
+    include: { permissions: true },
+  });
+}
+
 export async function grantAllPermissions(userId: string): Promise<void> {
   for (const permissionKey of PERMISSION_KEYS) {
     await prismaApp.userPermission.upsert({

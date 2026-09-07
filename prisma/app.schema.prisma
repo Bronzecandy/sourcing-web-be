@@ -21,7 +21,7 @@ enum UserRole {
 
 model User {
   id          String           @id @default(cuid())
-  googleSub   String           @unique
+  googleSub   String?          @unique
   email       String           @unique
   name        String?
   avatarUrl   String?
