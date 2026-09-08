@@ -82,9 +82,9 @@ const COHORT_CACHE_TTL = Math.max(
   300,
   parseInt(process.env.DISTRIBUTION_COHORT_CACHE_TTL ?? "1800", 10) || 1800,
 );
-const TRENDS_MONTH_CONCURRENCY = Math.max(
-  1,
-  parseInt(process.env.DISTRIBUTION_TRENDS_MONTH_CONCURRENCY ?? "2", 10) || 2,
+const TRENDS_MONTH_CONCURRENCY = Math.min(
+  4,
+  Math.max(1, parseInt(process.env.DISTRIBUTION_TRENDS_MONTH_CONCURRENCY ?? "3", 10) || 3),
 );
 
 const COHORT_FIRST_SELECT = APP_RANK_DISTRIBUTION_COHORT_COLUMNS;

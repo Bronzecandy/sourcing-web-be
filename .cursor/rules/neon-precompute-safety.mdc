@@ -18,11 +18,11 @@
 | Biến | Mặc định mới | Ghi chú |
 |------|--------------|---------|
 | `PRECOMPUTE_START_DELAY_MS` | `45000` prod | Server listen + health trước khi warm |
-| `PRECOMPUTE_DISTRIBUTION_CONCURRENCY` | `1` | Tuần tự từng overview/trends |
-| `PRECOMPUTE_DISTRIBUTION_TASK_DELAY_MS` | `3000` | Nghỉ giữa task Distribution |
+| `PRECOMPUTE_DISTRIBUTION_CONCURRENCY` | `1` | Giữ 1 — query cả năm `DISTINCT ON` dễ 40001 nếu song song |
+| `PRECOMPUTE_DISTRIBUTION_TASK_DELAY_MS` | `1000` | Nghỉ giữa task Distribution (đo 2026-09: 3s không giảm 40001 đáng kể) |
 | `PRECOMPUTE_DISTRIBUTION_WARMUP_YEARS` | `1` | Deploy chỉ warm năm mới nhất |
 | `PRECOMPUTE_DISTRIBUTION_MAX_YEARS` | `0` (= all) | Giới hạn năm khi `cron` |
-| `DISTRIBUTION_TRENDS_MONTH_CONCURRENCY` | `2` | Tháng trong trends |
+| `DISTRIBUTION_TRENDS_MONTH_CONCURRENCY` | `3` | Đo replica Garena 2026: c=3 ~16s / 0% 40001; c=1 ~35s / 22% 40001 (cap 4) |
 | `DISTRIBUTION_DB_MAX_ATTEMPTS` | `3` | Inner query retry; outer cache layer = 1 (không nhân lần) |
 | `DISTRIBUTION_COHORT_CACHE_TTL` | `1800` | Cohort trung gian, không 24h |
 | `SKIP_WARMUP=1` | — | Bật nếu cần deploy nhanh; disk cache (`data/response-cache/`) vẫn serve ngay |

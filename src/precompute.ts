@@ -141,7 +141,7 @@ const PRECOMPUTE_DISTRIBUTION_CONCURRENCY = Math.max(
 
 const PRECOMPUTE_DISTRIBUTION_TASK_DELAY_MS = Math.max(
   0,
-  parseInt(process.env.PRECOMPUTE_DISTRIBUTION_TASK_DELAY_MS ?? "3000", 10) || 3000,
+  parseInt(process.env.PRECOMPUTE_DISTRIBUTION_TASK_DELAY_MS ?? "1000", 10) || 1000,
 );
 
 function isDistributionPrecomputeEnabled(): boolean {
