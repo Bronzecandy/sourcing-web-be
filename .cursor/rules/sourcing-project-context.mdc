@@ -98,4 +98,4 @@ Scripts BE: `npm run dev`, `prisma:*`, `seed`, `smoke:rubric`, `src/inspect-db.t
 
 ## Trạng thái gần đây (cập nhật khi đổi)
 
-Đang chỉnh tier libraries (`studio-tiers.json`, `system-requirement-tiers.json`) và `src/services/ai-analysis.service.ts`.
+Tối ưu tốc độ: disk cache `data/response-cache/` (Distribution overview+trends, dashboard, ranking, potential list); SWR khi query replica timeout. Index crawl `(appId, date)` board — chạy `npm run apply:crawl-indexes` trên **primary** crawl DB.

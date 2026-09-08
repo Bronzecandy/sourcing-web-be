@@ -30,8 +30,8 @@ const LAUNCHED_BOARD_SQL = `(
 )`;
 
 const HEAVY_DB_RETRY = {
-  maxAttempts: Math.max(1, parseInt(process.env.DISTRIBUTION_DB_MAX_ATTEMPTS ?? "5", 10) || 5),
-  delayMs: Math.max(500, parseInt(process.env.DISTRIBUTION_DB_RETRY_DELAY_MS ?? "3000", 10) || 3000),
+  maxAttempts: Math.max(1, parseInt(process.env.DISTRIBUTION_DB_MAX_ATTEMPTS ?? "3", 10) || 3),
+  delayMs: Math.max(500, parseInt(process.env.DISTRIBUTION_DB_RETRY_DELAY_MS ?? "2000", 10) || 2000),
 };
 
 const COHORT_DIR = path.join(process.cwd(), "data", "distribution-cohort");

@@ -23,7 +23,6 @@ import { releaseDateFromRow } from "../utils/taptap-raw-extract";
 import { toFiniteNumber } from "../utils/to-finite-number";
 import { parseAppRankRow } from "./distribution-row-utils";
 import { ensureCohortEdges } from "./distribution-cohort-store";
-import { persistDistributionOverview } from "./distribution-disk-cache";
 import type {
   DistributionBucket,
   DistributionLifecycle,
@@ -74,9 +73,11 @@ export function distributionTrendsCacheKey(
 const CACHE_TTL = 86400;
 /** Align with cache/getCachedOrFetch defaults — avoid 12× retry piling connections on Neon replica (40001). */
 const HEAVY_DB_RETRY = {
-  maxAttempts: Math.max(1, parseInt(process.env.DISTRIBUTION_DB_MAX_ATTEMPTS ?? "5", 10) || 5),
-  delayMs: Math.max(500, parseInt(process.env.DISTRIBUTION_DB_RETRY_DELAY_MS ?? "3000", 10) || 3000),
+  maxAttempts: Math.max(1, parseInt(process.env.DISTRIBUTION_DB_MAX_ATTEMPTS ?? "3", 10) || 3),
+  delayMs: Math.max(500, parseInt(process.env.DISTRIBUTION_DB_RETRY_DELAY_MS ?? "2000", 10) || 2000),
 };
+/** Inner queries already use HEAVY_DB_RETRY — do not nest another 3–5 attempts. */
+const NO_OUTER_RETRY = { maxAttempts: 1, delayMs: 500 };
 const COHORT_CACHE_TTL = Math.max(
   300,
   parseInt(process.env.DISTRIBUTION_COHORT_CACHE_TTL ?? "1800", 10) || 1800,
@@ -427,7 +428,7 @@ async function fetchBoardCohortEdgesCached(
     key,
     () => fetchBoardCohortEdgesRaw(periodStart, periodEnd, board),
     COHORT_CACHE_TTL,
-    HEAVY_DB_RETRY,
+    NO_OUTER_RETRY,
   );
 }
 
@@ -1041,17 +1042,12 @@ export class DistributionService {
     const { year = null, month, lifecycle } = query;
     const cacheKey = distributionOverviewCacheKey(year ?? null, lifecycle, month ?? null);
 
-    const data = await getCachedOrFetch(
+    return getCachedOrFetch(
       cacheKey,
       () => this.buildOverviewBody(year ?? null, month, lifecycle),
       CACHE_TTL,
+      NO_OUTER_RETRY,
     );
-
-    if (isAllTimeFull(year ?? null, month ?? null)) {
-      void persistDistributionOverview(cacheKey, data);
-    }
-
-    return data;
   }
 
   async getTrends(query: DistributionOverviewQuery): Promise<DistributionTrendsResponse> {
@@ -1074,6 +1070,7 @@ export class DistributionService {
         };
       },
       CACHE_TTL,
+      NO_OUTER_RETRY,
     );
   }
 
@@ -1234,11 +1231,19 @@ export class DistributionService {
 
   async getMeta(): Promise<DistributionMeta> {
     return getCachedOrFetch(DISTRIBUTION_META_CACHE_KEY, async () => {
-      const { rows } = await pool.query<{ year: number; month: number }>(
-        `SELECT DISTINCT EXTRACT(YEAR FROM "date")::int AS year,
-                EXTRACT(MONTH FROM "date")::int AS month
-         FROM "AppRank"
-         ORDER BY year DESC, month DESC`,
+      const { rows } = await withDbRetry(
+        () =>
+          pool.query<{ year: number; month: number }>(
+            `SELECT EXTRACT(YEAR FROM d)::int AS year,
+                    EXTRACT(MONTH FROM d)::int AS month
+             FROM (
+               SELECT DISTINCT date_trunc('month', "date")::date AS d
+               FROM "AppRank"
+             ) t
+             ORDER BY year DESC, month DESC`,
+          ),
+        "distribution-meta-months",
+        HEAVY_DB_RETRY,
       );
 
       const yearSet = new Set<number>();
@@ -1275,7 +1280,7 @@ export class DistributionService {
           rating: RATING_GROWTH_BUCKETS,
         },
       };
-    }, CACHE_TTL);
+    }, CACHE_TTL, NO_OUTER_RETRY);
   }
 
   async getDistribution(query: DistributionQuery): Promise<DistributionResponse> {
@@ -1405,6 +1410,7 @@ export class DistributionService {
         };
       },
       CACHE_TTL,
+      NO_OUTER_RETRY,
     );
   }
 }

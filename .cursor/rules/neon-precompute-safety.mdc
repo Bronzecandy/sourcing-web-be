@@ -23,9 +23,11 @@
 | `PRECOMPUTE_DISTRIBUTION_WARMUP_YEARS` | `1` | Deploy chỉ warm năm mới nhất |
 | `PRECOMPUTE_DISTRIBUTION_MAX_YEARS` | `0` (= all) | Giới hạn năm khi `cron` |
 | `DISTRIBUTION_TRENDS_MONTH_CONCURRENCY` | `2` | Tháng trong trends |
-| `DISTRIBUTION_DB_MAX_ATTEMPTS` | `5` | Khớp cache retry |
+| `DISTRIBUTION_DB_MAX_ATTEMPTS` | `3` | Inner query retry; outer cache layer = 1 (không nhân lần) |
 | `DISTRIBUTION_COHORT_CACHE_TTL` | `1800` | Cohort trung gian, không 24h |
-| `SKIP_WARMUP=1` | — | Bật nếu cần deploy nhanh, cron warm sau |
+| `SKIP_WARMUP=1` | — | Bật nếu cần deploy nhanh; disk cache (`data/response-cache/`) vẫn serve ngay |
+
+**Disk cache:** overview/trends/meta/dashboard/ranking/potential list được ghi `data/response-cache/`. Boot load vào memory; request miss đọc disk rồi mới query DB. Lỗi 40001 → trả stale disk nếu có.
 
 ## Khi sửa Distribution / precompute
 

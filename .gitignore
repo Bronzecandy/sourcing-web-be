@@ -10,3 +10,4 @@ generated/
 .translation-cache.json
 data/distribution-cohort/
 data/distribution-cache/
+data/response-cache/

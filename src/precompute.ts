@@ -321,7 +321,7 @@ async function precomputeDistribution(options: { force: boolean; label?: string 
       failed,
     });
   } finally {
-    setForceRefresh(true);
+    setForceRefresh(false);
   }
 }
 

@@ -1,6 +1,11 @@
 import { Router } from "express";
-import { distributionService } from "../services/distribution.service";
-import { beginPrecomputePause, endPrecomputePause } from "../utils/analysis-active-guard";
+import {
+  DISTRIBUTION_META_CACHE_KEY,
+  distributionOverviewCacheKey,
+  distributionService,
+  distributionTrendsCacheKey,
+} from "../services/distribution.service";
+import { withPrecomputePauseUnlessCached } from "../utils/analysis-active-guard";
 import type { DistributionLifecycleFilter, DistributionMetric, DistributionTab } from "../types";
 
 const router = Router();
@@ -24,7 +29,11 @@ const LIFECYCLES = new Set<DistributionLifecycleFilter>([
 const TABS = new Set<DistributionTab>(["reserve", "new", "old"]);
 
 router.get("/distribution/meta", async (_req, res) => {
-  const data = await distributionService.getMeta();
+  const data = await withPrecomputePauseUnlessCached(
+    DISTRIBUTION_META_CACHE_KEY,
+    "distribution-meta",
+    () => distributionService.getMeta(),
+  );
   res.json({ success: true, data });
 });
 
@@ -44,35 +53,6 @@ function parseOverviewQuery(req: import("express").Request) {
 }
 
 router.get("/distribution/overview/trends", async (req, res) => {
-  const pauseLabel = "distribution-trends";
-  beginPrecomputePause(pauseLabel);
-  try {
-    const { year, month, lifecycle } = parseOverviewQuery(req);
-
-    if (year != null && (!Number.isFinite(year) || year < 2000 || year > 2100)) {
-      res.status(400).json({ success: false, error: "year must be 2000–2100 or all" });
-      return;
-    }
-    if (month != null && (!Number.isFinite(month) || month < 1 || month > 12)) {
-      res.status(400).json({ success: false, error: "month must be 1–12" });
-      return;
-    }
-    if (!TABS.has(lifecycle)) {
-      res.status(400).json({ success: false, error: "lifecycle must be reserve, new, or old" });
-      return;
-    }
-
-    const data = await distributionService.getTrends({ year, month, lifecycle });
-    res.json({ success: true, data });
-  } finally {
-    endPrecomputePause(pauseLabel);
-  }
-});
-
-router.get("/distribution/overview", async (req, res) => {
-  const pauseLabel = "distribution-overview";
-  beginPrecomputePause(pauseLabel);
-  try {
   const { year, month, lifecycle } = parseOverviewQuery(req);
 
   if (year != null && (!Number.isFinite(year) || year < 2000 || year > 2100)) {
@@ -88,17 +68,37 @@ router.get("/distribution/overview", async (req, res) => {
     return;
   }
 
-  const data = await distributionService.getOverview({ year, month, lifecycle });
+  const cacheKey = distributionTrendsCacheKey(year ?? null, lifecycle, month ?? null);
+  const data = await withPrecomputePauseUnlessCached(cacheKey, "distribution-trends", () =>
+    distributionService.getTrends({ year, month, lifecycle }),
+  );
   res.json({ success: true, data });
-  } finally {
-    endPrecomputePause(pauseLabel);
+});
+
+router.get("/distribution/overview", async (req, res) => {
+  const { year, month, lifecycle } = parseOverviewQuery(req);
+
+  if (year != null && (!Number.isFinite(year) || year < 2000 || year > 2100)) {
+    res.status(400).json({ success: false, error: "year must be 2000–2100 or all" });
+    return;
   }
+  if (month != null && (!Number.isFinite(month) || month < 1 || month > 12)) {
+    res.status(400).json({ success: false, error: "month must be 1–12" });
+    return;
+  }
+  if (!TABS.has(lifecycle)) {
+    res.status(400).json({ success: false, error: "lifecycle must be reserve, new, or old" });
+    return;
+  }
+
+  const cacheKey = distributionOverviewCacheKey(year ?? null, lifecycle, month ?? null);
+  const data = await withPrecomputePauseUnlessCached(cacheKey, "distribution-overview", () =>
+    distributionService.getOverview({ year, month, lifecycle }),
+  );
+  res.json({ success: true, data });
 });
 
 router.get("/distribution", async (req, res) => {
-  const pauseLabel = "distribution-legacy";
-  beginPrecomputePause(pauseLabel);
-  try {
   const year = parseInt(String(req.query.year ?? ""), 10);
   const monthRaw = req.query.month;
   const month =
@@ -125,16 +125,16 @@ router.get("/distribution", async (req, res) => {
     return;
   }
 
-  const data = await distributionService.getDistribution({
-    year,
-    month,
-    metric,
-    lifecycle,
-  });
+  const cacheKey = `distribution-v1-${year}-${month ?? "all"}-${metric}-${lifecycle}`;
+  const data = await withPrecomputePauseUnlessCached(cacheKey, "distribution-legacy", () =>
+    distributionService.getDistribution({
+      year,
+      month,
+      metric,
+      lifecycle,
+    }),
+  );
   res.json({ success: true, data });
-  } finally {
-    endPrecomputePause(pauseLabel);
-  }
 });
 
 export default router;

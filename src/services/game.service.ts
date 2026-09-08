@@ -87,28 +87,29 @@ export class GameService {
     return getCachedOrFetch(
       "dashboard-stats",
       async () => {
-        const [totalDataPoints, totalReviews, latestRankRow] =
-          await Promise.all([
-            prisma.appRank.count(),
-            prisma.appReview.count(),
-            prisma.appRank.findFirst({ orderBy: { date: "desc" } }),
-          ]);
+        const [rankAgg, totalReviews] = await Promise.all([
+          pool.query<{
+            totalDataPoints: string;
+            totalApps: string;
+            dateCount: string;
+            latestDate: Date | null;
+          }>(
+            `SELECT COUNT(*)::text AS "totalDataPoints",
+                    COUNT(DISTINCT "appId")::text AS "totalApps",
+                    COUNT(DISTINCT "date")::text AS "dateCount",
+                    MAX("date") AS "latestDate"
+             FROM "AppRank"`,
+          ),
+          prisma.appReview.count(),
+        ]);
 
-        const latestDate = latestRankRow?.date
-          ? latestRankRow.date.toISOString().split("T")[0]
+        const agg = rankAgg.rows[0];
+        const totalDataPoints = parseInt(agg?.totalDataPoints ?? "0", 10) || 0;
+        const totalApps = parseInt(agg?.totalApps ?? "0", 10) || 0;
+        const dateCount = parseInt(agg?.dateCount ?? "0", 10) || 0;
+        const latestDate = agg?.latestDate
+          ? agg.latestDate.toISOString().split("T")[0]
           : null;
-
-        const distinctApps = await prisma.appRank.findMany({
-          select: { appId: true },
-          distinct: ["appId"],
-        });
-        const totalApps = distinctApps.length;
-
-        const distinctDates = await prisma.appRank.findMany({
-          select: { date: true },
-          distinct: ["date"],
-        });
-        const dateCount = distinctDates.length;
 
         const topMovers: DashboardStats["topMovers"] = {
           gainers: [],
@@ -326,15 +327,13 @@ export class GameService {
     return getCachedOrFetch(
       "available-dates",
       async () => {
-        const dates = await prisma.appRank.findMany({
-          select: { date: true },
-          distinct: ["date"],
-          orderBy: { date: "desc" },
-          take: 90,
-        });
-        return dates.map(
-          (d: { date: Date }) => d.date.toISOString().split("T")[0]
+        const { rows } = await pool.query<{ date: Date }>(
+          `SELECT DISTINCT "date"
+           FROM "AppRank"
+           ORDER BY "date" DESC
+           LIMIT 90`,
         );
+        return rows.map((d) => d.date.toISOString().split("T")[0]);
       }
     );
   }

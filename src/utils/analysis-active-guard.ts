@@ -1,3 +1,4 @@
+import { cacheHas } from "./cache";
 import { logDiag } from "./process-diagnostics";
 
 let activePrecomputeBlockers = 0;
@@ -43,6 +44,21 @@ export async function waitForPrecomputeSlot(): Promise<void> {
 
 export function isPrecomputePaused(): boolean {
   return activePrecomputeBlockers > 0;
+}
+
+/** Pause warm-up only when this request will miss memory cache (live DB work). */
+export async function withPrecomputePauseUnlessCached<T>(
+  cacheKey: string,
+  label: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  if (cacheHas(cacheKey)) return fn();
+  beginPrecomputePause(label);
+  try {
+    return await fn();
+  } finally {
+    endPrecomputePause(label);
+  }
 }
 
 /** @deprecated alias */

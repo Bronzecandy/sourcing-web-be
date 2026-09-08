@@ -1,5 +1,5 @@
 import { pool } from "../utils/prisma";
-import { getCachedOrFetch, pruneCacheKeyPrefix } from "../utils/cache";
+import { getCachedOrFetch } from "../utils/cache";
 import { withDbRetry } from "../utils/db-retry";
 import type {
   PotentialScoreResult,
@@ -284,11 +284,7 @@ export class RankingService {
             );
           }
           growthCalibrationBuiltAt = Date.now();
-          // Rebuild potential lists with real absCap on next request.
-          pruneCacheKeyPrefix(`potential-${ALGO_VERSION_RESERVE}-`);
-          pruneCacheKeyPrefix(`potential-${ALGO_VERSION_LAUNCHED}-`);
-          pruneCacheKeyPrefix(`potential-detail-${ALGO_VERSION_RESERVE}-`);
-          pruneCacheKeyPrefix(`potential-detail-${ALGO_VERSION_LAUNCHED}-`);
+          // Keep existing potential lists; cron/precompute rebuilds with fresh absCap.
         } catch (err) {
           console.error(`[growth-calib] failed ${platform}:`, err);
           for (const segment of ["reserve", "launched"] as const) {
@@ -1174,10 +1170,15 @@ export class RankingService {
   }
 
   private async fetchLightRows(days: number): Promise<AppRankRow[]> {
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - days);
-    const { rows } = await pool.query<AppRankRow>(APP_RANK_LIGHT_SELECT_SQL, [cutoff]);
-    return rows;
+    const run = async () => {
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - days);
+      const { rows } = await pool.query<AppRankRow>(APP_RANK_LIGHT_SELECT_SQL, [cutoff]);
+      return rows;
+    };
+    // Calibration lookback (365d) is large — don't pin it in RAM alongside Potential windows.
+    if (days > 90) return run();
+    return getCachedOrFetch(`app-rank-light-${days}`, run, 3600);
   }
 
   /** Full AppRank light history — used for absCap calibration (từ trước tới giờ). */

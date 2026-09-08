@@ -3,7 +3,7 @@ import cron from "node-cron";
 import app from "./app";
 import { precomputeAll } from "./precompute";
 import { warmLibraryCache } from "./services/library-store";
-import { loadDistributionDiskCache } from "./services/distribution-disk-cache";
+import { loadResponseDiskCache } from "./utils/cache";
 import { installProcessDiagnostics, logDiag, logDiagError } from "./utils/process-diagnostics";
 
 installProcessDiagnostics();
@@ -40,37 +40,45 @@ cron.schedule("15 10 * * *", () => runPrecompute("cron"), {
   timezone: "Asia/Ho_Chi_Minh",
 });
 
-app.listen(PORT, async () => {
-  await warmAppDb();
-  const distKeys = await loadDistributionDiskCache();
-  if (distKeys > 0) {
-    console.log(`[distribution] Loaded ${distKeys} overview cache file(s) from disk`);
+async function start(): Promise<void> {
+  const diskKeys = await loadResponseDiskCache();
+  if (diskKeys > 0) {
+    console.log(`[cache] Loaded ${diskKeys} persisted response(s) from disk`);
   }
-  console.log(`Server running on http://localhost:${PORT}`);
-  console.log(`Health check: http://localhost:${PORT}/api/health`);
-  console.log(`Library admin UI: http://localhost:${PORT}/admin/libraries`);
-  console.log(`AI model: ${process.env.OPENAI_MODEL ?? "(not set)"}`);
-  console.log(`Cron: pre-compute daily at 10:15 Asia/Ho_Chi_Minh`);
-  logDiag("server-listening", {
-    port: PORT,
-    skipWarmup: process.env.SKIP_WARMUP === "1",
-    pgPoolMax: process.env.PG_POOL_MAX ?? "8",
-    precomputeDbConcurrency: process.env.PRECOMPUTE_DB_CONCURRENCY ?? "2",
-    nodeEnv: process.env.NODE_ENV ?? "(unset)",
-  });
-  if (process.env.SKIP_WARMUP === "1") {
-    console.log(`[warm-up] Skipped (SKIP_WARMUP=1)`);
-  } else {
-    const defaultDelay = process.env.NODE_ENV === "development" ? 120_000 : 45_000;
-    const startDelay = Math.max(
-      0,
-      parseInt(process.env.PRECOMPUTE_START_DELAY_MS ?? String(defaultDelay), 10) || 0,
-    );
-    if (startDelay > 0) {
-      console.log(`[warm-up] Scheduled in ${Math.round(startDelay / 1000)}s (PRECOMPUTE_START_DELAY_MS)`);
-      setTimeout(() => runPrecompute("warm-up"), startDelay);
+
+  app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Health check: http://localhost:${PORT}/api/health`);
+    console.log(`Library admin UI: http://localhost:${PORT}/admin/libraries`);
+    console.log(`AI model: ${process.env.OPENAI_MODEL ?? "(not set)"}`);
+    console.log(`Cron: pre-compute daily at 10:15 Asia/Ho_Chi_Minh`);
+    logDiag("server-listening", {
+      port: PORT,
+      skipWarmup: process.env.SKIP_WARMUP === "1",
+      pgPoolMax: process.env.PG_POOL_MAX ?? "8",
+      precomputeDbConcurrency: process.env.PRECOMPUTE_DB_CONCURRENCY ?? "2",
+      nodeEnv: process.env.NODE_ENV ?? "(unset)",
+    });
+    void warmAppDb();
+    if (process.env.SKIP_WARMUP === "1") {
+      console.log(`[warm-up] Skipped (SKIP_WARMUP=1)`);
     } else {
-      runPrecompute("warm-up");
+      const defaultDelay = process.env.NODE_ENV === "development" ? 120_000 : 45_000;
+      const startDelay = Math.max(
+        0,
+        parseInt(process.env.PRECOMPUTE_START_DELAY_MS ?? String(defaultDelay), 10) || 0,
+      );
+      if (startDelay > 0) {
+        console.log(`[warm-up] Scheduled in ${Math.round(startDelay / 1000)}s (PRECOMPUTE_START_DELAY_MS)`);
+        setTimeout(() => runPrecompute("warm-up"), startDelay);
+      } else {
+        void runPrecompute("warm-up");
+      }
     }
-  }
+  });
+}
+
+void start().catch((err) => {
+  console.error("[startup] Failed:", err);
+  process.exit(1);
 });
