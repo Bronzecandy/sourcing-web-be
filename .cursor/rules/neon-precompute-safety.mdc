@@ -12,6 +12,7 @@
 2. **Fail-soft trong precompute**: `retrySoft` trong `precompute.ts` — log `SKIP … after DB retries`, tiếp tục task khác; **không** làm process chết.
 3. **Skip query phụ** khi lỗi (vd. `game.service` bỏ qua review distribution nếu query fail).
 4. **Distribution Phase 4 chạy cuối** (sau Phase 1–3) để dashboard/ranking/potential warm trước.
+5. **Alert top 20 Potential** (sau Phase 4, chỉ `label=cron`) fail-soft — lỗi snapshot/AI/SeaTalk không làm chết process.
 
 ## Cấu hình khuyến nghị
 

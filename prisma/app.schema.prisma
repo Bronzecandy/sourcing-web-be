@@ -100,3 +100,62 @@ model UserAiCompare {
   @@index([appIdsKey, comparedAt(sort: Desc)])
   @@index([userId])
 }
+
+/// Snapshot top 20 mỗi bảng Potential (14 ngày, combined) theo ngày ICT.
+model PotentialBoardDay {
+  date  DateTime @db.Date
+  /// reserve_growth | reserve_scale | launch_growth | launch_scale
+  board String
+  rank  Int
+  appId Int
+  title String
+  score Float
+
+  @@id([date, board, rank])
+  @@index([date, board])
+  @@index([board, appId])
+}
+
+/// Một lần job alert / baseline trong ngày — cron chạy lại không phân tích/gửi trùng.
+model PotentialAlertRun {
+  date          DateTime @id @db.Date
+  status        String
+  newCount      Int      @default(0)
+  analyzedCount Int      @default(0)
+  payload       Json?
+  createdAt     DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime @updatedAt @db.Timestamptz(6)
+}
+
+/// Một kỳ Game Radar Recap (ngày ICT).
+model RadarRecapRun {
+  date       DateTime        @id @db.Date
+  status     String
+  periodCode String
+  summary    Json?
+  createdAt  DateTime        @default(now()) @db.Timestamptz(6)
+  updatedAt  DateTime        @updatedAt @db.Timestamptz(6)
+  rows       RadarRecapRow[]
+}
+
+/// Một dòng top 20 trong kỳ Radar (Reserve growth/scale hoặc New Launch).
+model RadarRecapRow {
+  id          String        @id @default(cuid())
+  date        DateTime      @db.Date
+  board       String
+  rank        Int
+  appId       Int
+  title       String
+  titleEn     String?
+  score       Float
+  nextAction  String
+  insights    String
+  adjustments String
+  screening   String
+  payload     Json
+  run         RadarRecapRun @relation(fields: [date], references: [date], onDelete: Cascade)
+
+  @@unique([date, board, rank])
+  @@index([date, board])
+  @@index([appId, date])
+}

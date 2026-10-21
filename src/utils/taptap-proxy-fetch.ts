@@ -73,6 +73,35 @@ export async function fetchTapTapViaProxy(appId: number): Promise<{
   };
 }
 
+/** Fast app/v4/detail snapshot — not the full review crawl. */
+export async function fetchTapTapDetailRawViaProxy(
+  appId: number,
+): Promise<Record<string, unknown> | null> {
+  if (!useTapTapProxy() || !PROXY_BASE) return null;
+  try {
+    const url = `${PROXY_BASE}/api/detail/${appId}`;
+    const res = await fetchWithLongConnect(url, {
+      headers: proxyHeaders(),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!res.ok) return null;
+    const raw = await res.text();
+    const json = parseProxyResponseBody(raw, "TapTap proxy detail");
+    if (!json.success) return null;
+    const data = json.data;
+    if (data && typeof data === "object") {
+      const rec = data as Record<string, unknown>;
+      if (rec.detailRaw && typeof rec.detailRaw === "object") {
+        return rec.detailRaw as Record<string, unknown>;
+      }
+      return rec;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export function formatFetchError(err: unknown): string {
   if (err instanceof Error) {
     const cause = err.cause as { code?: string } | undefined;

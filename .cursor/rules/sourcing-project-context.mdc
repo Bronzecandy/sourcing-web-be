@@ -78,6 +78,10 @@ Tính năng chính:
 | `SKIP_WARMUP=1` | Bỏ warmup cache khi dev |
 | `PRECOMPUTE_START_DELAY_MS` | Trì hoãn warm-up sau listen (prod mặc định 45s) |
 | `PRECOMPUTE_DISTRIBUTION_*` | Phase 4 Distribution — xem `neon-precompute-safety.mdc` |
+| `SEATALK_ENABLED` | Bật gửi SeaTalk (mặc định tắt) |
+| `SEATALK_APP_ID`, `SEATALK_APP_SECRET`, `SEATALK_DAILY_GROUP_ID` | Bot group_chat (copy từ Data Dashboard) |
+| `SEATALK_WEBHOOK_URL` | Fallback webhook nếu không dùng bot |
+| `SOURCING_PUBLIC_URL` | Base link trong tin (`https://sourcing-web.run.ingarena.net`) |
 
 **Neon replica / warm-up OOM:** xem rule `neon-precompute-safety.mdc` (40001, fail-soft, concurrency).
 
@@ -98,4 +102,4 @@ Scripts BE: `npm run dev`, `prisma:*`, `seed`, `smoke:rubric`, `src/inspect-db.t
 
 ## Trạng thái gần đây (cập nhật khi đổi)
 
-Tối ưu tốc độ: disk cache `data/response-cache/` (Distribution overview+trends, dashboard, ranking, potential list); SWR khi query replica timeout. Index crawl `(appId, date)` board — chạy `npm run apply:crawl-indexes` trên **primary** crawl DB.
+Tối ưu tốc độ: disk cache `data/response-cache/` (Distribution overview+trends, dashboard, ranking, potential list); SWR khi query replica timeout. Index crawl `(appId, date)` board — chạy `npm run apply:crawl-indexes` trên **primary** crawl DB. Cron 10:15 sau precompute: snapshot top 20 4 bảng Potential (14 ngày, combined) → auto AI (user `ADMIN_BOOTSTRAP_EMAIL`) → tin SeaTalk; dry-run `npm run seatalk:top20 -- --dry`. Cùng cron: Game Radar Recap 3 bảng (Reserve growth/scale, New Launch) → trang `/radar`, tải docx/xlsx; chạy tay `npm run radar:recap`.

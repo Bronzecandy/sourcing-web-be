@@ -441,6 +441,23 @@ export async function precomputeAll(options?: {
       console.warn("[precompute]   potential scorers post-refresh failed:", (err as Error).message);
     }
 
+    if (label === "cron") {
+      try {
+        const { runPotentialTop20Alert } = await import("./services/potential-top20-alert.service");
+        await runPotentialTop20Alert();
+      } catch (err) {
+        console.warn("[precompute] potential top20 alert failed:", (err as Error).message);
+        logDiagError("potential-top20-alert", err, { label });
+      }
+      try {
+        const { runRadarRecap } = await import("./services/radar-recap.service");
+        await runRadarRecap();
+      } catch (err) {
+        console.warn("[precompute] radar recap failed:", (err as Error).message);
+        logDiagError("radar-recap", err, { label });
+      }
+    }
+
     const duration = Date.now() - start;
     console.log(`[precompute] All done in ${(duration / 1000).toFixed(1)}s (${cache.keys().length} keys cached)`);
     logDiag("precompute-phase", {

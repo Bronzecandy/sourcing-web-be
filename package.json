@@ -24,7 +24,9 @@
     "smoke:local": "tsx src/scripts/smoke-local.ts",
     "apply:crawl-indexes": "tsx src/scripts/apply-crawl-db-indexes.ts",
     "bench:distribution-concurrency": "tsx src/scripts/bench-distribution-concurrency.ts",
-    "peek:tags": "tsx src/scripts/peek-app-raw-tags.ts"
+    "peek:tags": "tsx src/scripts/peek-app-raw-tags.ts",
+    "seatalk:top20": "tsx src/scripts/seatalk-top20.ts",
+    "radar:recap": "tsx src/scripts/radar-recap.ts"
   },
   "keywords": [],
   "author": "",
@@ -36,7 +38,9 @@
     "@types/multer": "^2.1.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
+    "docx": "^9.13.0",
     "dotenv": "^17.4.1",
+    "exceljs": "^4.4.0",
     "express": "^5.2.1",
     "google-auth-library": "^10.6.2",
     "google-translate-api-x": "^10.7.2",
