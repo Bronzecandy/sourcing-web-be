@@ -8,10 +8,14 @@ export function isSuperAdmin(role: UserRole): boolean {
   return role === "SUPER_ADMIN";
 }
 
+export function isTester(role: UserRole): boolean {
+  return role === "TESTER";
+}
+
 export function canAssignRole(actor: UserRole, target: UserRole): boolean {
   if (actor === "SUPER_ADMIN") return true;
   if (actor === "ADMIN") {
-    return target === "USER" || target === "STAFF" || target === "ADMIN";
+    return target === "USER" || target === "STAFF" || target === "ADMIN" || target === "TESTER";
   }
   return false;
 }

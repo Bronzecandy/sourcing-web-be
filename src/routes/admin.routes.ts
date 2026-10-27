@@ -11,9 +11,11 @@ const router = Router();
 
 router.use(requireAuth, requirePanelAdmin);
 
-router.get("/users", async (_req, res) => {
+router.get("/users", async (req, res) => {
   try {
+    const includeTesters = req.query.testers === "1";
     const users = await prismaApp.user.findMany({
+      where: includeTesters ? undefined : { role: { not: "TESTER" } },
       orderBy: { createdAt: "desc" },
       include: { permissions: true },
     });

@@ -42,13 +42,33 @@ export function getOAuthClient(): OAuth2Client {
   return new OAuth2Client(clientId, clientSecret, `${apiBaseUrl()}/api/auth/google/callback`);
 }
 
-export function getGoogleAuthUrl(): string {
+/** Trang khởi tạo đăng nhập: Sourcing (mặc định) hoặc Tester Program (/tester). */
+export type LoginPortal = "sourcing" | "tester";
+
+export function parseLoginPortal(value: unknown): LoginPortal {
+  return value === "tester" ? "tester" : "sourcing";
+}
+
+export function getGoogleAuthUrl(portal: LoginPortal = "sourcing"): string {
   const client = getOAuthClient();
   return client.generateAuthUrl({
     access_type: "online",
     scope: ["openid", "email", "profile"],
     prompt: "select_account",
+    state: portal,
   });
+}
+
+/** TESTER_ALLOWED_EMAIL_DOMAINS="garena.vn,garena.com" — để trống thì mọi Google account đều đăng ký được. */
+function testerEmailAllowed(email: string): boolean {
+  const raw = process.env.TESTER_ALLOWED_EMAIL_DOMAINS?.trim();
+  if (!raw) return true;
+  const domain = email.split("@")[1]?.toLowerCase() ?? "";
+  return raw
+    .split(",")
+    .map((d) => d.trim().toLowerCase())
+    .filter(Boolean)
+    .some((d) => domain === d || domain.endsWith(`.${d}`));
 }
 
 export async function userToDto(
@@ -167,7 +187,7 @@ export async function grantAllPermissions(userId: string): Promise<void> {
   }
 }
 
-export async function handleGoogleCallback(code: string): Promise<AuthUserDto> {
+export async function handleGoogleCallback(code: string, portal: LoginPortal = "sourcing"): Promise<AuthUserDto> {
   const client = getOAuthClient();
   const { tokens } = await client.getToken(code);
   if (!tokens.id_token) throw new Error("No id_token from Google");
@@ -204,14 +224,16 @@ export async function handleGoogleCallback(code: string): Promise<AuthUserDto> {
         include: { permissions: true },
       });
     } else {
+      const asTester = portal === "tester" && !isBootstrap;
+      if (asTester && !testerEmailAllowed(email)) throw new Error("TESTER_EMAIL_NOT_ALLOWED");
       user = await prismaApp.user.create({
         data: {
           googleSub: payload.sub,
           email,
           name: payload.name ?? null,
           avatarUrl: payload.picture ?? null,
-          status: isBootstrap ? "ACTIVE" : "PENDING",
-          role: isBootstrap ? "SUPER_ADMIN" : "USER",
+          status: isBootstrap || asTester ? "ACTIVE" : "PENDING",
+          role: isBootstrap ? "SUPER_ADMIN" : asTester ? "TESTER" : "USER",
         },
         include: { permissions: true },
       });
@@ -306,8 +328,9 @@ const ROUTE_PERMISSION_FALLBACK: Array<{ perm: PermissionKey; path: string }> = 
   { perm: "libraries.read", path: "/libraries" },
 ];
 
-export function redirectAfterLogin(user: AuthUserDto): string {
+export function redirectAfterLogin(user: AuthUserDto, portal: LoginPortal = "sourcing"): string {
   const base = frontendUrl();
+  if (portal === "tester" || user.role === "TESTER") return `${base}/tester`;
   if (user.status === "PENDING") return `${base}/waiting`;
   if (user.isPanelAdmin) {
     const first = ROUTE_PERMISSION_FALLBACK.find((r) => user.permissions[r.perm]);
@@ -315,7 +338,7 @@ export function redirectAfterLogin(user: AuthUserDto): string {
     return `${base}/admin/users`;
   }
   const first = ROUTE_PERMISSION_FALLBACK.find((r) => user.permissions[r.perm]);
-  if (!first) return `${base}/waiting`;
+  if (!first) return user.permissions["tester.manage"] ? `${base}/tester/admin` : `${base}/waiting`;
   if (first.path === "/") return `${base}/`;
   return `${base}${first.path}`;
 }

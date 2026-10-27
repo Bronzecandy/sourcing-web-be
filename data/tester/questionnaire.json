@@ -1,0 +1,1050 @@
+{
+  "slug": "tester-profile",
+  "version": 1,
+  "title": "Game Tester Profile",
+  "introduction": "Bảng hỏi giúp team New Games hiểu thói quen chơi game của bạn để mời bạn test đúng dòng game phù hợp. Mất khoảng 10 phút, bạn có thể cập nhật lại bất cứ lúc nào.",
+  "questions": [
+    {
+      "number": 1,
+      "text": "Tên bạn là gì?",
+      "type": "text_single",
+      "mustAnswer": true,
+      "page": 1,
+      "pic": null,
+      "video": null,
+      "regex": null,
+      "semanticKey": "name",
+      "genreKey": null,
+      "options": []
+    },
+    {
+      "number": 2,
+      "text": "Bạn hiện đang làm việc ở văn phòng nào?",
+      "type": "single",
+      "mustAnswer": true,
+      "page": 1,
+      "pic": null,
+      "video": null,
+      "regex": null,
+      "semanticKey": "office",
+      "genreKey": null,
+      "options": [
+        {
+          "label": "Hà Nội",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "HCM",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        }
+      ]
+    },
+    {
+      "number": 3,
+      "text": "Bạn thuộc phòng ban/team game nào?",
+      "type": "single",
+      "mustAnswer": true,
+      "page": 1,
+      "pic": null,
+      "video": null,
+      "regex": null,
+      "semanticKey": "team",
+      "genreKey": null,
+      "options": [
+        {
+          "label": "AOV - Liên Quân Mobile",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "FF - Free Fire",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "FCO - FC Online",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "FCM - FC Mobile",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "3KD - Cái Thế Tranh Hùng",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "DF - Delta Force",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "GnG/New Games",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Reg Craftland",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Code",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "People (PPT/HRBP)",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Studio",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Finance",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "C&B",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Admin Game",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Purchasing",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "CS - Customer Services",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "IT (Helpdesk/Infra)",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "SO - Strategy & Operations",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Others",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        }
+      ]
+    },
+    {
+      "number": 4,
+      "text": "Bạn bao nhiêu tuổi?",
+      "type": "single",
+      "mustAnswer": true,
+      "page": 1,
+      "pic": null,
+      "video": null,
+      "regex": null,
+      "semanticKey": "age",
+      "genreKey": null,
+      "options": [
+        {
+          "label": "Dưới 20",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "20 - 25",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "25 - 30",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "30 - 35",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "35 - 40",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Trên 40",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        }
+      ]
+    },
+    {
+      "number": 5,
+      "text": "Bạn chơi game trên các nền tảng nào?  (Chọn tất cả nền tảng bạn có chơi game trong thời gian gần đây)",
+      "type": "multiple",
+      "mustAnswer": true,
+      "page": 1,
+      "pic": null,
+      "video": null,
+      "regex": null,
+      "semanticKey": "platforms",
+      "genreKey": null,
+      "options": [
+        {
+          "label": "Di động (Smartphone, Tablet)",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "PC (Desktop, Laptop)",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Console (Playstation, Xbox, Nintendo Switch, Steam Deck,...)",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        }
+      ]
+    },
+    {
+      "number": 6,
+      "text": "Giới tính của bạn là?",
+      "type": "single",
+      "mustAnswer": true,
+      "page": 1,
+      "pic": null,
+      "video": null,
+      "regex": null,
+      "semanticKey": "gender",
+      "genreKey": null,
+      "options": [
+        {
+          "label": "Nam",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Nữ",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Khác",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        }
+      ]
+    },
+    {
+      "number": 7,
+      "text": "Mỗi tuần, bạn thường dành ra bao nhiêu thời gian để chơi game cho mục đích giải trí (không tính thời gian chơi game vì lý do công việc)?",
+      "type": "single",
+      "mustAnswer": true,
+      "page": 1,
+      "pic": null,
+      "video": null,
+      "regex": null,
+      "semanticKey": "weekly_play",
+      "genreKey": null,
+      "options": [
+        {
+          "label": "Dưới 3 giờ (<30 phút mỗi ngày)",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "3 - 6 giờ (30 phút - 1 giờ mỗi ngày)",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "6 - 10 giờ (1 giờ - 1.5 giờ mỗi ngày)",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "10 - 15 giờ (1.5 - 2 giờ mỗi ngày)",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "15 - 20 giờ (2 giờ - 2.5 giờ mỗi ngày)",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "20 - 25 giờ (2.5 - 3 giờ mỗi ngày)",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Trên 25 giờ (Trên 3 giờ mỗi ngày)",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        }
+      ]
+    },
+    {
+      "number": 8,
+      "text": "Chọn những dòng game bạn có dành thời gian chơi nhiều trong khoảng 5 năm trở lại đây",
+      "type": "multiple",
+      "mustAnswer": true,
+      "page": 1,
+      "pic": null,
+      "video": null,
+      "regex": null,
+      "semanticKey": "genres",
+      "genreKey": null,
+      "options": [
+        {
+          "label": "MOBA (Liên Minh Huyền Thoại, Liên Quân Mobile, Mobile Legends Bang Bang,...)",
+          "jump": null,
+          "connect": [
+            9
+          ],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "FPS/Bắn Súng Góc Nhìn Thứ Nhất (Call of Duty, Delta Force, Overwatch, Valorant, CS:GO, Crossfire,...)",
+          "jump": null,
+          "connect": [
+            10
+          ],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Sinh Tồn Battle Royale (Free Fire, PUBG, Naraka Bladepoint,...)",
+          "jump": null,
+          "connect": [
+            11
+          ],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Auto Chess (Đấu Trường Chân Lý, Cờ Liên Quân,...)",
+          "jump": null,
+          "connect": [
+            12
+          ],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "CardRPG / IdleRPG (Cái Thế Tranh Hùng, Tiểu Yêu Tầm Đạo, AFK Journey, AFK Arena,...)",
+          "jump": null,
+          "connect": [
+            13
+          ],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "ActionRPG (Genshin Impact, Where Winds Meet, Diablo IV... )",
+          "jump": null,
+          "connect": [
+            14
+          ],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "MMORPG (Linage II, MU Legend, Võ Lâm Truyền Kỳ,...)",
+          "jump": null,
+          "connect": [
+            15
+          ],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Thể Thao / Đua Xe (FC Online, FC Mobile, NBA, Asphalt, Need for Speed,...)",
+          "jump": null,
+          "connect": [
+            16
+          ],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Extraction (Escape from Tarkov, Dark and Darker, Escape from Duckov, Delta Force: Chiến Dịch Sinh Tồn,...)",
+          "jump": null,
+          "connect": [
+            17
+          ],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Chiến thuật/SLG (Starcraft, Age of Empire, Clash of Clans, Rise of Kingdoms, Lord Mobile,...)",
+          "jump": null,
+          "connect": [
+            18
+          ],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Mô phỏng/Nông trại (Hayday, The Sims, Stardew Valley,...)",
+          "jump": null,
+          "connect": [
+            19
+          ],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Casual/Hypercasual (Block Blast, Coin Master, Candy Crush Saga, Homescape, Billard 8 Pool...)",
+          "jump": null,
+          "connect": [
+            20
+          ],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Sandbox (Minecraft, Roblox, Miniworld,...)",
+          "jump": null,
+          "connect": [
+            21
+          ],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Party/Hội Nhóm (Among Us, Goose Goose Duck, các trò chơi Boardgame...)",
+          "jump": null,
+          "connect": [
+            22
+          ],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Khác, vui lòng nêu rõ.",
+          "jump": null,
+          "connect": [
+            23
+          ],
+          "fix": true,
+          "exclusive": false,
+          "textInput": true
+        }
+      ]
+    },
+    {
+      "number": 9,
+      "text": "Ghi các tựa game bạn chơi trong dòng MOBA (Liên Minh Huyền Thoại, Liên Quân Mobile, Mobile Legends Bang Bang,...), kèm theo (1) thời gian hoặc số trận đã chơi đã chơi và (2) xếp hạng/cấp độ nhân vật nếu cóVí dụ:- Liên Quân Mobile - 1000 trận - Chiến Tướng",
+      "type": "text_single",
+      "mustAnswer": true,
+      "page": 1,
+      "pic": null,
+      "video": null,
+      "regex": null,
+      "semanticKey": "genre_detail",
+      "genreKey": "MOBA",
+      "options": []
+    },
+    {
+      "number": 10,
+      "text": "Ghi các tựa game bạn chơi trong dòng Bắn Súng Góc Nhìn Thứ Nhất/FPS (Call of Duty, Delta Force, Valorant, CS:GO, Crossfire,...), kèm theo (1) thời gian hoặc số trận đã chơi đã chơi và (2) xếp hạng/cấp độ nếu có Ví dụ:- Delta Force - 200 trận - Đại Tướng",
+      "type": "text_single",
+      "mustAnswer": true,
+      "page": 1,
+      "pic": null,
+      "video": null,
+      "regex": null,
+      "semanticKey": "genre_detail",
+      "genreKey": "FPS",
+      "options": []
+    },
+    {
+      "number": 11,
+      "text": "Ghi các tựa game bạn chơi trong dòng Battle Royale (Free Fire, PUBG, Naraka Bladepoint,...), kèm theo (1) thời gian hoặc số trận đã chơi đã chơi và (2) xếp hạng/cấp độ nếu có Ví dụ:- Free Fire - 500 Trận - Siêu Huyền Thoại",
+      "type": "text_single",
+      "mustAnswer": true,
+      "page": 1,
+      "pic": null,
+      "video": null,
+      "regex": null,
+      "semanticKey": "genre_detail",
+      "genreKey": "BR",
+      "options": []
+    },
+    {
+      "number": 12,
+      "text": "Ghi các tựa game bạn chơi trong dòng Auto Chess (Đấu Trường Chân Lý, Cờ Liên Quân,...), kèm theo (1) thời gian hoặc số trận đã chơi đã chơi và (2) xếp hạng/cấp độ nếu cóVí dụ:- TFT - 1000 trận - Cao Thủ",
+      "type": "text_single",
+      "mustAnswer": true,
+      "page": 1,
+      "pic": null,
+      "video": null,
+      "regex": null,
+      "semanticKey": "genre_detail",
+      "genreKey": "Autochess",
+      "options": []
+    },
+    {
+      "number": 13,
+      "text": "Ghi các tựa game bạn chơi trong dòng CardRPG / IdleRPG (Cái Thế Tranh Hùng, Tiểu Yêu Tầm Đạo, AFK Journey, AFK Arena,...), kèm theo (1) thời gian hoặc số trận đã chơi đã chơi và (2) cấp độ nếu có Ví dụ:- Cái Thế Tranh Hùng - 200 giờ - lv 80",
+      "type": "text_single",
+      "mustAnswer": true,
+      "page": 1,
+      "pic": null,
+      "video": null,
+      "regex": null,
+      "semanticKey": "genre_detail",
+      "genreKey": "CardRPG",
+      "options": []
+    },
+    {
+      "number": 14,
+      "text": "Ghi các tựa game bạn chơi trong dòng ActionRPG (Genshin Impact, Where Winds Meet, Diablo IV... ), kèm theo (1) thời gian hoặc số trận đã chơi đã chơi vàVí dụ:- Genshin Impact - 200 giờ",
+      "type": "text_single",
+      "mustAnswer": true,
+      "page": 1,
+      "pic": null,
+      "video": null,
+      "regex": null,
+      "semanticKey": "genre_detail",
+      "genreKey": "ARPG",
+      "options": []
+    },
+    {
+      "number": 15,
+      "text": "Ghi các tựa game bạn chơi trong dòng MMORPG (Linage II, MU Legend, Võ Lâm Truyền Kỳ, Nghịch Thủy Hàn,...), kèm theo (1) thời gian hoặc số trận đã chơi đã chơi- Linage II - 200 giờ",
+      "type": "text_single",
+      "mustAnswer": true,
+      "page": 1,
+      "pic": null,
+      "video": null,
+      "regex": null,
+      "semanticKey": "genre_detail",
+      "genreKey": "MMORPG",
+      "options": []
+    },
+    {
+      "number": 16,
+      "text": "Ghi các tựa game bạn chơi trong dòng Thể Thao / Đua Xe (FC Online, FC Mobile, NBA, Asphalt, Need for Speed,...), kèm theo (1) thời gian hoặc số trận đã chơi đã chơi và (2) xếp hạng/cấp độ nếu có Ví dụ:- FC Mobile - 200 giờ - Huyền Thoại",
+      "type": "text_single",
+      "mustAnswer": true,
+      "page": 1,
+      "pic": null,
+      "video": null,
+      "regex": null,
+      "semanticKey": "genre_detail",
+      "genreKey": "Sport",
+      "options": []
+    },
+    {
+      "number": 17,
+      "text": "Ghi các tựa game bạn chơi trong dòng Extraction (Escape from Tarkov, Dark and Darker, Escape from Duckov, Delta Force: Chiến Dịch Sinh Tồn,...), kèm theo (1) thời gian hoặc số trận đã chơi đã chơi và (2) xếp hạng/cấp độ nếu có  Ví dụ:- Delta Force: Chiến Dịch Sinh Tồn - 200 giờ - Đại Tướng",
+      "type": "text_single",
+      "mustAnswer": true,
+      "page": 1,
+      "pic": null,
+      "video": null,
+      "regex": null,
+      "semanticKey": "genre_detail",
+      "genreKey": "Extraction",
+      "options": []
+    },
+    {
+      "number": 18,
+      "text": "Ghi các tựa game bạn chơi trong dòng Chiến thuật/SLG (Starcraft, Age of Empire, Clash of Clans, Rise of Kingdoms, Lord Mobile,...), kèm theo (1) thời gian hoặc số trận đã chơiVí dụ:- Clash of Clans - 200 giờ",
+      "type": "text_single",
+      "mustAnswer": true,
+      "page": 1,
+      "pic": null,
+      "video": null,
+      "regex": null,
+      "semanticKey": "genre_detail",
+      "genreKey": "SLG",
+      "options": []
+    },
+    {
+      "number": 19,
+      "text": "Ghi các tựa game bạn chơi trong dòng Mô phỏng/Nông trại (Hayday, The Sims, Stardew Valley,...), kèm theo (1) thời gian hoặc số trận đã chơi đã chơi Ví dụ:- Hayday - 200 giờ",
+      "type": "text_single",
+      "mustAnswer": true,
+      "page": 1,
+      "pic": null,
+      "video": null,
+      "regex": null,
+      "semanticKey": "genre_detail",
+      "genreKey": "Simulator",
+      "options": []
+    },
+    {
+      "number": 20,
+      "text": "Ghi các tựa game bạn chơi trong dòng Casual/Hypercasual (Block Blast, Coin Master, Candy Crush Saga, Homescape,...), kèm theo (1) thời gian hoặc số trận đã chơi đã chơiVí dụ:- Block Blast - 200 giờ",
+      "type": "text_single",
+      "mustAnswer": true,
+      "page": 1,
+      "pic": null,
+      "video": null,
+      "regex": null,
+      "semanticKey": "genre_detail",
+      "genreKey": "Casual",
+      "options": []
+    },
+    {
+      "number": 21,
+      "text": "Ghi các tựa game bạn chơi trong dòng Sandbox (Minecraft, Roblox, Miniworld,...), kèm theo (1) thời gian hoặc số trận đã chơi đã chơiVí dụ:- Roblox - 200 giờ",
+      "type": "text_single",
+      "mustAnswer": true,
+      "page": 1,
+      "pic": null,
+      "video": null,
+      "regex": null,
+      "semanticKey": "genre_detail",
+      "genreKey": "Sandbox",
+      "options": []
+    },
+    {
+      "number": 22,
+      "text": "Ghi các tựa game bạn chơi trong dòng Party/Hội Nhóm (Among Us, Goose Goose Duck, các trò chơi Boardgame...), kèm theo (1) thời gian hoặc số trận đã chơi đã chơi Ví dụ:- Among Us - 200 giờ",
+      "type": "text_single",
+      "mustAnswer": true,
+      "page": 1,
+      "pic": null,
+      "video": null,
+      "regex": null,
+      "semanticKey": "genre_detail",
+      "genreKey": "Party",
+      "options": []
+    },
+    {
+      "number": 23,
+      "text": "Các tựa game \"Khác\" bạn chơi là gì? Ghi kèm theo số giờ chơi và xếp hạng/cấp độ nếu có.  Ví dụ:- Liên Quân Mobile - 1000 trận - Chiến Tướng- Cái Thế Tranh Hùng - 200 giờ - Lv. 80",
+      "type": "text_single",
+      "mustAnswer": true,
+      "page": 1,
+      "pic": null,
+      "video": null,
+      "regex": null,
+      "semanticKey": "other_games",
+      "genreKey": "Other",
+      "options": []
+    },
+    {
+      "number": 24,
+      "text": "Vậy đâu là dòng game bạn THÍCH NHẤT?",
+      "type": "single",
+      "mustAnswer": true,
+      "page": 1,
+      "pic": null,
+      "video": null,
+      "regex": null,
+      "semanticKey": "favorite_genre",
+      "genreKey": null,
+      "options": [
+        {
+          "label": "MOBA (Liên Minh Huyền Thoại, Liên Quân Mobile, Mobile Legends Bang Bang,...)",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Bắn Súng/FPS (Call of Duty, Delta Force, Valorant, CS:GO, Crossfire,...)",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Battle Royale (Free Fire, PUBG, Naraka Bladepoint,...)",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Auto Chess (Đấu Trường Chân Lý, Cờ Liên Quân,...)",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Card RPG / Idle RPG (Cái Thế Tranh Hùng, Tiểu Yêu Tầm Đạo, AFK Journey, AFK Arena,...)",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "ActionRPG (Genshin Impact, Where Winds Meet, Diablo IV... )",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "MMORPG (Linage II, MU Legend, Võ Lâm Truyền Kỳ,...)",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Thể Thao / Đua Xe (FC Online, FC Mobile, NBA, Asphalt, Need for Speed,...)",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Extraction (Escape from Tarkov, Dark and Darker, Escape from Duckov, Delta Force: Chiến Dịch Sinh Tồn,...)",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Chiến thuật/SLG (Starcraft, Age of Empire, Clash of Clans, Rise of Kingdoms, Lord Mobile,...)",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Mô phỏng/Nông trại (Hayday, The Sims, Stardew Valley,...)",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Casual/Hypercasual (Block Blast, Coin Master, Candy Crush Saga, Homescape,...)",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Sandbox (Minecraft, Roblox, Miniworld,...)",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Party/Hội Nhóm (Among Us, Goose Goose Duck, các trò chơi Boardgame...)",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Khác, vui lòng nêu rõ.",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        }
+      ]
+    },
+    {
+      "number": 25,
+      "text": "Bạn sẵn sàng bỏ ra bao nhiêu tiền cho game trong 1 tháng?",
+      "type": "single",
+      "mustAnswer": false,
+      "page": 1,
+      "pic": null,
+      "video": null,
+      "regex": null,
+      "semanticKey": "pay",
+      "genreKey": null,
+      "options": [
+        {
+          "label": "Dưới 100.000 VND",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "100.000 - 200.000 VND",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "200.000 - 400.000 VND",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "400.000 - 600.000 VND",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "600.000 - 1.000.000 VND",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "1.000.000 - 2.000.000 VND",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "2.000.000 - 4.000.000 VND",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Trên 4.000.000 VND",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        }
+      ]
+    },
+    {
+      "number": 26,
+      "text": "Trong trường hợp team New Game cần bạn trải nghiệm một tựa game thuộc dòng game bạn yêu thích hoặc có kinh nghiệm, bạn nghĩ mình sẽ có thể dành bao nhiêu thời gian trong 1 TUẦN để hỗ trợ test game?",
+      "type": "single",
+      "mustAnswer": true,
+      "page": 1,
+      "pic": null,
+      "video": null,
+      "regex": null,
+      "semanticKey": "test_time",
+      "genreKey": null,
+      "options": [
+        {
+          "label": "Dưới 1 giờ",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "1-2 giờ",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "2-4 giờ",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "4-6 giờ",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        },
+        {
+          "label": "Trên 6 giờ",
+          "jump": null,
+          "connect": [],
+          "fix": true,
+          "exclusive": false,
+          "textInput": false
+        }
+      ]
+    }
+  ]
+}

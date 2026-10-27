@@ -17,6 +17,7 @@ enum UserRole {
   ADMIN
   STAFF
   USER
+  TESTER
 }
 
 model User {
@@ -32,6 +33,10 @@ model User {
   permissions  UserPermission[]
   aiAnalyses   UserAiAnalysis[]
   aiCompares   UserAiCompare[]
+  surveyResponses    SurveyResponse[]
+  testerProfile      TesterProfile?
+  testAssignments    TestAssignment[]
+  benefitRedemptions BenefitRedemption[]
 }
 
 model UserPermission {
@@ -158,6 +163,210 @@ model RadarRecapRow {
   @@unique([date, board, rank])
   @@index([date, board])
   @@index([appId, date])
+}
+
+/// Bảng hỏi Tester Program (cấu hình theo format survey-toolkit, seed từ tab Questionnaire).
+model SurveyForm {
+  id           String           @id @default(cuid())
+  slug         String           @unique
+  version      Int              @default(1)
+  title        String
+  introduction String
+  supplement   String?
+  isActive     Boolean          @default(true)
+  createdAt    DateTime         @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime         @updatedAt @db.Timestamptz(6)
+  questions    SurveyQuestion[]
+  responses    SurveyResponse[]
+}
+
+model SurveyQuestion {
+  id          String         @id @default(cuid())
+  formId      String
+  /// Cột c trong file cấu hình.
+  number      Int
+  code        String
+  text        String
+  /// text_single | text_multiple | text_num | single | multiple | matrixs
+  type        String
+  mustAnswer  Boolean        @default(true)
+  page        Int            @default(1)
+  pic         String?
+  video       String?
+  regex       String?
+  /// name | office | team | age | platforms | gender | weekly_play | genres | genre_detail | other_games | favorite_genre | pay | test_time
+  semanticKey String?
+  genreKey    String?
+  form        SurveyForm     @relation(fields: [formId], references: [id], onDelete: Cascade)
+  options     SurveyOption[]
+
+  @@unique([formId, number])
+}
+
+model SurveyOption {
+  id         String         @id @default(cuid())
+  questionId String
+  order      Int
+  label      String
+  value      String
+  jump       Int?
+  connect    Int[]
+  fix        Boolean        @default(true)
+  exclusive  Boolean        @default(false)
+  textInput  Boolean        @default(false)
+  question   SurveyQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([questionId, order])
+}
+
+/// Mỗi lần nộp bảng hỏi (giữ lịch sử; bản mới nhất dựng TesterProfile).
+model SurveyResponse {
+  id          String     @id @default(cuid())
+  formId      String
+  formVersion Int
+  userId      String
+  answers     Json
+  startedAt   DateTime?  @db.Timestamptz(6)
+  submittedAt DateTime   @default(now()) @db.Timestamptz(6)
+  durationSec Int?
+  device      String?
+  /// web | sheet-import
+  source      String     @default("web")
+  form        SurveyForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, submittedAt(sort: Desc)])
+}
+
+model TesterProfile {
+  userId          String             @id
+  name            String
+  office          String?
+  team            String?
+  ageRange        String?
+  /// MB | PC | CS
+  platforms       String[]
+  gender          String?
+  weeklyPlayLabel String?
+  weeklyPlayLevel Int?
+  payLabel        String?
+  payTier         String?
+  testTimeLabel   String?
+  favoriteGenre   String?
+  genres          String[]
+  active          Boolean            @default(true)
+  /// pending | scoring | scored | failed
+  scoringStatus   String             @default("pending")
+  scoredAt        DateTime?          @db.Timestamptz(6)
+  responseId      String?
+  createdAt       DateTime           @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime           @updatedAt @db.Timestamptz(6)
+  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  genreScores     TesterGenreScore[]
+}
+
+/// Điểm hardcore 0–100 theo dòng game (volume + rank, port từ Hardcore Score.gs).
+model TesterGenreScore {
+  userId       String
+  genre        String
+  rawText      String
+  rawHash      String
+  volumeScore  Int
+  rankScore    Int
+  hasRank      Boolean
+  hours        Int
+  matches      Int
+  anchorGame   String?
+  bestRank     String?
+  matchedGames Json
+  finalScore   Int
+  /// ai | sheet
+  source       String        @default("ai")
+  model        String?
+  scoredAt     DateTime      @default(now()) @db.Timestamptz(6)
+  profile      TesterProfile @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@id([userId, genre])
+  @@index([genre, finalScore])
+}
+
+/// Thư viện game dùng khi chấm hardcore (tên/alias → genre); AI bổ sung game mới.
+model GameLibraryEntry {
+  id            String   @id @default(cuid())
+  canonicalName String   @unique
+  aliases       String[]
+  genres        String[]
+  subgenres     String[]
+  /// seed | sheet | ai_classified | manual
+  source        String
+  confidence    Int
+  notes         String?
+  updatedAt     DateTime @updatedAt @db.Timestamptz(6)
+}
+
+/// Cache kết quả chấm theo hash(genre|raw) — cùng câu trả lời không gọi AI lại.
+model TesterScoreCache {
+  key       String   @id
+  result    Json
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+}
+
+/// Đợt test (thay tab Game Data); appId gắn TapTap để Radar đọc tình trạng test nội bộ.
+model TestCampaign {
+  id            String           @id @default(cuid())
+  gameName      String
+  appId         Int?
+  genre         String?
+  platform      String?
+  mainTags      String[]
+  secondaryTags String[]
+  workloadHours Float            @default(0)
+  startDate     DateTime?        @db.Date
+  endDate       DateTime?        @db.Date
+  team          String?
+  /// planned | running | done | cancelled
+  status        String           @default("planned")
+  /// suitable | unsuitable
+  result        String?
+  resultNote    String?
+  createdBy     String?
+  createdAt     DateTime         @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime         @updatedAt @db.Timestamptz(6)
+  assignments   TestAssignment[]
+
+  @@index([appId])
+  @@index([status, startDate])
+}
+
+/// Tester được gán vào đợt test (thay tab Test Instance Data).
+model TestAssignment {
+  id            String       @id @default(cuid())
+  campaignId    String
+  userId        String
+  workloadHours Float?
+  completed     Boolean      @default(false)
+  completedAt   DateTime?    @db.Timestamptz(6)
+  note          String?
+  createdAt     DateTime     @default(now()) @db.Timestamptz(6)
+  campaign      TestCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, userId])
+  @@index([userId])
+}
+
+/// Benefit đã dùng (cột Used_benefit cũ); benefit có = round(giờ test hoàn thành / 3).
+model BenefitRedemption {
+  id        String   @id @default(cuid())
+  userId    String
+  amount    Int
+  item      String
+  note      String?
+  createdBy String?
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 /// Snapshot TapTap hằng ngày của game trong 3 bảng Radar — so lịch ra mắt/test giữa 2 kỳ.

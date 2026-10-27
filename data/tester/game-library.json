@@ -1,0 +1,1035 @@
+[
+  {
+    "canonicalName": "Teamfight Tactics",
+    "aliases": [
+      "tft",
+      "teamfight tactics"
+    ],
+    "genres": [
+      "autochess"
+    ],
+    "subgenres": [
+      "auto battler"
+    ],
+    "source": "seed",
+    "confidence": 100,
+    "notes": "Autochess"
+  },
+  {
+    "canonicalName": "Auto Chess",
+    "aliases": [
+      "auto chess"
+    ],
+    "genres": [
+      "autochess"
+    ],
+    "subgenres": [
+      "auto battler"
+    ],
+    "source": "seed",
+    "confidence": 100,
+    "notes": "Autochess"
+  },
+  {
+    "canonicalName": "Dota Underlords",
+    "aliases": [
+      "dota underlords",
+      "underlords"
+    ],
+    "genres": [
+      "autochess"
+    ],
+    "subgenres": [
+      "auto battler"
+    ],
+    "source": "seed",
+    "confidence": 95,
+    "notes": "Autochess"
+  },
+  {
+    "canonicalName": "Chess Rush",
+    "aliases": [
+      "chess rush"
+    ],
+    "genres": [
+      "autochess"
+    ],
+    "subgenres": [
+      "auto battler"
+    ],
+    "source": "seed",
+    "confidence": 95,
+    "notes": "Autochess"
+  },
+  {
+    "canonicalName": "Magic Chess",
+    "aliases": [
+      "magic chess"
+    ],
+    "genres": [
+      "autochess"
+    ],
+    "subgenres": [
+      "auto battler"
+    ],
+    "source": "seed",
+    "confidence": 95,
+    "notes": "Autochess"
+  },
+  {
+    "canonicalName": "Gold and Glory",
+    "aliases": [
+      "gold and glory",
+      "gng"
+    ],
+    "genres": [
+      "extraction"
+    ],
+    "subgenres": [
+      "fantasy extraction",
+      "pvpve dungeon crawler"
+    ],
+    "source": "seed",
+    "confidence": 100,
+    "notes": "Internal / niche extraction title"
+  },
+  {
+    "canonicalName": "Escape from Tarkov",
+    "aliases": [
+      "escape from tarkov",
+      "tarkov",
+      "eft"
+    ],
+    "genres": [
+      "extraction"
+    ],
+    "subgenres": [
+      "hardcore extraction shooter"
+    ],
+    "source": "seed",
+    "confidence": 100,
+    "notes": "Extraction"
+  },
+  {
+    "canonicalName": "Dark and Darker",
+    "aliases": [
+      "dark and darker"
+    ],
+    "genres": [
+      "extraction"
+    ],
+    "subgenres": [
+      "fantasy extraction",
+      "pvpve dungeon crawler"
+    ],
+    "source": "seed",
+    "confidence": 100,
+    "notes": "Extraction"
+  },
+  {
+    "canonicalName": "Hunt: Showdown",
+    "aliases": [
+      "hunt showdown",
+      "hunt: showdown",
+      "hunt"
+    ],
+    "genres": [
+      "extraction"
+    ],
+    "subgenres": [
+      "extraction shooter",
+      "pvpve"
+    ],
+    "source": "seed",
+    "confidence": 95,
+    "notes": "Extraction"
+  },
+  {
+    "canonicalName": "Marauders",
+    "aliases": [
+      "marauders"
+    ],
+    "genres": [
+      "extraction"
+    ],
+    "subgenres": [
+      "space extraction shooter"
+    ],
+    "source": "seed",
+    "confidence": 95,
+    "notes": "Extraction"
+  },
+  {
+    "canonicalName": "League of Legends",
+    "aliases": [
+      "league of legends",
+      "lol",
+      "liên minh"
+    ],
+    "genres": [
+      "moba"
+    ],
+    "subgenres": [
+      "moba"
+    ],
+    "source": "seed",
+    "confidence": 100,
+    "notes": "MOBA"
+  },
+  {
+    "canonicalName": "Dota 2",
+    "aliases": [
+      "dota 2"
+    ],
+    "genres": [
+      "moba"
+    ],
+    "subgenres": [
+      "moba"
+    ],
+    "source": "seed",
+    "confidence": 100,
+    "notes": "MOBA"
+  },
+  {
+    "canonicalName": "Arena of Valor",
+    "aliases": [
+      "arena of valor",
+      "aov",
+      "liên quân"
+    ],
+    "genres": [
+      "moba"
+    ],
+    "subgenres": [
+      "moba"
+    ],
+    "source": "seed",
+    "confidence": 100,
+    "notes": "MOBA"
+  },
+  {
+    "canonicalName": "VALORANT",
+    "aliases": [
+      "valorant"
+    ],
+    "genres": [
+      "fps"
+    ],
+    "subgenres": [
+      "tactical shooter"
+    ],
+    "source": "seed",
+    "confidence": 100,
+    "notes": "FPS"
+  },
+  {
+    "canonicalName": "Counter-Strike 2",
+    "aliases": [
+      "counter-strike 2",
+      "cs2",
+      "csgo",
+      "counter strike 2"
+    ],
+    "genres": [
+      "fps"
+    ],
+    "subgenres": [
+      "tactical shooter"
+    ],
+    "source": "seed",
+    "confidence": 100,
+    "notes": "FPS"
+  },
+  {
+    "canonicalName": "PUBG: Battlegrounds",
+    "aliases": [
+      "pubg",
+      "pubg battlegrounds"
+    ],
+    "genres": [
+      "battleroyale"
+    ],
+    "subgenres": [
+      "battle royale"
+    ],
+    "source": "seed",
+    "confidence": 100,
+    "notes": "Battle royale"
+  },
+  {
+    "canonicalName": "Free Fire",
+    "aliases": [
+      "Garena Free Fire",
+      "FF"
+    ],
+    "genres": [
+      "Battle Royale"
+    ],
+    "subgenres": [
+      "Survival",
+      "Shooter"
+    ],
+    "source": "ai_classified",
+    "confidence": 90,
+    "notes": "Free Fire is a popular battle royale game where players compete to be the last one standing."
+  },
+  {
+    "canonicalName": "Đấu Trường Chân Lý",
+    "aliases": [
+      "TFT",
+      "Teamfight Tactics"
+    ],
+    "genres": [
+      "autochess"
+    ],
+    "subgenres": [],
+    "source": "ai_classified",
+    "confidence": 90,
+    "notes": "Game thuộc thể loại autochess, nơi người chơi xây dựng đội hình và chiến đấu tự động."
+  },
+  {
+    "canonicalName": "Monster Hunter World",
+    "aliases": [
+      "MHW"
+    ],
+    "genres": [
+      "Action RPG"
+    ],
+    "subgenres": [
+      "Action",
+      "Adventure"
+    ],
+    "source": "ai_classified",
+    "confidence": 80,
+    "notes": "Game có yếu tố RPG rõ ràng nhưng chủ yếu tập trung vào hành động và săn quái vật."
+  },
+  {
+    "canonicalName": "Elden Ring",
+    "aliases": [
+      "Elden Ring"
+    ],
+    "genres": [
+      "action role-playing game"
+    ],
+    "subgenres": [
+      "open world",
+      "dark fantasy"
+    ],
+    "source": "ai_classified",
+    "confidence": 90,
+    "notes": "Elden Ring is primarily an action role-playing game (ARPG) with open-world elements, fitting well within the target genre."
+  },
+  {
+    "canonicalName": "Diablo 4",
+    "aliases": [
+      "Diablo IV"
+    ],
+    "genres": [
+      "Action RPG"
+    ],
+    "subgenres": [
+      "Dark Fantasy",
+      "Hack and Slash"
+    ],
+    "source": "ai_classified",
+    "confidence": 90,
+    "notes": "Diablo 4 is a well-known action RPG, fitting the target genre."
+  },
+  {
+    "canonicalName": "God of War series",
+    "aliases": [
+      "God of War",
+      "God of War: Ascension",
+      "God of War II",
+      "God of War III",
+      "God of War (2018)"
+    ],
+    "genres": [
+      "action",
+      "adventure",
+      "arpg"
+    ],
+    "subgenres": [
+      "hack and slash",
+      "mythology",
+      "narrative-driven"
+    ],
+    "source": "ai_classified",
+    "confidence": 85,
+    "notes": "The series features action RPG elements, including character progression and skill upgrades."
+  },
+  {
+    "canonicalName": "Arc Raider",
+    "aliases": [],
+    "genres": [
+      "extraction"
+    ],
+    "subgenres": [],
+    "source": "ai_classified",
+    "confidence": 80,
+    "notes": "Game có yếu tố hợp lý thuộc thể loại extraction."
+  },
+  {
+    "canonicalName": "Tốc Chiến",
+    "aliases": [
+      "Liên Minh Huyền Thoại: Tốc Chiến",
+      "Wild Rift"
+    ],
+    "genres": [
+      "moba"
+    ],
+    "subgenres": [
+      "multiplayer",
+      "action"
+    ],
+    "source": "ai_classified",
+    "confidence": 90,
+    "notes": "Game thuộc thể loại MOBA, tương tự như Liên Minh Huyền Thoại."
+  },
+  {
+    "canonicalName": "Counter-Strike: Global Offensive",
+    "aliases": [
+      "CS:GO"
+    ],
+    "genres": [
+      "fps"
+    ],
+    "subgenres": [
+      "tactical shooter"
+    ],
+    "source": "ai_classified",
+    "confidence": 95,
+    "notes": "Game thuộc thể loại bắn súng góc nhìn thứ nhất (FPS) với yếu tố chiến thuật cao."
+  },
+  {
+    "canonicalName": "PUBG",
+    "aliases": [
+      "PlayerUnknown's Battlegrounds"
+    ],
+    "genres": [
+      "Battle Royale"
+    ],
+    "subgenres": [
+      "Shooter"
+    ],
+    "source": "ai_classified",
+    "confidence": 90,
+    "notes": "PUBG is a well-known battle royale game."
+  },
+  {
+    "canonicalName": "PUBG Mobile",
+    "aliases": [
+      "PUBGM",
+      "PlayerUnknown's Battlegrounds Mobile"
+    ],
+    "genres": [
+      "Battle Royale"
+    ],
+    "subgenres": [
+      "Multiplayer",
+      "Shooter"
+    ],
+    "source": "ai_classified",
+    "confidence": 90,
+    "notes": "PUBG Mobile is a well-known battle royale game, fitting the target genre."
+  },
+  {
+    "canonicalName": "PlayerUnknown's Battlegrounds",
+    "aliases": [
+      "PUBG"
+    ],
+    "genres": [
+      "Battle Royale"
+    ],
+    "subgenres": [
+      "Survival",
+      "Shooter"
+    ],
+    "source": "ai_classified",
+    "confidence": 90,
+    "notes": "PUBG is a well-known battle royale game where players compete to be the last one standing."
+  },
+  {
+    "canonicalName": "FCM",
+    "aliases": [],
+    "genres": [
+      "sport"
+    ],
+    "subgenres": [],
+    "source": "ai_classified",
+    "confidence": 70,
+    "notes": "Game có thể thuộc thể loại thể thao nhưng cần thêm thông tin để xác nhận."
+  },
+  {
+    "canonicalName": "FCO",
+    "aliases": [],
+    "genres": [
+      "sport"
+    ],
+    "subgenres": [],
+    "source": "ai_classified",
+    "confidence": 80,
+    "notes": "Game có yếu tố thể thao, có khả năng thuộc thể loại này."
+  },
+  {
+    "canonicalName": "Minecraft",
+    "aliases": [
+      "Minecraft: Java Edition",
+      "Minecraft: Bedrock Edition"
+    ],
+    "genres": [
+      "sandbox"
+    ],
+    "subgenres": [
+      "survival",
+      "creative"
+    ],
+    "source": "ai_classified",
+    "confidence": 90,
+    "notes": "Minecraft is widely recognized as a sandbox game, allowing players to build and explore freely."
+  },
+  {
+    "canonicalName": "FC Online",
+    "aliases": [],
+    "genres": [
+      "sport"
+    ],
+    "subgenres": [
+      "football"
+    ],
+    "source": "ai_classified",
+    "confidence": 80,
+    "notes": "Game có yếu tố thể thao, chủ yếu xoay quanh bóng đá."
+  },
+  {
+    "canonicalName": "FC Mobile",
+    "aliases": [],
+    "genres": [
+      "sport"
+    ],
+    "subgenres": [
+      "mobile sports"
+    ],
+    "source": "ai_classified",
+    "confidence": 80,
+    "notes": "Game có tính chất thể thao, phù hợp với thể loại thể thao."
+  },
+  {
+    "canonicalName": "Cái Thế Tranh Hùng",
+    "aliases": [],
+    "genres": [
+      "cardrpg"
+    ],
+    "subgenres": [],
+    "source": "ai_classified",
+    "confidence": 70,
+    "notes": "Game có yếu tố thẻ bài và RPG, nhưng cần thêm thông tin để xác nhận hoàn toàn."
+  },
+  {
+    "canonicalName": "Escape From Duckov",
+    "aliases": [],
+    "genres": [
+      "extraction"
+    ],
+    "subgenres": [],
+    "source": "ai_classified",
+    "confidence": 80,
+    "notes": "Game có yếu tố thoát khỏi khu vực, phù hợp với thể loại extraction."
+  },
+  {
+    "canonicalName": "Among Ú",
+    "aliases": [],
+    "genres": [
+      "party"
+    ],
+    "subgenres": [],
+    "source": "ai_classified",
+    "confidence": 80,
+    "notes": "Game có yếu tố tương tác xã hội và chơi cùng bạn bè, phù hợp với thể loại party."
+  },
+  {
+    "canonicalName": "Action Role-Playing Game",
+    "aliases": [
+      "ARPG"
+    ],
+    "genres": [
+      "Role-Playing",
+      "Action"
+    ],
+    "subgenres": [
+      "Hack and Slash",
+      "Dungeon Crawler"
+    ],
+    "source": "ai_classified",
+    "confidence": 70,
+    "notes": "ARPGs are often favorites among players due to their engaging gameplay and character progression."
+  },
+  {
+    "canonicalName": "MOBA",
+    "aliases": [],
+    "genres": [
+      "Multiplayer Online Battle Arena"
+    ],
+    "subgenres": [],
+    "source": "ai_classified",
+    "confidence": 80,
+    "notes": "MOBA is a well-known genre that fits within the favorite category for many players."
+  },
+  {
+    "canonicalName": "Sport",
+    "aliases": [],
+    "genres": [
+      "Sports"
+    ],
+    "subgenres": [],
+    "source": "ai_classified",
+    "confidence": 70,
+    "notes": "Game thuộc thể loại thể thao, có khả năng được yêu thích."
+  },
+  {
+    "canonicalName": "Autochess",
+    "aliases": [
+      "Auto Chess"
+    ],
+    "genres": [
+      "Strategy"
+    ],
+    "subgenres": [
+      "Auto Battler"
+    ],
+    "source": "ai_classified",
+    "confidence": 80,
+    "notes": "Game thuộc thể loại chiến thuật, có thể được coi là yêu thích trong cộng đồng game thủ."
+  },
+  {
+    "canonicalName": "Rise of Kingdoms",
+    "aliases": [
+      "RoK"
+    ],
+    "genres": [
+      "strategy"
+    ],
+    "subgenres": [
+      "real-time strategy",
+      "mobile strategy"
+    ],
+    "source": "ai_classified",
+    "confidence": 85,
+    "notes": "Game có yếu tố chiến lược và quản lý tài nguyên, phù hợp với thể loại SLG."
+  },
+  {
+    "canonicalName": "Võ lâm truyền kỳ",
+    "aliases": [
+      "VLTK"
+    ],
+    "genres": [
+      "mmorpg"
+    ],
+    "subgenres": [
+      "fantasy",
+      "martial arts"
+    ],
+    "source": "ai_classified",
+    "confidence": 90,
+    "notes": "Game thuộc thể loại MMORPG với bối cảnh võ hiệp."
+  },
+  {
+    "canonicalName": "Thiên long bát bộ",
+    "aliases": [
+      "TLBB"
+    ],
+    "genres": [
+      "mmorpg"
+    ],
+    "subgenres": [
+      "fantasy",
+      "adventure"
+    ],
+    "source": "ai_classified",
+    "confidence": 85,
+    "notes": "Game thuộc thể loại MMORPG với bối cảnh fantasy."
+  },
+  {
+    "canonicalName": "Clash of Clans",
+    "aliases": [
+      "CoC"
+    ],
+    "genres": [
+      "Strategy"
+    ],
+    "subgenres": [
+      "Real-time strategy",
+      "Base building"
+    ],
+    "source": "ai_classified",
+    "confidence": 90,
+    "notes": "Clash of Clans is a strategy game that involves building and managing a base, which aligns with the SLG genre."
+  },
+  {
+    "canonicalName": "Hay Day",
+    "aliases": [
+      "HayDay"
+    ],
+    "genres": [
+      "simulator"
+    ],
+    "subgenres": [
+      "farming simulation"
+    ],
+    "source": "ai_classified",
+    "confidence": 90,
+    "notes": "Hay Day is a farming simulator game where players manage a farm, grow crops, and raise animals."
+  },
+  {
+    "canonicalName": "Coin Master",
+    "aliases": [
+      "Coin Master Game"
+    ],
+    "genres": [
+      "casual"
+    ],
+    "subgenres": [
+      "social casino",
+      "mobile game"
+    ],
+    "source": "ai_classified",
+    "confidence": 85,
+    "notes": "Game có yếu tố giải trí và tương tác xã hội, phù hợp với thể loại casual."
+  },
+  {
+    "canonicalName": "Roblox",
+    "aliases": [
+      "Roblox Studio"
+    ],
+    "genres": [
+      "sandbox"
+    ],
+    "subgenres": [
+      "multiplayer",
+      "social",
+      "building"
+    ],
+    "source": "ai_classified",
+    "confidence": 90,
+    "notes": "Roblox is a user-generated online platform that allows players to create and play games, fitting well within the sandbox genre."
+  },
+  {
+    "canonicalName": "Block man GO",
+    "aliases": [],
+    "genres": [
+      "sandbox"
+    ],
+    "subgenres": [],
+    "source": "ai_classified",
+    "confidence": 80,
+    "notes": "Game có yếu tố sandbox với khả năng xây dựng và khám phá."
+  },
+  {
+    "canonicalName": "Miniworld",
+    "aliases": [],
+    "genres": [
+      "sandbox"
+    ],
+    "subgenres": [],
+    "source": "ai_classified",
+    "confidence": 80,
+    "notes": "Game có yếu tố sandbox với khả năng xây dựng và khám phá."
+  },
+  {
+    "canonicalName": "Cyberpunk 2077",
+    "aliases": [
+      "Cyberpunk 2077: Night City",
+      "Cyberpunk 2077: Phantom Liberty"
+    ],
+    "genres": [
+      "Action RPG",
+      "Open World"
+    ],
+    "subgenres": [
+      "First-person shooter",
+      "Stealth"
+    ],
+    "source": "ai_classified",
+    "confidence": 70,
+    "notes": "Game primarily classified as Action RPG with FPS elements."
+  },
+  {
+    "canonicalName": "Tiểu yêu tầm đạo",
+    "aliases": [],
+    "genres": [
+      "cardrpg"
+    ],
+    "subgenres": [],
+    "source": "ai_classified",
+    "confidence": 70,
+    "notes": "Game có yếu tố thẻ bài và RPG, có khả năng thuộc thể loại cardrpg."
+  },
+  {
+    "canonicalName": "Where Winds Meet",
+    "aliases": [],
+    "genres": [
+      "Action RPG"
+    ],
+    "subgenres": [],
+    "source": "ai_classified",
+    "confidence": 80,
+    "notes": "Game có yếu tố hành động và nhập vai, phù hợp với thể loại ARPG."
+  },
+  {
+    "canonicalName": "Albion",
+    "aliases": [
+      "Albion Online"
+    ],
+    "genres": [
+      "MMORPG"
+    ],
+    "subgenres": [
+      "Sandbox",
+      "Fantasy"
+    ],
+    "source": "ai_classified",
+    "confidence": 90,
+    "notes": "Albion is a sandbox MMORPG with player-driven economy and open-world PvP."
+  },
+  {
+    "canonicalName": "The Sims",
+    "aliases": [
+      "Sims"
+    ],
+    "genres": [
+      "simulator"
+    ],
+    "subgenres": [
+      "life simulation"
+    ],
+    "source": "ai_classified",
+    "confidence": 90,
+    "notes": "The Sims is a life simulation game where players create and control people in a virtual world."
+  },
+  {
+    "canonicalName": "Homescape",
+    "aliases": [],
+    "genres": [
+      "casual"
+    ],
+    "subgenres": [
+      "puzzle",
+      "simulation"
+    ],
+    "source": "ai_classified",
+    "confidence": 80,
+    "notes": "Game có yếu tố giải đố và xây dựng, phù hợp với thể loại casual."
+  },
+  {
+    "canonicalName": "Crossfire-2931 trận-Thần Thoại",
+    "aliases": [],
+    "genres": [
+      "fps"
+    ],
+    "subgenres": [],
+    "source": "ai_classified",
+    "confidence": 80,
+    "notes": "Game có khả năng thuộc thể loại FPS dựa trên tên gọi."
+  },
+  {
+    "canonicalName": "PUBG-1917 trận-Thống Trị Siêu Việt",
+    "aliases": [],
+    "genres": [
+      "Battle Royale"
+    ],
+    "subgenres": [],
+    "source": "ai_classified",
+    "confidence": 90,
+    "notes": "Game có khả năng thuộc thể loại Battle Royale."
+  },
+  {
+    "canonicalName": "Delta Force",
+    "aliases": [],
+    "genres": [
+      "fps"
+    ],
+    "subgenres": [
+      "military shooter"
+    ],
+    "source": "ai_classified",
+    "confidence": 90,
+    "notes": "Delta Force is a tactical first-person shooter game, fitting well within the fps genre."
+  },
+  {
+    "canonicalName": "Sunshine Island",
+    "aliases": [],
+    "genres": [
+      "simulator"
+    ],
+    "subgenres": [
+      "farming simulator",
+      "life simulation"
+    ],
+    "source": "ai_classified",
+    "confidence": 80,
+    "notes": "Game có yếu tố mô phỏng cuộc sống và nông trại."
+  },
+  {
+    "canonicalName": "Lineage2 Classic",
+    "aliases": [
+      "Lineage 2 Classic",
+      "Lineage II Classic"
+    ],
+    "genres": [
+      "MMORPG"
+    ],
+    "subgenres": [
+      "Fantasy",
+      "Open World"
+    ],
+    "source": "ai_classified",
+    "confidence": 90,
+    "notes": "Lineage2 Classic is a well-known MMORPG with a strong player base and classic gameplay elements."
+  },
+  {
+    "canonicalName": "Blade And Soul",
+    "aliases": [
+      "B&S"
+    ],
+    "genres": [
+      "mmorpg"
+    ],
+    "subgenres": [
+      "action",
+      "fantasy"
+    ],
+    "source": "ai_classified",
+    "confidence": 90,
+    "notes": "Blade And Soul is a well-known MMORPG with action combat and a fantasy setting."
+  },
+  {
+    "canonicalName": "SilkRoad",
+    "aliases": [
+      "Silk Road Online"
+    ],
+    "genres": [
+      "mmorpg"
+    ],
+    "subgenres": [
+      "fantasy",
+      "adventure"
+    ],
+    "source": "ai_classified",
+    "confidence": 90,
+    "notes": "SilkRoad is a well-known MMORPG set in a fantasy world inspired by the Silk Road trade route."
+  },
+  {
+    "canonicalName": "Lineage 2 Mobile",
+    "aliases": [],
+    "genres": [
+      "mmorpg"
+    ],
+    "subgenres": [],
+    "source": "ai_classified",
+    "confidence": 90,
+    "notes": "Game thuộc thể loại MMORPG, dựa trên thương hiệu Lineage."
+  },
+  {
+    "canonicalName": "FarmVille 2",
+    "aliases": [
+      "FarmVille 2: Country Escape",
+      "FarmVille 2: Tropic Escape"
+    ],
+    "genres": [
+      "simulation"
+    ],
+    "subgenres": [
+      "farm simulation"
+    ],
+    "source": "ai_classified",
+    "confidence": 90,
+    "notes": "FarmVille 2 is a farming simulation game where players manage a farm, making it a reasonable fit for the simulator genre."
+  },
+  {
+    "canonicalName": "Family Island",
+    "aliases": [],
+    "genres": [
+      "simulator"
+    ],
+    "subgenres": [
+      "life simulation",
+      "farm simulation"
+    ],
+    "source": "ai_classified",
+    "confidence": 80,
+    "notes": "Game thuộc thể loại mô phỏng với yếu tố xây dựng và quản lý nông trại."
+  },
+  {
+    "canonicalName": "Farm Story",
+    "aliases": [],
+    "genres": [
+      "simulator"
+    ],
+    "subgenres": [
+      "farming simulation"
+    ],
+    "source": "ai_classified",
+    "confidence": 80,
+    "notes": "Game có yếu tố mô phỏng nông trại, phù hợp với thể loại simulator."
+  },
+  {
+    "canonicalName": "Township",
+    "aliases": [
+      "Township Game"
+    ],
+    "genres": [
+      "simulator"
+    ],
+    "subgenres": [
+      "city-building",
+      "farm simulation"
+    ],
+    "source": "ai_classified",
+    "confidence": 85,
+    "notes": "Township combines city-building and farming elements, fitting well within the simulator genre."
+  },
+  {
+    "canonicalName": "Candy Crush Saga",
+    "aliases": [
+      "Candy Crush"
+    ],
+    "genres": [
+      "casual"
+    ],
+    "subgenres": [
+      "puzzle"
+    ],
+    "source": "ai_classified",
+    "confidence": 90,
+    "notes": "Game thuộc thể loại casual với gameplay đơn giản và dễ tiếp cận."
+  },
+  {
+    "canonicalName": "Delta Force: Chiến Dịch Sinh Tồn",
+    "aliases": [
+      "Delta Force: Survival Operation"
+    ],
+    "genres": [
+      "Shooter",
+      "Tactical Shooter"
+    ],
+    "subgenres": [
+      "Military Shooter",
+      "Extraction Shooter"
+    ],
+    "source": "ai_classified",
+    "confidence": 70,
+    "notes": "Game có yếu tố chiến thuật và sinh tồn, có thể liên quan đến thể loại extraction."
+  },
+  {
+    "canonicalName": "ARPG",
+    "aliases": [],
+    "genres": [
+      "Action RPG"
+    ],
+    "subgenres": [],
+    "source": "ai_classified",
+    "confidence": 80,
+    "notes": "ARPGs are often favorites among players due to their engaging gameplay and character progression."
+  }
+]

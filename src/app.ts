@@ -11,6 +11,8 @@ import analyticsRoutes from "./routes/analytics.routes";
 import radarRoutes from "./routes/radar.routes";
 import authRoutes from "./routes/auth.routes";
 import adminRoutes from "./routes/admin.routes";
+import testerRoutes from "./routes/tester.routes";
+import testerAdminRoutes from "./routes/tester-admin.routes";
 import { errorHandler } from "./middleware/error-handler";
 import { precomputeAll } from "./precompute";
 import { cache } from "./utils/cache";
@@ -69,6 +71,8 @@ app.use("/api/analysis", analysisRoutes);
 app.use("/api/libraries", librariesRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/radar", radarRoutes);
+app.use("/api/tester/admin", testerAdminRoutes);
+app.use("/api/tester", testerRoutes);
 
 app.get("/admin/libraries", (_req, res) => {
   res.sendFile(path.join(process.cwd(), "public", "admin", "libraries.html"));

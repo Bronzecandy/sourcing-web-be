@@ -1,0 +1,103 @@
+{
+  "tiers": [
+    {
+      "condition": "Mỗi game test (<3 games)",
+      "items": [
+        {
+          "game": "AOV",
+          "reward": "Thẻ giảm giá 200QH",
+          "pic": "Đại Vương (Ducanh.le)\nViệt Anh (Vietanh.pham)"
+        },
+        {
+          "game": "FF",
+          "reward": "Phiếu giảm giá 100KC -- Tiêu ít nhất 500 KC",
+          "pic": "Zeus (Anhvu.an)\nTrí Hoàng (Minhtri.hoang)\nAthi (Huuthinh.nguyen)"
+        },
+        {
+          "game": "FCO",
+          "reward": "Gói Tỷ Phú BP Đặc biệt (210 FC)",
+          "pic": "Khôi Messi (Minhkhoi.tran)\nAnh Vũ (Anhvu.huynhnguyen)"
+        },
+        {
+          "game": "FCM",
+          "reward": "15k Gems - 5 FC Draft Voucher",
+          "pic": "Wang Lão Gia (Phuocquang.nhan)\nThảo Lê (phuongthao.le)"
+        },
+        {
+          "game": "DF",
+          "reward": "Delta Ticket x400",
+          "pic": "Đại Vương (Ducanh.le)\nVượng (Huuvuong.nguyen)"
+        }
+      ]
+    },
+    {
+      "condition": "Test nhiều hơn 3 game/Tháng OR > 10h Test Game / Tháng",
+      "items": [
+        {
+          "game": "AOV",
+          "reward": "Thẻ giảm giá 999QH x2 HOẶC SSM Vượt cấp",
+          "pic": "Đại Vương (Ducanh.le)\nViệt Anh (Vietanh.pham)"
+        },
+        {
+          "game": "FF",
+          "reward": "1 skin/tháng (Ngoại trừ IP Skin/Item VIP) HOẶC BP Siêu cấp",
+          "pic": "Zeus (Anhvu.an)\nTrí Hoàng (Minhtri.hoang)\nAthi (Huuthinh.nguyen)"
+        },
+        {
+          "game": "FCO",
+          "reward": "Sổ tay + Gói tỉ phú BP HOẶC May mắn (X30/X15 days tuỳ chọn) x1",
+          "pic": "Khôi Messi (Minhkhoi.tran)\nAnh Vũ (Anhvu.huynhnguyen)"
+        },
+        {
+          "game": "FCM",
+          "reward": "45k Gems - 15 FC Draft Voucher HOẶC Sổ siêu sao siêu cấp x1",
+          "pic": "Wang Lão Gia (Phuocquang.nhan)\nThảo Lê (phuongthao.le)"
+        },
+        {
+          "game": "DF",
+          "reward": "Delta Ticket x2600",
+          "pic": "Đại Vương (Ducanh.le)\nVượng (Huuvuong.nguyen)"
+        }
+      ]
+    }
+  ],
+  "teamRequests": [
+    {
+      "team": "AOV",
+      "items": [
+        "NVCT + CTV Team LQ: 2 skin/tháng",
+        "Còn lại: Thẻ giám giá 999x2 hoặc SSM vượt cấp",
+        "Điều kiện: Cần chơi tối thiểu 4 trận thường/rank trong tháng"
+      ]
+    },
+    {
+      "team": "FF",
+      "items": [
+        "2 skin/tháng (Ngoại trừ IP Skins/Item của VIP)",
+        "Điều kiện: Đạt tối thiểu rank Bạch Kim 1"
+      ]
+    },
+    {
+      "team": "FCO",
+      "items": [
+        "BP Ingame + Gói tỉ phú BP/May mắn (X30/X15 days tuỳ lựa chọn)",
+        "Điều kiện: Chơi FCO"
+      ]
+    },
+    {
+      "team": "FCM",
+      "items": [
+        "Sổ nâng cấp/20k Gems (trường hợp đã mua sổ)",
+        "Điều kiện: Chơi FCM"
+      ]
+    },
+    {
+      "team": "DF",
+      "items": [
+        "NVCT: Delta Coin x720 + Delta Ticket x4280 + Thẻ trang bị cao cấp x2 + Thẻ trang bị thường x5 + EXP Vũ khí cao cấp x20",
+        "CTV: Delta Ticket x2600",
+        "Điều kiện: Chơi 10 trận Warface/2 trận Chiến dịch trong tháng"
+      ]
+    }
+  ]
+}

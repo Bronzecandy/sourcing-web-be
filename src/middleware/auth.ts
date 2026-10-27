@@ -111,6 +111,8 @@ export function resolvePermissionForApiPath(path: string, method: string): ApiPe
 
   if (path.startsWith("/translate")) return "translate.use";
 
+  if (path.startsWith("/tester/admin")) return "tester.manage";
+
   return null;
 }
 

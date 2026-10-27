@@ -1,0 +1,88 @@
+{
+  "genres": [
+    {
+      "key": "MOBA",
+      "label": "MOBA",
+      "workloadGroup": "action",
+      "hints": ["moba", "lol", "league of legends", "liên minh", "liên minh huyền thoại", "lmht", "dota 2", "liên quân", "arena of valor", "aov", "honor of kings", "mobile legends", "mlbb", "tốc chiến", "wild rift", "pokemon unite"]
+    },
+    {
+      "key": "FPS",
+      "label": "FPS / Bắn súng",
+      "workloadGroup": "action",
+      "hints": ["fps", "cs2", "counter-strike 2", "counter strike", "csgo", "cs:go", "valorant", "crossfire", "đột kích", "point blank", "call of duty", "cod", "apex legends", "overwatch", "delta force", "warface"]
+    },
+    {
+      "key": "BR",
+      "label": "Battle Royale",
+      "workloadGroup": "action",
+      "hints": ["battle royale", "battleroyale", "pubg", "pubg mobile", "pubgm", "free fire", "apex legends", "fortnite", "warzone", "naraka", "naraka bladepoint"]
+    },
+    {
+      "key": "Autochess",
+      "label": "Auto Chess",
+      "workloadGroup": null,
+      "hints": ["autochess", "auto chess", "tft", "teamfight tactics", "đấu trường chân lý", "đtcl", "dota underlords", "chess rush", "magic chess", "cờ liên quân"]
+    },
+    {
+      "key": "CardRPG",
+      "label": "Card RPG / Idle RPG",
+      "workloadGroup": "card",
+      "hints": ["card game", "card rpg", "idle rpg", "ccg", "tcg", "hearthstone", "legends of runeterra", "shadowverse", "yu-gi-oh", "cái thế tranh hùng", "tiểu yêu tầm đạo", "afk journey", "afk arena", "summoners war"]
+    },
+    {
+      "key": "ARPG",
+      "label": "Action RPG",
+      "workloadGroup": "rpg",
+      "hints": ["action rpg", "arpg", "genshin", "genshin impact", "where winds meet", "diablo", "diablo iv", "monster hunter", "elden ring", "wuthering waves", "black myth", "honkai impact"]
+    },
+    {
+      "key": "MMORPG",
+      "label": "MMORPG",
+      "workloadGroup": "rpg",
+      "hints": ["mmorpg", "world of warcraft", "wow", "final fantasy xiv", "ffxiv", "black desert", "lost ark", "lineage", "lineage ii", "linage", "mu legend", "mu online", "võ lâm truyền kỳ", "vltk", "nghịch thủy hàn", "justice"]
+    },
+    {
+      "key": "Sport",
+      "label": "Thể thao / Đua xe",
+      "workloadGroup": null,
+      "hints": ["fc online", "fco", "fc mobile", "fcm", "fifa", "pes", "efootball", "nba", "nba 2k", "asphalt", "need for speed", "đua xe", "zingspeed"]
+    },
+    {
+      "key": "Extraction",
+      "label": "Extraction",
+      "workloadGroup": "action",
+      "hints": ["extraction", "tarkov", "escape from tarkov", "eft", "gold and glory", "gng", "dark and darker", "hunt showdown", "arc raiders", "arena breakout", "delta force chiến dịch sinh tồn", "escape from duckov", "marauders"]
+    },
+    {
+      "key": "SLG",
+      "label": "Chiến thuật / SLG",
+      "workloadGroup": null,
+      "hints": ["strategy", "slg", "rts", "starcraft", "age of empires", "aoe", "total war", "civilization", "clash of clans", "coc", "rise of kingdoms", "rok", "lords mobile", "whiteout survival", "last war"]
+    },
+    {
+      "key": "Simulator",
+      "label": "Mô phỏng / Nông trại",
+      "workloadGroup": "casual",
+      "hints": ["simulator", "mô phỏng", "nông trại", "hay day", "the sims", "stardew valley", "animal crossing"]
+    },
+    {
+      "key": "Casual",
+      "label": "Casual / Hypercasual",
+      "workloadGroup": "casual",
+      "hints": ["casual", "hypercasual", "block blast", "coin master", "candy crush", "homescapes", "billiard", "8 ball pool", "subway surfers"]
+    },
+    {
+      "key": "Sandbox",
+      "label": "Sandbox",
+      "workloadGroup": null,
+      "hints": ["sandbox", "minecraft", "roblox", "mini world", "miniworld", "terraria"]
+    },
+    {
+      "key": "Party",
+      "label": "Party / Hội nhóm",
+      "workloadGroup": "casual",
+      "hints": ["party", "among us", "goose goose duck", "boardgame", "board game", "ma sói", "uno"]
+    }
+  ]
+}

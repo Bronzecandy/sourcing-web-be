@@ -1,0 +1,37 @@
+{
+  "groups": [
+    {
+      "key": "action",
+      "label": "Action Games (MOBA/Shooter/Battle Royale/Extraction...)",
+      "testDays": 1,
+      "hoursPerDay": 3,
+      "workloadHours": 3,
+      "weight": 1.5
+    },
+    {
+      "key": "card",
+      "label": "CardRPG/IdleRPG",
+      "testDays": 4,
+      "hoursPerDay": 1,
+      "workloadHours": 4,
+      "weight": 1
+    },
+    {
+      "key": "casual",
+      "label": "Casual/Hypercasual",
+      "testDays": 1,
+      "hoursPerDay": 1.5,
+      "workloadHours": 1.5,
+      "weight": 1
+    },
+    {
+      "key": "rpg",
+      "label": "ARPG/MMORPG",
+      "testDays": 2,
+      "hoursPerDay": 2,
+      "workloadHours": 4,
+      "weight": 1.25
+    }
+  ],
+  "benefitHoursPerUnit": 3
+}

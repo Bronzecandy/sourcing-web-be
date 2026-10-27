@@ -11,13 +11,15 @@ export const PERMISSION_KEYS = [
   "libraries.read",
   "libraries.write",
   "translate.use",
+  "tester.manage",
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
 
 export type UserStatus = "PENDING" | "ACTIVE";
 
-export const USER_ROLES = ["SUPER_ADMIN", "ADMIN", "STAFF", "USER"] as const;
+/** TESTER: tài khoản Tester Program (đăng ký qua /tester) — không có quyền dữ liệu Sourcing. */
+export const USER_ROLES = ["SUPER_ADMIN", "ADMIN", "STAFF", "USER", "TESTER"] as const;
 export type UserRole = (typeof USER_ROLES)[number];
 
 export interface PermissionMap {
@@ -33,6 +35,7 @@ export interface PermissionMap {
   "libraries.read": boolean;
   "libraries.write": boolean;
   "translate.use": boolean;
+  "tester.manage": boolean;
 }
 
 export interface AuthUserDto {
@@ -65,6 +68,7 @@ export function emptyPermissions(): PermissionMap {
     "libraries.read": false,
     "libraries.write": false,
     "translate.use": false,
+    "tester.manage": false,
   };
 }
 

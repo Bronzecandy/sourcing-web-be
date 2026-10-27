@@ -1,0 +1,349 @@
+{
+  "volume": {
+    "hours": [
+      [
+        4,
+        3
+      ],
+      [
+        8,
+        5
+      ],
+      [
+        12,
+        7
+      ],
+      [
+        16,
+        9
+      ],
+      [
+        22,
+        11
+      ],
+      [
+        28,
+        13
+      ],
+      [
+        36,
+        15
+      ],
+      [
+        45,
+        17
+      ],
+      [
+        55,
+        19
+      ],
+      [
+        70,
+        21
+      ],
+      [
+        85,
+        23
+      ],
+      [
+        105,
+        25
+      ],
+      [
+        130,
+        27
+      ],
+      [
+        160,
+        29
+      ],
+      [
+        195,
+        31
+      ],
+      [
+        235,
+        33
+      ],
+      [
+        280,
+        35
+      ],
+      [
+        330,
+        37
+      ],
+      [
+        385,
+        39
+      ],
+      [
+        440,
+        41
+      ],
+      [
+        490,
+        43
+      ],
+      [
+        535,
+        45
+      ],
+      [
+        570,
+        47
+      ],
+      [
+        590,
+        49
+      ],
+      [
+        600,
+        50
+      ]
+    ],
+    "matches": [
+      [
+        15,
+        3
+      ],
+      [
+        30,
+        5
+      ],
+      [
+        45,
+        7
+      ],
+      [
+        60,
+        9
+      ],
+      [
+        80,
+        11
+      ],
+      [
+        100,
+        13
+      ],
+      [
+        125,
+        15
+      ],
+      [
+        150,
+        17
+      ],
+      [
+        180,
+        19
+      ],
+      [
+        220,
+        21
+      ],
+      [
+        270,
+        23
+      ],
+      [
+        320,
+        25
+      ],
+      [
+        380,
+        27
+      ],
+      [
+        450,
+        29
+      ],
+      [
+        530,
+        31
+      ],
+      [
+        620,
+        33
+      ],
+      [
+        710,
+        35
+      ],
+      [
+        800,
+        37
+      ],
+      [
+        890,
+        39
+      ],
+      [
+        970,
+        41
+      ],
+      [
+        1040,
+        43
+      ],
+      [
+        1100,
+        45
+      ],
+      [
+        1150,
+        47
+      ],
+      [
+        1180,
+        49
+      ],
+      [
+        1200,
+        50
+      ]
+    ],
+    "vagueHours": 50
+  },
+  "rank": {
+    "levels": [
+      {
+        "score": 10,
+        "label": "Low"
+      },
+      {
+        "score": 18,
+        "label": "Below Average"
+      },
+      {
+        "score": 25,
+        "label": "Average"
+      },
+      {
+        "score": 33,
+        "label": "Above Average"
+      },
+      {
+        "score": 42,
+        "label": "High"
+      },
+      {
+        "score": 50,
+        "label": "Extreme"
+      }
+    ],
+    "games": [
+      {
+        "game": "LMHT / LoL SoloQ",
+        "tiers": [
+          "Silver I trở xuống",
+          "Gold IV–Gold II",
+          "Gold I–Platinum II",
+          "Platinum I–Emerald I",
+          "Diamond IV–Diamond I",
+          "Master+"
+        ]
+      },
+      {
+        "game": "TFT / ĐTCL",
+        "tiers": [
+          "Gold III trở xuống",
+          "Gold II–Platinum IV",
+          "Platinum III–Emerald IV",
+          "Emerald III–Diamond III",
+          "Diamond II–Master thấp",
+          "Master cao / GM / Challenger"
+        ]
+      },
+      {
+        "game": "Valorant",
+        "tiers": [
+          "Silver trở xuống / Gold thấp",
+          "Gold",
+          "Platinum",
+          "Diamond–Ascendant",
+          "Ascendant cao / Immortal",
+          "Radiant / Immortal cao"
+        ]
+      },
+      {
+        "game": "CS2 Premier",
+        "tiers": [
+          "≤ 9k rating",
+          "10k–12k",
+          "13k–16k",
+          "17k–22k",
+          "23k–26k",
+          "≥ 27k"
+        ]
+      },
+      {
+        "game": "PUBG PC",
+        "tiers": [
+          "Bronze / Silver",
+          "Gold",
+          "Platinum",
+          "Diamond",
+          "Master",
+          "Master top leaderboard"
+        ]
+      },
+      {
+        "game": "PUBG Mobile*",
+        "tiers": [
+          "Bronze–Gold",
+          "Platinum / Diamond thấp",
+          "Diamond cao / Crown",
+          "Ace",
+          "Ace Master / Ace Dominator",
+          "Conqueror"
+        ]
+      },
+      {
+        "game": "Free Fire*",
+        "tiers": [
+          "Bronze / Silver",
+          "Gold",
+          "Platinum / Diamond thấp",
+          "Diamond cao / Heroic",
+          "Master / Elite Master",
+          "Grandmaster"
+        ]
+      },
+      {
+        "game": "MLBB*",
+        "tiers": [
+          "Warrior–Master",
+          "Grandmaster / Epic thấp",
+          "Epic cao / Legend thấp",
+          "Legend cao / Mythic thấp",
+          "Mythical Honor / Mythical Glory",
+          "Mythical Immortal"
+        ]
+      },
+      {
+        "game": "AoV / Liên Quân*",
+        "tiers": [
+          "Bronze / Silver",
+          "Gold / Platinum",
+          "Diamond / Veteran thấp",
+          "Veteran cao / Master-Conqueror",
+          "Legendary",
+          "Eternal Legend / top server"
+        ]
+      },
+      {
+        "game": "Naraka: Bladepoint*",
+        "tiers": [
+          "Bronze / Silver",
+          "Gold / Platinum",
+          "Solar / Empyrean",
+          "Astral / Asura",
+          "Unrivaled Asura / Formless Dragon",
+          "Infinite Nirvana / top leaderboard"
+        ]
+      }
+    ]
+  }
+}

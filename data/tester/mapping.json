@@ -1,0 +1,124 @@
+{
+  "weeklyPlay": [
+    {
+      "label": "Dưới 3 giờ (<30 phút mỗi ngày)",
+      "level": 1
+    },
+    {
+      "label": "3 - 6 giờ (30 phút - 1 giờ mỗi ngày)",
+      "level": 2
+    },
+    {
+      "label": "6 - 10 giờ (1 giờ - 1.5 giờ mỗi ngày)",
+      "level": 3
+    },
+    {
+      "label": "10 - 15 giờ (1.5 - 2 giờ mỗi ngày)",
+      "level": 4
+    },
+    {
+      "label": "15 - 20 giờ (2 giờ - 2.5 giờ mỗi ngày)",
+      "level": 5
+    },
+    {
+      "label": "20 - 25 giờ (2.5 - 3 giờ mỗi ngày)",
+      "level": 6
+    },
+    {
+      "label": "Trên 25 giờ (Trên 3 giờ mỗi ngày)",
+      "level": 7
+    }
+  ],
+  "payment": [
+    {
+      "label": "Dưới 100.000 VND",
+      "tier": "Non-pay"
+    },
+    {
+      "label": "100.000 - 200.000 VND",
+      "tier": "Small R"
+    },
+    {
+      "label": "200.000 - 400.000 VND",
+      "tier": "Mid-Low R"
+    },
+    {
+      "label": "400.000 - 600.000 VND",
+      "tier": "Mid R"
+    },
+    {
+      "label": "600.000 - 1.000.000 VND",
+      "tier": "Mid R"
+    },
+    {
+      "label": "1.000.000 - 2.000.000 VND",
+      "tier": "Mid-High R"
+    },
+    {
+      "label": "2.000.000 - 4.000.000 VND",
+      "tier": "Big R"
+    },
+    {
+      "label": "Trên 4.000.000 VND",
+      "tier": "Big R"
+    }
+  ],
+  "device": [
+    {
+      "label": "Di động (Smartphone, Tablet)",
+      "key": "MB"
+    },
+    {
+      "label": "PC (Desktop, Laptop)",
+      "key": "PC"
+    },
+    {
+      "label": "Console (Playstation, Xbox, Nintendo Switch, Steam Deck,...)",
+      "key": "CS"
+    }
+  ],
+  "perspective": [
+    {
+      "label": "Góc nhìn thứ nhất (FPS): Góc nhìn của nhân vật (v.d Delta Force, Valorant,...)",
+      "key": "FPP"
+    },
+    {
+      "label": "Góc nhìn thứ ba (TPS): Góc nhìn sau lưng nhân vật (v.d Free Fire, Genshin Impact, Where Wind Meets...)",
+      "key": "TPP"
+    },
+    {
+      "label": "2D Platform: Góc nhìn 2D ngang nhân vật (v.d Ngọc Rồng Online, Megaman,...)",
+      "key": "Platform"
+    },
+    {
+      "label": "Góc nhìn từ trên xuống (Top-down): Góc nhìn toàn cảnh từ trên xuống (v.d Liên Quân, Liên Minh Huyền Thoại,...)",
+      "key": "Topdown"
+    }
+  ],
+  "playtimeBuckets": [
+    {
+      "label": "Dưới 50 giờ | Dưới 150 trận",
+      "level": 1
+    },
+    {
+      "label": "50 - 100 giờ | 150 trận - 300 trận",
+      "level": 2
+    },
+    {
+      "label": "100 - 200 giờ | 300 trận - 600 trận",
+      "level": 3
+    },
+    {
+      "label": "200 - 300 giờ | 600 trận - 900 trận",
+      "level": 4
+    },
+    {
+      "label": "300 - 400 giờ | 900 trận - 1200 trận",
+      "level": 5
+    },
+    {
+      "label": "Trên 400 giờ | Trên 1200 trận",
+      "level": 6
+    }
+  ]
+}
