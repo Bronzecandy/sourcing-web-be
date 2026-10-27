@@ -37,7 +37,7 @@ router.get("/google/callback", async (req, res) => {
     res.redirect(redirectAfterLogin(user, portal));
   } catch (err) {
     if (err instanceof Error && err.message === "TESTER_EMAIL_NOT_ALLOWED") {
-      res.redirect(`${frontendUrl()}/tester/login?error=domain`);
+      res.redirect(`${frontendUrl()}/tester?error=domain`);
       return;
     }
     console.error("[auth] callback:", err);

@@ -64,17 +64,43 @@ export function defaultWorkload(mainGenre: string | null | undefined): number {
   return hit?.workloadHours ?? 3;
 }
 
-async function testerRows(userIds?: string[]) {
+const ROW_USER_SELECT = {
+  email: true,
+  avatarUrl: true,
+  roles: true,
+  testAssignments: { include: { campaign: true } },
+  benefitRedemptions: { select: { amount: true } },
+} as const;
+
+interface TesterRow {
+  userId: string;
+  email: string;
+  name: string;
+  avatarUrl: string | null;
+  roles: string[];
+  hasProfile: boolean;
+  office: string | null;
+  team: string | null;
+  platforms: string[];
+  favoriteGenre: string | null;
+  weeklyPlayLabel: string | null;
+  testTimeLabel: string | null;
+  payTier: string | null;
+  active: boolean;
+  scoringStatus: string;
+  scores: Record<string, number>;
+  stats: ReturnType<typeof statsFor>;
+  submittedAt: string | null;
+}
+
+/** Hồ sơ tester; `userIds` không truyền = chỉ user đang có role TESTER. */
+async function testerRows(userIds?: string[]): Promise<TesterRow[]> {
   const profiles = await prismaApp.testerProfile.findMany({
-    where: userIds ? { userId: { in: userIds } } : undefined,
+    where: userIds ? { userId: { in: userIds } } : { user: { roles: { has: "TESTER" } } },
     include: {
       user: {
         select: {
-          email: true,
-          avatarUrl: true,
-          role: true,
-          testAssignments: { include: { campaign: true } },
-          benefitRedemptions: { select: { amount: true } },
+          ...ROW_USER_SELECT,
           surveyResponses: { orderBy: { submittedAt: "desc" }, take: 1, select: { submittedAt: true } },
         },
       },
@@ -87,7 +113,8 @@ async function testerRows(userIds?: string[]) {
     email: p.user.email,
     name: p.name,
     avatarUrl: p.user.avatarUrl,
-    role: p.user.role,
+    roles: p.user.roles,
+    hasProfile: true,
     office: p.office,
     team: p.team,
     platforms: p.platforms,
@@ -106,12 +133,54 @@ async function testerRows(userIds?: string[]) {
   }));
 }
 
+/** Có role TESTER nhưng chưa làm khảo sát. */
+async function noSurveyRows(userIds?: string[]): Promise<TesterRow[]> {
+  const users = await prismaApp.user.findMany({
+    where: {
+      roles: { has: "TESTER" },
+      testerProfile: { is: null },
+      ...(userIds ? { id: { in: userIds } } : {}),
+    },
+    select: { id: true, name: true, ...ROW_USER_SELECT },
+    orderBy: { createdAt: "desc" },
+  });
+  return users.map((u) => ({
+    userId: u.id,
+    email: u.email,
+    name: u.name ?? u.email,
+    avatarUrl: u.avatarUrl,
+    roles: u.roles,
+    hasProfile: false,
+    office: null,
+    team: null,
+    platforms: [],
+    favoriteGenre: null,
+    weeklyPlayLabel: null,
+    testTimeLabel: null,
+    payTier: null,
+    active: true,
+    scoringStatus: "no_survey",
+    scores: {},
+    stats: statsFor(
+      u.testAssignments,
+      u.benefitRedemptions.reduce((sum, r) => sum + r.amount, 0),
+    ),
+    submittedAt: null,
+  }));
+}
+
 export async function listTesters() {
-  return testerRows();
+  const [profiles, noSurvey] = await Promise.all([testerRows(), noSurveyRows()]);
+  return [...profiles, ...noSurvey];
+}
+
+async function testerRow(userId: string): Promise<TesterRow | undefined> {
+  const [row] = await testerRows([userId]);
+  return row ?? (await noSurveyRows([userId]))[0];
 }
 
 export async function testerDetail(userId: string) {
-  const [row] = await testerRows([userId]);
+  const row = await testerRow(userId);
   if (!row) throw new TesterAdminError("Không tìm thấy tester", 404);
   const [latest, scores, assignments, redemptions] = await Promise.all([
     prismaApp.surveyResponse.findFirst({ where: { userId }, orderBy: { submittedAt: "desc" } }),
@@ -165,9 +234,10 @@ export async function testerDetail(userId: string) {
 
 export async function updateTester(userId: string, body: { active?: unknown }) {
   if (typeof body.active === "boolean") {
-    await prismaApp.testerProfile.update({ where: { userId }, data: { active: body.active } });
+    const updated = await prismaApp.testerProfile.updateMany({ where: { userId }, data: { active: body.active } });
+    if (updated.count === 0) throw new TesterAdminError("Tester chưa làm khảo sát", 409);
   }
-  const [row] = await testerRows([userId]);
+  const row = await testerRow(userId);
   if (!row) throw new TesterAdminError("Không tìm thấy tester", 404);
   return row;
 }

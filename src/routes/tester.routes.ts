@@ -2,9 +2,18 @@ import { Router } from "express";
 import type { AuthedRequest } from "../middleware/auth";
 import { requireAuth } from "../middleware/auth";
 import { getActiveSurvey, SurveyValidationError } from "../services/tester-survey.service";
-import { getTesterMe, myBenefits, myTests, submitTesterSurvey } from "../services/tester.service";
+import { getTesterMe, myBenefits, myTests, submitTesterSurvey, testerPublicInfo } from "../services/tester.service";
 
 const router = Router();
+
+router.get("/public", async (_req, res) => {
+  try {
+    res.json({ success: true, data: await testerPublicInfo() });
+  } catch (err) {
+    console.error("[tester] public:", err);
+    res.status(500).json({ success: false, error: "Không tải được thông tin chương trình" });
+  }
+});
 
 router.use(requireAuth);
 

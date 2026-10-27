@@ -27,7 +27,8 @@ model User {
   name        String?
   avatarUrl   String?
   status      UserStatus       @default(PENDING)
-  role        UserRole         @default(USER)
+  /// Nhiều role: tối đa 1 role Sourcing (SUPER_ADMIN | ADMIN | STAFF | USER) cộng TESTER.
+  roles       UserRole[]       @default([USER])
   createdAt   DateTime         @default(now()) @db.Timestamptz(6)
   updatedAt   DateTime         @updatedAt @db.Timestamptz(6)
   permissions  UserPermission[]

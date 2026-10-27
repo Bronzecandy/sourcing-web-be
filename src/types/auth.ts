@@ -18,9 +18,13 @@ export type PermissionKey = (typeof PERMISSION_KEYS)[number];
 
 export type UserStatus = "PENDING" | "ACTIVE";
 
-/** TESTER: tài khoản Tester Program (đăng ký qua /tester) — không có quyền dữ liệu Sourcing. */
+/** TESTER: thành viên Tester Program; có thể đi kèm 1 role Sourcing (vd STAFF + TESTER). */
 export const USER_ROLES = ["SUPER_ADMIN", "ADMIN", "STAFF", "USER", "TESTER"] as const;
 export type UserRole = (typeof USER_ROLES)[number];
+
+/** Role cho web Sourcing — mỗi user tối đa 1. */
+export const SOURCING_ROLES = ["SUPER_ADMIN", "ADMIN", "STAFF", "USER"] as const;
+export type SourcingRole = (typeof SOURCING_ROLES)[number];
 
 export interface PermissionMap {
   "crawl.dashboard": boolean;
@@ -44,9 +48,12 @@ export interface AuthUserDto {
   name: string | null;
   avatarUrl: string | null;
   status: UserStatus;
+  /** Role cao nhất trong `roles` (SUPER_ADMIN > ADMIN > STAFF > USER > TESTER). */
   role: UserRole;
+  roles: UserRole[];
   /** True if user can open admin panel (Super Admin or Admin). */
   isPanelAdmin: boolean;
+  isTester: boolean;
   permissions: PermissionMap;
 }
 

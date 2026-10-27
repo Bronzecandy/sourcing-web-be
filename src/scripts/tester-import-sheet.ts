@@ -53,9 +53,14 @@ function normEmail(s: string): string {
 
 async function ensureUser(email: string, name: string | null): Promise<string> {
   const existing = await prismaApp.user.findUnique({ where: { email } });
-  if (existing) return existing.id;
+  if (existing) {
+    if (!existing.roles.includes("TESTER")) {
+      await prismaApp.user.update({ where: { id: existing.id }, data: { roles: [...existing.roles, "TESTER"] } });
+    }
+    return existing.id;
+  }
   const user = await prismaApp.user.create({
-    data: { email, name, status: "ACTIVE", role: "TESTER", googleSub: null },
+    data: { email, name, status: "ACTIVE", roles: ["TESTER"], googleSub: null },
   });
   await prismaApp.userPermission.createMany({
     data: PERMISSION_KEYS.map((permissionKey) => ({ userId: user.id, permissionKey, granted: false })),

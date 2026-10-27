@@ -11,7 +11,7 @@ import {
   fullPermissions,
 } from "../types/auth";
 import { permissionsFromRows } from "../utils/permissions";
-import { isPanelAdmin, isSuperAdmin } from "../utils/user-roles";
+import { isPanelAdmin, isSuperAdmin, primaryRole } from "../utils/user-roles";
 import type { UserRole as PrismaUserRole } from "../../generated/prisma-app/client";
 
 const COOKIE_NAME = "sourcing_token";
@@ -78,14 +78,17 @@ export async function userToDto(
     name: string | null;
     avatarUrl: string | null;
     status: "PENDING" | "ACTIVE";
-    role: PrismaUserRole;
+    roles: PrismaUserRole[];
     permissions: Array<{ permissionKey: string; granted: boolean }>;
   },
 ): Promise<AuthUserDto> {
-  const role = user.role as UserRole;
+  const roles = (user.roles.length > 0 ? user.roles : ["USER"]) as UserRole[];
+  const role = primaryRole(roles);
   const permissions: PermissionMap = isSuperAdmin(role)
     ? fullPermissions()
     : permissionsFromRows(user.permissions);
+  // Quản lý tester nằm trong admin site: Admin tự có quyền này.
+  if (isPanelAdmin(role)) permissions["tester.manage"] = true;
   return {
     id: user.id,
     email: user.email,
@@ -93,9 +96,18 @@ export async function userToDto(
     avatarUrl: user.avatarUrl,
     status: user.status,
     role,
+    roles,
     isPanelAdmin: isPanelAdmin(role),
+    isTester: roles.includes("TESTER"),
     permissions,
   };
+}
+
+/** Thêm role TESTER (giữ role Sourcing hiện có). */
+export async function ensureTesterRole(userId: string): Promise<void> {
+  const user = await prismaApp.user.findUnique({ where: { id: userId }, select: { roles: true } });
+  if (!user || user.roles.includes("TESTER")) return;
+  await prismaApp.user.update({ where: { id: userId }, data: { roles: [...user.roles, "TESTER"] } });
 }
 
 async function ensurePermissionRows(userId: string): Promise<void> {
@@ -120,7 +132,7 @@ export async function createInvitedUser(input: {
   email: string;
   name?: string | null;
   status: "PENDING" | "ACTIVE";
-  role: UserRole;
+  roles: UserRole[];
   permissions?: Partial<Record<PermissionKey, boolean>>;
 }): Promise<{
   id: string;
@@ -128,7 +140,7 @@ export async function createInvitedUser(input: {
   name: string | null;
   avatarUrl: string | null;
   status: "PENDING" | "ACTIVE";
-  role: PrismaUserRole;
+  roles: PrismaUserRole[];
   createdAt: Date;
   permissions: Array<{ permissionKey: string; granted: boolean }>;
   googleSub: string | null;
@@ -147,13 +159,13 @@ export async function createInvitedUser(input: {
       email,
       name,
       status: input.status,
-      role: input.role as PrismaUserRole,
+      roles: input.roles as PrismaUserRole[],
     },
     include: { permissions: true },
   });
 
   await ensurePermissionRows(user.id);
-  if (input.role === "SUPER_ADMIN") {
+  if (input.roles.includes("SUPER_ADMIN")) {
     await grantAllPermissions(user.id);
   } else if (input.permissions) {
     for (const permissionKey of PERMISSION_KEYS) {
@@ -233,7 +245,7 @@ export async function handleGoogleCallback(code: string, portal: LoginPortal = "
           name: payload.name ?? null,
           avatarUrl: payload.picture ?? null,
           status: isBootstrap || asTester ? "ACTIVE" : "PENDING",
-          role: isBootstrap ? "SUPER_ADMIN" : asTester ? "TESTER" : "USER",
+          roles: isBootstrap ? ["SUPER_ADMIN"] : asTester ? ["TESTER"] : ["USER"],
         },
         include: { permissions: true },
       });
@@ -245,12 +257,15 @@ export async function handleGoogleCallback(code: string, portal: LoginPortal = "
       });
     }
   } else {
+    const bootstrapRoles: PrismaUserRole[] = user.roles.includes("TESTER")
+      ? ["SUPER_ADMIN", "TESTER"]
+      : ["SUPER_ADMIN"];
     user = await prismaApp.user.update({
       where: { id: user.id },
       data: {
         name: payload.name ?? user.name,
         avatarUrl: payload.picture ?? user.avatarUrl,
-        ...(isBootstrap ? { status: "ACTIVE" as const, role: "SUPER_ADMIN" as const } : {}),
+        ...(isBootstrap ? { status: "ACTIVE" as const, roles: bootstrapRoles } : {}),
       },
       include: { permissions: true },
     });
@@ -330,7 +345,8 @@ const ROUTE_PERMISSION_FALLBACK: Array<{ perm: PermissionKey; path: string }> = 
 
 export function redirectAfterLogin(user: AuthUserDto, portal: LoginPortal = "sourcing"): string {
   const base = frontendUrl();
-  if (portal === "tester" || user.role === "TESTER") return `${base}/tester`;
+  // role chính TESTER = chỉ là tester (không có role Sourcing)
+  if (portal === "tester" || user.role === "TESTER") return `${base}/tester/profile`;
   if (user.status === "PENDING") return `${base}/waiting`;
   if (user.isPanelAdmin) {
     const first = ROUTE_PERMISSION_FALLBACK.find((r) => user.permissions[r.perm]);
@@ -338,7 +354,7 @@ export function redirectAfterLogin(user: AuthUserDto, portal: LoginPortal = "sou
     return `${base}/admin/users`;
   }
   const first = ROUTE_PERMISSION_FALLBACK.find((r) => user.permissions[r.perm]);
-  if (!first) return user.permissions["tester.manage"] ? `${base}/tester/admin` : `${base}/waiting`;
+  if (!first) return user.permissions["tester.manage"] ? `${base}/admin/test-campaigns` : `${base}/waiting`;
   if (first.path === "/") return `${base}/`;
   return `${base}${first.path}`;
 }

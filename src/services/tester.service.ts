@@ -1,5 +1,6 @@
 import { prismaApp } from "../utils/prisma-app";
 import type { AuthUserDto } from "../types/auth";
+import { ensureTesterRole } from "./auth.service";
 import { genreLabel, testerConfig } from "./tester-config";
 import { queueTesterScoring } from "./tester-scoring.service";
 import {
@@ -63,6 +64,31 @@ function sanitizeAnswers(input: unknown): SurveyAnswers {
   return out;
 }
 
+/** Dữ liệu cho landing page công khai /tester (không có tên người phụ trách phần quà). */
+export async function testerPublicInfo() {
+  const [testers, campaigns, completedTests] = await Promise.all([
+    prismaApp.testerProfile.count({ where: { active: true, user: { roles: { has: "TESTER" } } } }),
+    prismaApp.testCampaign.count({ where: { status: { not: "cancelled" } } }),
+    prismaApp.testAssignment.count({ where: { completed: true } }),
+  ]);
+  const workload = testerConfig.workload();
+  return {
+    genres: testerConfig.genres().map((g) => ({ key: g.key, label: g.label })),
+    benefitHoursPerUnit: workload.benefitHoursPerUnit,
+    workload: workload.groups.map((g) => ({
+      label: g.label,
+      testDays: g.testDays,
+      hoursPerDay: g.hoursPerDay,
+      workloadHours: g.workloadHours,
+    })),
+    rewards: testerConfig.benefits().tiers.map((t) => ({
+      condition: t.condition,
+      items: t.items.map((i) => ({ game: i.game, reward: i.reward })),
+    })),
+    stats: { testers, campaigns, completedTests },
+  };
+}
+
 export async function getTesterMe(user: AuthUserDto) {
   const [profile, latest, assignments, used] = await Promise.all([
     prismaApp.testerProfile.findUnique({ where: { userId: user.id }, include: { genreScores: true } }),
@@ -71,8 +97,16 @@ export async function getTesterMe(user: AuthUserDto) {
     prismaApp.benefitRedemption.aggregate({ where: { userId: user.id }, _sum: { amount: true } }),
   ]);
   return {
-    user: { id: user.id, email: user.email, name: user.name, avatarUrl: user.avatarUrl, role: user.role },
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      avatarUrl: user.avatarUrl,
+      role: user.role,
+      roles: user.roles,
+    },
     canManage: user.role === "SUPER_ADMIN" || user.permissions["tester.manage"] === true,
+    hasSourcing: user.role !== "TESTER" && user.status === "ACTIVE",
     profile: profile
       ? {
           name: profile.name,
@@ -141,6 +175,7 @@ export async function submitTesterSurvey(
     create: { userId: user.id, ...fields, responseId: response.id, scoringStatus: "pending" },
     update: { ...fields, responseId: response.id, scoringStatus: "pending" },
   });
+  await ensureTesterRole(user.id);
   queueTesterScoring(user.id);
   return getTesterMe(user);
 }

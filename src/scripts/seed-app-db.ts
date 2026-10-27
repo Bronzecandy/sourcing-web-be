@@ -79,7 +79,7 @@ async function main() {
           email: bootstrapEmail,
           name: "Bootstrap Admin",
           status: "ACTIVE",
-          role: "SUPER_ADMIN",
+          roles: ["SUPER_ADMIN"],
         },
       });
       for (const permissionKey of PERMISSION_KEYS) {
@@ -91,7 +91,10 @@ async function main() {
     } else {
       await prismaApp.user.update({
         where: { id: existing.id },
-        data: { role: "SUPER_ADMIN", status: "ACTIVE" },
+        data: {
+          roles: existing.roles.includes("TESTER") ? ["SUPER_ADMIN", "TESTER"] : ["SUPER_ADMIN"],
+          status: "ACTIVE",
+        },
       });
       await grantAllPermissions(existing.id);
       console.log(`[seed-app] ✓ ensured admin for ${bootstrapEmail}`);

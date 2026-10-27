@@ -4,18 +4,24 @@ import type { AuthedRequest } from "../middleware/auth";
 import { requireAuth, requirePanelAdmin } from "../middleware/auth";
 import { createInvitedUser, isValidInviteEmail, normalizeInviteEmail, userToDto } from "../services/auth.service";
 import { PERMISSION_KEYS, USER_ROLES, type PermissionKey, type UserRole } from "../types/auth";
-import { canAssignRole, canManageUser, isSuperAdmin, roleUsesPermissionGrants } from "../utils/user-roles";
+import {
+  canAssignRole,
+  canAssignRoles,
+  canManageUser,
+  isSuperAdmin,
+  normalizeRoles,
+  primaryRole,
+  roleUsesPermissionGrants,
+} from "../utils/user-roles";
 import type { UserRole as PrismaUserRole } from "../../generated/prisma-app/client";
 
 const router = Router();
 
 router.use(requireAuth, requirePanelAdmin);
 
-router.get("/users", async (req, res) => {
+router.get("/users", async (_req, res) => {
   try {
-    const includeTesters = req.query.testers === "1";
     const users = await prismaApp.user.findMany({
-      where: includeTesters ? undefined : { role: { not: "TESTER" } },
       orderBy: { createdAt: "desc" },
       include: { permissions: true },
     });
@@ -33,13 +39,28 @@ router.get("/users", async (req, res) => {
   }
 });
 
+/** `roles` (mảng) là chuẩn; `role` (1 giá trị) vẫn nhận — giữ TESTER nếu user đang có. */
+function requestedRoles(
+  body: { roles?: unknown; role?: unknown },
+  current: readonly UserRole[] = [],
+): UserRole[] | null | undefined {
+  if (body.roles !== undefined) return normalizeRoles(body.roles);
+  if (body.role !== undefined) {
+    if (!USER_ROLES.includes(body.role as UserRole)) return null;
+    const keepTester = body.role !== "TESTER" && current.includes("TESTER");
+    return normalizeRoles(keepTester ? [body.role, "TESTER"] : [body.role]);
+  }
+  return undefined;
+}
+
 router.patch("/users/:id", async (req: AuthedRequest, res) => {
   try {
     const actor = req.authUser!;
     const id = String(req.params.id ?? "");
     const body = req.body as {
       status?: "PENDING" | "ACTIVE";
-      role?: UserRole;
+      roles?: unknown;
+      role?: unknown;
       permissions?: Partial<Record<PermissionKey, boolean>>;
     };
 
@@ -49,7 +70,8 @@ router.patch("/users/:id", async (req: AuthedRequest, res) => {
       return;
     }
 
-    const targetRole = existing.role as UserRole;
+    const currentRoles = existing.roles as UserRole[];
+    const targetRole = primaryRole(currentRoles);
 
     if (targetRole === "SUPER_ADMIN") {
       res.status(403).json({
@@ -65,12 +87,14 @@ router.patch("/users/:id", async (req: AuthedRequest, res) => {
       return;
     }
 
-    if (body.role !== undefined) {
-      if (!USER_ROLES.includes(body.role)) {
-        res.status(400).json({ success: false, error: "Invalid role" });
-        return;
-      }
-      if (!canAssignRole(actor.role, body.role)) {
+    const nextRoles = requestedRoles(body, currentRoles);
+    if (nextRoles === null) {
+      res.status(400).json({ success: false, error: "Invalid roles" });
+      return;
+    }
+    if (nextRoles) {
+      const added = nextRoles.filter((r) => !currentRoles.includes(r));
+      if (!canAssignRoles(actor.role, added)) {
         res.status(403).json({
           success: false,
           error: "Only Super Admin can assign Super Admin role",
@@ -80,7 +104,7 @@ router.patch("/users/:id", async (req: AuthedRequest, res) => {
       }
       await prismaApp.user.update({
         where: { id },
-        data: { role: body.role as PrismaUserRole },
+        data: { roles: nextRoles as PrismaUserRole[] },
       });
     }
 
@@ -88,8 +112,7 @@ router.patch("/users/:id", async (req: AuthedRequest, res) => {
       await prismaApp.user.update({ where: { id }, data: { status: body.status } });
     }
 
-    const effectiveRole =
-      body.role !== undefined ? body.role : (existing.role as UserRole);
+    const effectiveRole = primaryRole(nextRoles ?? currentRoles);
 
     if (
       body.permissions &&
@@ -136,7 +159,8 @@ router.post("/users", async (req: AuthedRequest, res) => {
       email?: string;
       name?: string | null;
       status?: "PENDING" | "ACTIVE";
-      role?: UserRole;
+      roles?: unknown;
+      role?: unknown;
       permissions?: Partial<Record<PermissionKey, boolean>>;
     };
 
@@ -146,12 +170,12 @@ router.post("/users", async (req: AuthedRequest, res) => {
       return;
     }
 
-    const role: UserRole = body.role ?? "USER";
-    if (!USER_ROLES.includes(role)) {
-      res.status(400).json({ success: false, error: "Invalid role" });
+    const roles = requestedRoles(body) ?? (body.roles === undefined && body.role === undefined ? ["USER"] : null);
+    if (!roles) {
+      res.status(400).json({ success: false, error: "Invalid roles" });
       return;
     }
-    if (!canAssignRole(actor.role, role)) {
+    if (!canAssignRoles(actor.role, roles)) {
       res.status(403).json({
         success: false,
         error: "Cannot assign this role",
@@ -166,8 +190,8 @@ router.post("/users", async (req: AuthedRequest, res) => {
       email,
       name: body.name,
       status,
-      role,
-      permissions: roleUsesPermissionGrants(role) ? body.permissions : undefined,
+      roles,
+      permissions: roleUsesPermissionGrants(primaryRole(roles)) ? body.permissions : undefined,
     });
 
     res.status(201).json({
