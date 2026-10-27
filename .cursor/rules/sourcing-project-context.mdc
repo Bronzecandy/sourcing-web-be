@@ -45,8 +45,8 @@ Tính năng chính:
 
 ### Frontend (`fe`) — `../fe/` từ gốc `be`
 
-- `src/pages/` — `/`, `/ranking`, `/game/:id`, `/potential`, `/radar`, `/ai-analysis`, `/libraries`
-- `src/tester/` — Tester Program `/tester/*` (layout, logo, tên tab riêng; role `TESTER` không vào được Sourcing)
+- `src/pages/` — `/`, `/ranking`, `/game/:id`, `/potential`, `/radar`, `/ai-analysis`, `/libraries`, `/admin/*` (`pages/admin/AdminLayout` + tab: users, test-campaigns, tester-benefits, tester-survey)
+- `src/tester/` — Tester Program `/tester/*`: `TesterShell` (header/footer chung), landing công khai `/tester`, `/tester/profile` (nút bắt đầu khảo sát), `/survey`, `/tests`, `/benefits`; style `tp-*` trong `index.css`, ảnh `public/tester/*.webp`
 - `public/brand/` — logo SVG Sourcing-Game + Tester Program; `src/lib/brand.ts` đổi tên tab/favicon theo route
 - `src/services/api.ts` — Axios; `VITE_API_BASE_URL` hoặc `/api` (dev proxy → `localhost:3001`)
 - `src/components/` — `RubricPanel`, `RedFlagSection`, `layout/Sidebar`
@@ -114,4 +114,6 @@ Tối ưu tốc độ: disk cache `data/response-cache/` (Distribution overview+
 
 Game Radar Recap + Executive Summary chạy **mỗi tuần** (Thứ Hai, chạy bù nếu lỗi): LLM chỉ trích dữ kiện, `radar-rules.ts` áp rule skill game-radar-recap (Drop → tier điểm/quy mô → barrier ép Low → ra mắt/open beta = Test Viable → Monitor kể cả chưa có ngày → Temporary Ignore); New Launch chỉ game ra mắt ≤ 60 ngày; report docx theo `report_template.js` (3 phần, "Cập nhật lịch trình mới" từ snapshot), xlsx 3 sheet + cột chỉ số; web `/radar` chọn kỳ; admin chạy tay `POST /api/radar/run`.
 
-Tester Program `/tester`: Google login `?portal=tester` → role `TESTER` (ACTIVE, không có quyền Sourcing); bảng hỏi 26 câu từ tab Questionnaire (CONNECT Q8 → Q9–Q23); chấm hardcore 0–100/dòng game (port `Hardcore Score.gs`, cache `TesterScoreCache`); admin `/tester/admin` (gợi ý top 7, đợt test, benefit 3 giờ = 1, xuất xlsx). `TestCampaign.appId` đồng bộ vào Radar (đang test trong tuần, plan test, kết quả không phù hợp → Drop).
+Tester Program `/tester`: landing công khai (API `GET /api/tester/public`), nút Đăng nhập trên header → Google `?portal=tester` → `/tester/profile`; bảng hỏi 26 câu từ tab Questionnaire (CONNECT Q8 → Q9–Q23), bắt đầu từ Hồ sơ; chấm hardcore 0–100/dòng game (port `Hardcore Score.gs`, cache `TesterScoreCache`). `TestCampaign.appId` đồng bộ vào Radar (đang test trong tuần, plan test, kết quả không phù hợp → Drop).
+
+Nhiều role: `User.roles UserRole[]` = tối đa 1 role Sourcing (SUPER_ADMIN/ADMIN/STAFF/USER) + `TESTER`; DTO có `roles` + `role` (role cao nhất, `TESTER` = chỉ là tester) + `isTester`. Đăng ký qua `/tester` → `[TESTER]`; gửi khảo sát tự thêm `TESTER`. Quản lý tester nằm trong admin Sourcing `/admin/users` (lọc Tất cả / Sourcing / Tester / Chờ duyệt, drawer có tab Hồ sơ tester) + tab Đợt test / Benefit tester / Bảng hỏi tester; Admin tự có `tester.manage`; Staff chỉ có `tester.manage` dùng `/admin/testers`. PATCH `/api/admin/users/:id` nhận `{ roles }` (vẫn nhận `role`).
