@@ -1,0 +1,21 @@
+{
+  "publishers": [
+    { "name": "Tencent", "topTier": true, "aliases": ["tencent", "腾讯", "天美", "光子工作室", "魔方工作室", "北极光工作室", "极光计划"] },
+    { "name": "NetEase", "topTier": true, "aliases": ["netease", "网易", "雷火"] },
+    { "name": "miHoYo", "topTier": true, "aliases": ["mihoyo", "hoyoverse", "米哈游"] },
+    { "name": "Manjuu", "topTier": true, "aliases": ["manjuu", "蛮啾", "蛮奈"] },
+    { "name": "Leiting Games", "topTier": true, "aliases": ["leiting", "雷霆游戏", "雷霆信息"] },
+    { "name": "Happy Elements (乐元素)", "topTier": true, "aliases": ["happy elements", "乐元素"] },
+    { "name": "Hypergryph", "topTier": true, "aliases": ["hypergryph", "鹰角"] },
+    { "name": "Papergames", "topTier": true, "aliases": ["papergames", "paper games", "叠纸"] },
+    { "name": "Kuro Games", "topTier": true, "aliases": ["kuro games", "kuro game", "库洛"] },
+    { "name": "Lilith Games", "topTier": true, "aliases": ["lilith", "莉莉丝"] },
+    { "name": "Bilibili Games", "topTier": true, "aliases": ["bilibili", "哔哩哔哩", "b站"] },
+    { "name": "Perfect World", "topTier": true, "aliases": ["perfect world", "完美世界"] },
+    { "name": "Seasun", "topTier": true, "aliases": ["seasun", "西山居"] },
+    { "name": "XD (心动)", "topTier": true, "aliases": ["xd inc", "xd network", "心动网络", "心动"] },
+    { "name": "Koei Tecmo", "topTier": true, "aliases": ["koei", "tecmo", "光荣特库摩"] },
+    { "name": "Yostar", "topTier": false, "aliases": ["yostar", "悠星"] },
+    { "name": "37 Games", "topTier": false, "aliases": ["37 games", "37games", "三七互娱", "三七"] }
+  ]
+}

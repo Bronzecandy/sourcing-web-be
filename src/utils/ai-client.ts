@@ -27,6 +27,7 @@ export async function callLLM(
   systemPrompt: string,
   userPrompt: string,
   maxTokens: number = 16_384,
+  opts: { temperature?: number } = {},
 ): Promise<LLMResponse> {
   const model = getModel();
   const client = getClient();
@@ -34,6 +35,7 @@ export async function callLLM(
   const response = await client.chat.completions.create({
     model,
     max_tokens: maxTokens,
+    ...(opts.temperature != null ? { temperature: opts.temperature } : {}),
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },

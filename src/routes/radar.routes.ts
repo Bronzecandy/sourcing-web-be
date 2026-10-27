@@ -1,7 +1,12 @@
 import { Router } from "express";
-import { getRadarRecap, radarFile } from "../services/radar-recap.service";
+import type { AuthedRequest } from "../middleware/auth";
+import { requirePanelAdmin } from "../middleware/auth";
+import { getRadarRecap, listRadarRuns, radarFile, runRadarRecap } from "../services/radar-recap.service";
+import { logDiagError } from "../utils/process-diagnostics";
 
 const router = Router();
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+let manualRun: Promise<unknown> | null = null;
 
 router.get("/latest", async (_req, res) => {
   try {
@@ -9,6 +14,42 @@ router.get("/latest", async (_req, res) => {
     res.json({ success: true, data });
   } catch (err) {
     console.error("[radar] latest:", err);
+    res.status(503).json({ success: false, error: err instanceof Error ? err.message : "Radar unavailable" });
+  }
+});
+
+router.get("/runs", async (_req, res) => {
+  try {
+    res.json({ success: true, data: await listRadarRuns() });
+  } catch (err) {
+    res.status(503).json({ success: false, error: err instanceof Error ? err.message : "Radar unavailable" });
+  }
+});
+
+/** Chạy kỳ Radar ngay (nền) — chỉ panel admin. */
+router.post("/run", requirePanelAdmin, (req: AuthedRequest, res) => {
+  if (manualRun) {
+    res.status(409).json({ success: false, error: "Radar đang chạy, thử lại sau" });
+    return;
+  }
+  const body = (req.body ?? {}) as { date?: string; publish?: boolean };
+  const date = typeof body.date === "string" && DATE_RE.test(body.date) ? body.date : undefined;
+  manualRun = runRadarRecap({ force: true, date, publish: body.publish !== false })
+    .catch((err) => logDiagError("radar-manual-run", err, { date: date ?? "today" }))
+    .finally(() => {
+      manualRun = null;
+    });
+  res.status(202).json({ success: true, data: { started: true, date: date ?? null } });
+});
+
+router.get("/:date", async (req, res) => {
+  if (!DATE_RE.test(req.params.date)) {
+    res.status(400).json({ success: false, error: "Ngày không hợp lệ" });
+    return;
+  }
+  try {
+    res.json({ success: true, data: await getRadarRecap(req.params.date) });
+  } catch (err) {
     res.status(503).json({ success: false, error: err instanceof Error ? err.message : "Radar unavailable" });
   }
 });
@@ -26,7 +67,7 @@ async function sendFile(
   kind: "docx" | "xlsx",
   res: import("express").Response,
 ): Promise<void> {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+  if (!DATE_RE.test(date)) {
     res.status(400).json({ success: false, error: "Ngày không hợp lệ" });
     return;
   }

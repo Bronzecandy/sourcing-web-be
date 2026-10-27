@@ -159,3 +159,23 @@ model RadarRecapRow {
   @@index([date, board])
   @@index([appId, date])
 }
+
+/// Snapshot TapTap hằng ngày của game trong 3 bảng Radar — so lịch ra mắt/test giữa 2 kỳ.
+model RadarGameSnapshot {
+  date          DateTime @db.Date
+  appId         Int
+  title         String
+  reserveCount  Int?
+  downloadCount Int?
+  rating        String?
+  flag          Int?
+  releaseDate   String?
+  scheduleKind  String?
+  scheduleDate  String?
+  scheduleLabel String?
+  facts         Json
+  createdAt     DateTime @default(now()) @db.Timestamptz(6)
+
+  @@id([date, appId])
+  @@index([appId, date])
+}

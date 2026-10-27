@@ -1,0 +1,560 @@
+{
+ "133568": {
+  "genre": "Sandbox sinh tồn thế giới mở, thuần hóa khủng long, multiplayer, PvP",
+  "publisher": "Phát hành: 蜗牛游戏 (苏州蜗牛数字科技 / Snail Games); phát triển: Studio Wildcard",
+  "titleEn": "ARK: Survival Evolved"
+ },
+ "172684": {
+  "genre": "Giải đố (puzzle) góc nhìn, single-player, thẩm mỹ cao",
+  "publisher": "ustwo games (phát hành TQ: XD/心动)"
+ },
+ "194039": {
+  "genre": "Sinh tồn sandbox, hợp tác nhiều người",
+  "publisher": "Tencent (ủy quyền Klei)",
+  "titleEn": "Hungry Wilds"
+ },
+ "200818": {
+  "genre": "Party game vật lý, casual, hài hước, multiplayer online",
+  "publisher": "Recreate Games (上海所思互动)",
+  "titleEn": "Party Animals"
+ },
+ "207433": {
+  "genre": "Bắn súng Battle Royale, esports, đồ họa cao",
+  "publisher": "KRAFTON (PUBG Studios)",
+  "titleEn": "PUBG: New State"
+ },
+ "217741": {
+  "genre": "Tower-defense roguelike, buy-to-play, port Steam",
+  "publisher": "黑灯游戏 (NPH Flawless Gaming/杭州星帆)"
+ },
+ "220317": {
+  "genre": "Shooter hành động sci-fi, RPG/looter, bản port mobile",
+  "publisher": "Digital Extremes",
+  "titleEn": "Warframe Mobile"
+ },
+ "233809": {
+  "genre": "Mô phỏng nông trại/đảo cozy, indie phương Tây",
+  "publisher": "Fluffnest"
+ },
+ "237561": {
+  "genre": "Anime, ARPG side-scroll, phiêu lưu, chiến thuật, bishoujo, sci-fi, 3D",
+  "publisher": "绿梦工作室 / 上海竹子互联网 (phát hành)",
+  "titleEn": "Green Dream: Sound of Time-Space"
+ },
+ "243110": {
+  "genre": "Auto-chess/chiến thuật theo lượt PvP, phái sinh Honor of Kings",
+  "publisher": "Tencent"
+ },
+ "245534": {
+  "genre": "Tool luyện ngắm hỗ trợ game FPS khác (không phải game độc lập, offline)",
+  "publisher": "扑家工作室/Acmore Games (NPH 上海欧皇网络)"
+ },
+ "254656": {
+  "genre": "Giải đố (puzzle)",
+  "publisher": "Dev cá nhân"
+ },
+ "281223": {
+  "genre": "MMORPG chuyển thể tiểu thuyết",
+  "publisher": "Kuaishou (自研)"
+ },
+ "352408": {
+  "genre": "Auto-battler/chiến thuật tự động kết hợp roguelike",
+  "publisher": "成都烛光科技"
+ },
+ "378464": {
+  "genre": "Sim trang trí nhà & kinh doanh, chữa lành, vẽ tay, màn hình dọc",
+  "publisher": "波波森林 BOOBOFOREST / 天津虞北文化",
+  "titleEn": "Rookie Chicken Dreamer"
+ },
+ "383874": {
+  "genre": "RPG hành động đô thị thế giới mở, anime, độ tự do cao, 3D",
+  "publisher": "NetEase (杭州网易雷火 / NetEase Thunderfire)",
+  "titleEn": "Ananta"
+ },
+ "386208": {
+  "genre": "RPG thế giới mở đô thị, thu thập sinh vật (月灵), anime, hành động, xây dựng",
+  "publisher": "望月游戏研究院 / 广州栖梧信息技术",
+  "titleEn": "Wangyue"
+ },
+ "41333": {
+  "genre": "Rhythm/music game (音游, note rơi 3D), cốt truyện, bishoujo",
+  "publisher": "Phát hành: 心动 (XD); phát triển: lowiro"
+ },
+ "593829": {
+  "genre": "RPG anime thế giới mở, thu thập/đồng hành sinh vật (pet), hành động, dưỡng thành",
+  "publisher": "Manjuu (蛮啾网络) — phát hành 蛮奈网络, dev 积咪网络",
+  "titleEn": "Azur Promilia",
+  "videoUrl": "https://www.bilibili.com/video/BV1Jr421n7n4/"
+ },
+ "611414": {
+  "genre": "MMORPG tiên hiệp/tu tiên, thế giới mở, phong cách Trung Hoa, 3D, đồ họa cao",
+  "publisher": "飞光阁工作室 (Feiguangge Studio) / 上海拾异信息科技",
+  "titleEn": "Qijie Mengtan"
+ },
+ "708247": {
+  "genre": "Puzzle-platformer, buy-to-play, port Steam",
+  "publisher": "机核（北京）文化传媒"
+ },
+ "711779": {
+  "genre": "Roguelike hành động side-scroll, co-op multiplayer, Steam port",
+  "publisher": "雷霆游戏 (深圳雷霆信息技术 / Leiting Games); dev Hunter Studio",
+  "videoUrl": "https://www.bilibili.com/video/BV16U421d7xt/"
+ },
+ "716232": {
+  "genre": "SLG lịch sử Trung Hoa, thẻ tướng, chiến thuật, kinh doanh",
+  "publisher": "广州万紫网络科技 (Wanzi Games)"
+ },
+ "716987": {
+  "genre": "Roguelike ARPG hành động, thuần chơi đơn (单机)",
+  "publisher": "缇米乐工作室 (Timile Studio)"
+ },
+ "718446": {
+  "genre": "RTS quân sự viễn tưởng pha 二次元",
+  "publisher": "霍尔果斯纳罗达网络科技"
+ },
+ "718694": {
+  "genre": "Casual, sim chữa lành/kinh doanh nhẹ (IP Chiikawa)",
+  "publisher": "Trang TapTap do 新闻消息 tạo (không có đơn vị phát hành TQ); bản quốc tế do Applibot phát hành",
+  "titleEn": "Chiikawa Pocket"
+ },
+ "729276": {
+  "genre": "Sim đảo/nông trại, chữa lành, câu cá, xây dựng, phiêu lưu, co-op online, vật lý vui nhộn",
+  "publisher": "Phát hành XD (心动网络); dev 猫不鱼工作室",
+  "titleEn": "Cozy Island Time"
+ },
+ "730107": {
+  "genre": "ARPG pixel 2D side-scroll, party PvP, IP hoạt hình Trung, multiplayer online",
+  "publisher": "啊吉游 (上海) 科技 (A Ji You)",
+  "titleEn": "Scissor Seven: Shadow Clash"
+ },
+ "730674": {
+  "genre": "Đối kháng 3D (fighting) competitive, hành động, IP anime",
+  "publisher": "Tencent (腾讯魔方工作室群 / Magic Cube)"
+ },
+ "733908": {
+  "genre": "Sinh tồn PvP thế giới mở (Rust license), liên thông PC + Mobile",
+  "publisher": "Tencent"
+ },
+ "738083": {
+  "genre": "RPG anime 3D, chủ đề mô tô/bishoujo",
+  "publisher": "Tencent",
+  "titleEn": "Chasing Kaleido"
+ },
+ "741112": {
+  "genre": "Card/gacha nuôi dưỡng (training sim kiểu roguelike), anime, bóng rổ, thể thao, chiến thuật QTE",
+  "publisher": "Phát hành 广州灵犀互动娱乐 (Lingxi Games, Alibaba); dev 黑曼波工作室",
+  "titleEn": "Basketball Girls: Leap to the Peak",
+  "videoUrl": "https://www.bilibili.com/video/BV1b5h46iEkz/"
+ },
+ "742050": {
+  "genre": "Sim/casual/puzzle-platform, sandbox, đơn người chơi (单人)",
+  "publisher": "Double Dagger Studio (US) / 嬉皮狗工作室"
+ },
+ "746164": {
+  "genre": "RPG hiện đại + otome/nữ-hướng (nội dung trưởng thành)",
+  "publisher": "不眠夜工作室"
+ },
+ "748031": {
+  "genre": "Thu phục sinh vật, MMORPG thế giới mở, phiêu lưu, đồ họa cao, cross-platform",
+  "publisher": "爪印工作室 Pawprint Studio; phát hành 上海趣乐糖 (FunPlus)",
+  "titleEn": "Yimo"
+ },
+ "751029": {
+  "genre": "Roguelike nhẹ kết hợp tu tiên/quản lý môn phái",
+  "publisher": "野趣工作室/海南青穹网络"
+ },
+ "753921": {
+  "genre": "Phiêu lưu, dưỡng pet/tinh linh, auto-chess, chiến thuật 3D",
+  "publisher": "miHoYo (上海米哈游)",
+  "titleEn": "Honkai: Nexus Anima",
+  "videoUrl": "https://www.bilibili.com/video/BV1irhQzNEEz/"
+ },
+ "754910": {
+  "genre": "Anime, trinh thám, ARPG, thế giới mở, hành động",
+  "publisher": "Happy Elements (乐元素 / 上海乐元素世界科技)",
+  "titleEn": "Silver City"
+ },
+ "755604": {
+  "genre": "RPG thế giới mở hải trình",
+  "publisher": "NetEase (Joker Studio)"
+ },
+ "759421": {
+  "genre": "Card idle RPG, anime 美少女, bản đồ dạng bàn cờ, chiến thuật",
+  "publisher": "晴空游戏工作室 (深圳晴空游戏科技)",
+  "titleEn": "Lingwu World"
+ },
+ "759961": {
+  "genre": "Sim xây dựng nhà máy/automation, buy-once (port Steam)",
+  "publisher": "iFAction Studio"
+ },
+ "760944": {
+  "genre": "Deck-building Roguelike đơn",
+  "publisher": "凉屋游戏 (Liangwu)",
+  "videoUrl": "https://www.bilibili.com/video/BV1pAgD6zE7M/"
+ },
+ "761143": {
+  "genre": "Bullet-hell deck-building Roguelike đơn",
+  "publisher": "迷你鲸工作室"
+ },
+ "761144": {
+  "genre": "Chiến lược sinh tồn hậu tận thế, port từ Steam",
+  "publisher": "Ndemic Creations / phát hành 上海橙墨"
+ },
+ "769654": {
+  "genre": "ARPG hầm ngục dark-fantasy, roguelike nhẹ, multiplayer",
+  "publisher": "猛猛刷工作室/海南多美仕科技"
+ },
+ "77045": {
+  "genre": "Mô phỏng nuôi dạy con (life-sim), port từ PC",
+  "publisher": "Beijing Yihuayou (北京艺画游)"
+ },
+ "771038": {
+  "genre": "Mô phỏng đời sống/trang trí nhà (chữa lành)",
+  "publisher": "佛山时尚都市网络科技"
+ },
+ "772909": {
+  "genre": "Sim xây dựng/chăm sóc nhà cửa, cozy, trồng trọt, thay đồ, social, multiplayer, 3D",
+  "publisher": "Tencent (深圳市腾讯计算机系统有限公司)",
+  "titleEn": "Lili's Tiny Kingdom",
+  "videoUrl": "https://www.biligame.com/detail/?id=116241"
+ },
+ "775574": {
+  "genre": "Sim kinh doanh, chữa lành, canh tác, nữ-hướng (女性向), màn hình dọc",
+  "publisher": "游萤互娱 (Firejoy)"
+ },
+ "776320": {
+  "genre": "Life sim / sim nông trại 3D, chữa lành, xây dựng, xã hội, multiplayer",
+  "publisher": "miHoYo (上海米哈游网络科技)",
+  "titleEn": "Starlit Valley",
+  "videoUrl": "https://www.bilibili.com/video/BV1sJe16dEEb/"
+ },
+ "784122": {
+  "genre": "Bắt/thu thập thú cưng, card, idle RPG, nuôi dưỡng, casual",
+  "publisher": "Bilibili Games (哔哩哔哩游戏 / 芜湖享游网络技术)",
+  "titleEn": "Shine On! Rumi"
+ },
+ "784824": {
+  "genre": "FMV lịch sử giả tưởng, đơn tuyến trả phí",
+  "publisher": "上海木焱网络科技"
+ },
+ "789293": {
+  "genre": "Merge, mô phỏng quản lý cửa hàng, dưỡng thành, casual (IP Sanrio)",
+  "publisher": "苏州沁游网络科技",
+  "titleEn": "Hello Kitty My Dream Store"
+ },
+ "789815": {
+  "genre": "Action-adventure thế giới mở, cốt truyện, single-player (AAA console port)",
+  "publisher": "Rockstar Games (phát hành mobile qua Netflix); trang TapTap là trang tin (新闻消息), không phải hãng chính thức"
+ },
+ "792018": {
+  "genre": "ARPG hành động chặt chém (Musou), IP Dynasty Warriors chính thức",
+  "publisher": "武汉盛天游戏 (bản quyền Koei Tecmo)",
+  "videoUrl": "https://www.bilibili.com/video/BV14UEY6WExS/"
+ },
+ "799054": {
+  "genre": "Sim kinh doanh/nuôi dưỡng gia tộc Trung Hoa cổ, theo lượt, chơi đơn",
+  "publisher": "侠云游创（广州）(Xiayun Studio)"
+ },
+ "799294": {
+  "genre": "Roguelike tower defense/bullet-hell, xây căn cứ di động, deckbuilding, idle, 2D sci-fi, single-player",
+  "publisher": "香蕉狗工作室 / BananaDogGames (indie)"
+ },
+ "799445": {
+  "genre": "Casual, sim trang trí phòng/thay đồ, chữa lành (kiểu Tabikaeru)",
+  "publisher": "厂商: 猫猫世纪工作室; 供应商: 上海新土网络科技 (Newsoil Games)"
+ },
+ "804298": {
+  "genre": "Extraction (搜打撤), sinh tồn/phiêu lưu",
+  "publisher": "时迹网络 / 超神网络"
+ },
+ "805993": {
+  "genre": "Sinh tồn thế giới mở, nhập vai khủng long, tiến hóa, bộ lạc, PvP",
+  "publisher": "微乐游戏 (Weile Games); nhà cung cấp 家乡互动（厦门）",
+  "titleEn": "Dragon Island: Origin of Beasts"
+ },
+ "807613": {
+  "genre": "Idol, nữ-hướng (女性向), anime",
+  "publisher": "Happy Elements (乐元素)"
+ },
+ "808743": {
+  "genre": "RPG chiến thuật, chí quái dân gian/new weird (新怪谈), phiêu lưu, 3D, anime",
+  "publisher": "游卡网络 (Yoka Games, 上海游卡网络技术) – NPH Tam Quốc Sát",
+  "videoUrl": "https://www.bilibili.com/video/BV1dMTD6sEqo/"
+ },
+ "809354": {
+  "genre": "Otome/nữ-hướng kinh dị nhẹ, góc nhìn thứ hai",
+  "publisher": "隐隐山工作室"
+ },
+ "817406": {
+  "genre": "Game xã hội hợp tác mạo hiểm chủ đề mộng cảnh (extraction nhẹ)",
+  "publisher": "三点饮茶工作室 (indie nhỏ)"
+ },
+ "820664": {
+  "genre": "MMORPG nhẹ, tiên hiệp",
+  "publisher": "Perfect World"
+ },
+ "823102": {
+  "genre": "Nông trại idle/clicker, offline",
+  "publisher": "苒酱紫工作室"
+ },
+ "832093": {
+  "genre": "Visual novel/life-sim hóa thân họa sĩ tự do, nhiều kết thúc",
+  "publisher": "长沙超神网络科技"
+ },
+ "837288": {
+  "genre": "Otome/nữ-hướng 3D kết hợp AI companion",
+  "publisher": "浙江同元智算科技 (初云)"
+ },
+ "845749": {
+  "genre": "Giải đố kinh dị/huyền bí cốt truyện nặng, đơn tuyến",
+  "publisher": "成都惊帆科技 (纸嫁衣工作室)"
+ },
+ "849146": {
+  "genre": "Otome/nữ-hướng, tình cảm đô thị (UE5)",
+  "publisher": "VVANNA (Zlongame/祖龙)"
+ },
+ "849668": {
+  "genre": "Đơn tuyến cốt truyện kinh dị/huyền bí, giải đố",
+  "publisher": "勾陈一工作室"
+ },
+ "852992": {
+  "genre": "Idle RPG võ hiệp, roguelike, dưỡng thành",
+  "publisher": "剑工作室 / 广州龙霆网络"
+ },
+ "859125": {
+  "genre": "Mô phỏng kinh doanh kết hợp tu tiên, dạng text",
+  "publisher": "一起来修仙工作室"
+ },
+ "864393": {
+  "genre": "Mô phỏng nấu ăn/phiêu lưu 3D, spin-off Dave the Diver",
+  "publisher": "Mintrocket / phát hành 心动网络"
+ },
+ "865519": {
+  "genre": "Ghép chữ + tháp phòng thủ (đề tài Tam Quốc)",
+  "publisher": "北京蜜獾工坊科技"
+ },
+ "865791": {
+  "genre": "Chiến thuật theo lượt/thẻ tướng, IP Lord of the Mysteries",
+  "publisher": "Zulong Games"
+ },
+ "866257": {
+  "genre": "Pet collection, tower defense, card, idle",
+  "publisher": "莉莉丝游戏 (Lilith Games)"
+ },
+ "866366": {
+  "genre": "RPG chiến thuật kể chuyện bằng thẻ bài (Card RPG), đã nổi tiếng trên Steam",
+  "publisher": "Game Tree (wudi)"
+ },
+ "868037": {
+  "genre": "Đối kháng/fighting 2D, arcade, PvP 3v3, thu thập nhân vật, IP KOF",
+  "publisher": "Wanda Game / 互爱互动 Hoolai (北京); IP SNK"
+ },
+ "870255": {
+  "genre": "Text-game phiêu lưu đa thế giới, casual",
+  "publisher": "济南众趣网络科技"
+ },
+ "871060": {
+  "genre": "Mô phỏng kinh doanh/thẩm định đồ cổ, offline",
+  "publisher": "保罗游品味/上海创巴科技"
+ },
+ "871150": {
+  "genre": "Câu cá mô phỏng (UGC)",
+  "publisher": "冰格子工作室/上海创巴科技"
+ },
+ "873046": {
+  "genre": "Mô phỏng cắt/giám định đá ngọc, cận cờ bạc",
+  "publisher": "口袋课室/上海创巴科技"
+ },
+ "873826": {
+  "genre": "Rèn luyện não bộ/giáo dục, casual",
+  "publisher": "打怪兽工作室/上海创巴科技"
+ },
+ "874438": {
+  "genre": "Text-adventure RPG do AI dẫn dắt, UGC",
+  "publisher": "zone_11工作室/上海创巴科技"
+ },
+ "874444": {
+  "genre": "Extraction shooter (搜打撤), kinh dị Trung Hoa, PvP",
+  "publisher": "NetEase LeiHuo",
+  "titleEn": "Phantom Shadow Blade"
+ },
+ "876632": {
+  "genre": "Giải đố cắt ghép nguyên liệu làm bento, UGC casual",
+  "publisher": "大大怪的工作室/上海创巴科技"
+ },
+ "880259": {
+  "genre": "FPS chiến thuật, cạnh tranh PvP (đặt bom/defuse, deathmatch, 2v2)",
+  "publisher": "Phát hành: 梧桐 (北京梧桐宇舟科技); phát triển: Axlebolt",
+  "titleEn": "Standoff: Clash Moment"
+ },
+ "882850": {
+  "genre": "Idle, sim nấu ăn/kinh doanh, casual (port Steam)",
+  "publisher": "萝卜游戏工作室 (供应商 fanyuhang)"
+ },
+ "884085": {
+  "genre": "Sim kinh doanh/tiêu tiền, casual, UGC",
+  "publisher": "薄荷糖糖工作室 (UGC TapTap)"
+ },
+ "892775": {
+  "genre": "RPG tu tiên, idle/auto-battle (IP tiểu thuyết)",
+  "publisher": "智玩游戏工作室"
+ },
+ "893924": {
+  "genre": "Card RPG idle dưỡng thành, thần thoại/steampunk, bishoujo",
+  "publisher": "广州春芒网络科技 (Guangzhou Chunmang; hệ Shiyue 十月)"
+ },
+ "894304": {
+  "genre": "Sim nuôi dạy con, UGC",
+  "publisher": "云墟仙途工作室 (UGC TapTap)"
+ },
+ "894881": {
+  "genre": "Extraction hợp tác 3 người",
+  "publisher": "NetEase (Lôi Hỏa)",
+  "videoUrl": "https://www.bilibili.com/video/BV17vuw68E58/"
+ },
+ "894924": {
+  "genre": "RPG open-world hành động, phiêu lưu, độ tự do cao, đồ họa cao (engine vật lý x hóa học)",
+  "publisher": "Phát hành: 悦然互动 (北京悦然互动科技); Dev: ZEALORY GAMES",
+  "titleEn": "Sleepless Wilds"
+ },
+ "895177": {
+  "genre": "Sim độ xe cũ kiếm tiền, UGC",
+  "publisher": "石头游戏工作室 (UGC TapTap)"
+ },
+ "898213": {
+  "genre": "Casual, mô phỏng triều chính (text-strategy)",
+  "publisher": "本营工作室 (UGC TapTap)"
+ },
+ "898983": {
+  "genre": "Casual sim shipper, UGC",
+  "publisher": "饭序工作室 (UGC TapTap)"
+ },
+ "899155": {
+  "genre": "Kinh dị sinh tồn/giải đố (liminal horror, Backrooms)",
+  "publisher": "模拟一切工作室 (NPH 上海创巴科技)"
+ },
+ "899626": {
+  "genre": "Sim chấm thi, tình huống đạo đức, UGC",
+  "publisher": "咕咕嘎嘎工作室 (UGC TapTap)"
+ },
+ "901325": {
+  "genre": "Chiến thuật cốt truyện, thu thập",
+  "publisher": "Hoolai Interactive/Wanda Game"
+ },
+ "902393": {
+  "genre": "Idle family-life sim (UGC)",
+  "publisher": "程序未响应工作室 (UGC TapTap)"
+ },
+ "902869": {
+  "genre": "Sim sinh tồn/tích trữ đồ trước tận thế, quản lý tài nguyên; UGC",
+  "publisher": "椰子星工作室 (UGC TapTap制造, 上海创巴科技)"
+ },
+ "903194": {
+  "genre": "Phiêu lưu văn bản màn hình dọc, casual, UGC (TapTap Maker)",
+  "publisher": "天策万想工作室 (UGC TapTap / 上海创巴科技)"
+ },
+ "903578": {
+  "genre": "Sim sưu tầm thần thoại đơn (UGC)",
+  "publisher": "骰子游戏 (TapTap制造)"
+ },
+ "904033": {
+  "genre": "Sim cuộc sống, nuôi dưỡng/chữa lành, xây dựng, đô thị, social, 3D",
+  "publisher": "Lilith Games (莉莉丝, phát hành) / 猫爪拿铁 (phát triển)"
+ },
+ "904067": {
+  "genre": "Casual, sim dọn dẹp, UGC",
+  "publisher": "果冻猫侠工作室 (UGC TapTap)"
+ },
+ "907735": {
+  "genre": "Sim giao đồ ăn, casual, UGC",
+  "publisher": "倦猫工作室 (UGC TapTap)"
+ },
+ "908506": {
+  "genre": "Strategy chiếm thành/thống nhất thiên hạ, phòng multiplayer; UGC",
+  "publisher": "Elyvon的工作室 (UGC TapTap制造, 上海创巴科技)"
+ },
+ "909114": {
+  "genre": "Chiến thuật quân sự solo (UGC)",
+  "publisher": "busjcdf的工作室 (UGC TapTap)"
+ },
+ "911108": {
+  "genre": "Sim đời sống/narrative 'sảng văn' (UGC)",
+  "publisher": "WSL的工作室 — TapTap制造 UGC (上海创巴科技), tác phẩm GameJam 聚光灯"
+ },
+ "912177": {
+  "genre": "Life-sim/idle hậu tận thế, UGC (TapTap Maker)",
+  "publisher": "涩芒的工作室 (UGC TapTap / 上海创巴科技)"
+ },
+ "913692": {
+  "genre": "Trắc nghiệm tính cách dạng văn bản, UGC (TapTap Maker)",
+  "publisher": "神之引工作室 (UGC TapTap / 上海创巴科技)"
+ },
+ "915977": {
+  "genre": "Casual sim đặt đồ ăn, UGC (TapTap Maker)",
+  "publisher": "THE FOSS LAB (UGC TapTap / 上海创巴科技)"
+ },
+ "919382": {
+  "genre": "Strategy chiếm thành kiểu State.io, Tam Quốc, thủy mặc; UGC",
+  "publisher": "魔芋爽工作室 (UGC TapTap制造, 上海创巴科技), dev 1 người"
+ },
+ "921865": {
+  "genre": "Sim đời sống quân ngũ, UGC",
+  "publisher": "KKV的工作室 (UGC TapTap)"
+ },
+ "922296": {
+  "genre": "Sim xây dựng thành phố",
+  "publisher": "算星汇河科技(贵州)"
+ },
+ "922540": {
+  "genre": "Idle/placement (UGC)",
+  "publisher": "印弨工作室 (UGC TapTap)"
+ },
+ "923653": {
+  "genre": "Sim kinh doanh/nghề tài xế công nghệ, dưỡng thành, màn hình dọc, UGC",
+  "publisher": "精力有限工作室 (UGC TapTap制造, 供应商 上海创巴科技)"
+ },
+ "928383": {
+  "genre": "Extraction 搜打撤, sinh tồn hậu tận thế, xây căn cứ, sim",
+  "publisher": "拾一工作室 – TapTap制造 UGC / 上海创巴科技"
+ },
+ "928422": {
+  "genre": "Sim kinh doanh cho thuê căn hộ, mai mối người thuê (UGC)",
+  "publisher": "珊珊的工作室3 — TapTap制造 UGC (上海创巴科技)"
+ },
+ "930271": {
+  "genre": "Sim quản lý cửa hàng casual (UGC mini-game)",
+  "publisher": "Hhj's的工作室 — UGC TapTap制造, nhà cung cấp 上海创巴科技"
+ },
+ "932371": {
+  "genre": "Idle/incremental câu cá, pixel, kinh doanh nhẹ",
+  "publisher": "追风的鱼的工作室 (indie, 供应商 chenwei; dev là UP Bilibili)"
+ },
+ "932417": {
+  "genre": "Casual mini-game lái xe/thi bằng lái (UGC)",
+  "publisher": "诶萌工作室 — TapTap制造 UGC (上海创巴科技)"
+ },
+ "932781": {
+  "genre": "Idle/sim nông trại gà, merge, bảng xếp hạng (UGC)",
+  "publisher": "AndreaH的工作室 — TapTap制造 UGC (供应商 易玩（上海）网络科技)"
+ },
+ "933254": {
+  "genre": "Sim cuộc đời dạng text (life sim, roguelite chọn lựa)",
+  "publisher": "黑白128921 (cá nhân) – TapTap制造 UGC / 上海创巴科技"
+ },
+ "934066": {
+  "genre": "Casual, sinh tồn nhẹ, nông trại/xây nhà trên đảo, co-op multiplayer",
+  "publisher": "月与光年工作室 – TapTap制造 UGC / 上海创巴科技"
+ },
+ "934386": {
+  "genre": "Sim kinh doanh làm giàu, gia tộc (cưới vợ, sinh con), casual",
+  "publisher": "庭风长月的工作室 — UGC TapTap制造, nhà cung cấp 易玩（上海）"
+ },
+ "936118": {
+  "genre": "Chiến thuật/cốt truyện vi kinh dị, sim mở quán giao đồ ăn, UGC",
+  "publisher": "聚光灯-蓝渡口工作室 (UGC TapTap / 上海创巴科技)"
+ },
+ "937605": {
+  "genre": "Sim kinh doanh thu mua/đổi điện thoại cũ, casual, H5 dọc, ad-based",
+  "publisher": "麻辣香锅 — UGC TapTap制造, nhà cung cấp 上海创巴科技"
+ }
+}

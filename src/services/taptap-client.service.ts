@@ -70,7 +70,13 @@ async function taptapGet(path: string, params: Record<string, string | number>):
     throw new Error(`TapTap API ${res.status}: ${res.statusText}`);
   }
 
-  const json = (await res.json()) as { success?: boolean; data?: unknown };
+  const body = await res.text();
+  let json: { success?: boolean; data?: unknown };
+  try {
+    json = JSON.parse(body) as { success?: boolean; data?: unknown };
+  } catch {
+    throw new Error(`TapTap API trả về không phải JSON (có thể bị chặn tạm thời): ${body.slice(0, 80)}`);
+  }
   if (!json.data) throw new Error("TapTap API returned no data");
   return json.data;
 }
@@ -103,6 +109,39 @@ export async function fetchAppDetailRaw(appId: number): Promise<Record<string, u
     console.warn(`[taptap-client] fetchAppDetailRaw(${appId}) failed:`, e instanceof Error ? e.message : e);
     return null;
   }
+}
+
+export interface TapTapOfficialPost {
+  title: string;
+  summary: string;
+  date: string | null;
+}
+
+/** Bài đăng chính thức (公告/动态) của game: group/v1/detail → feed/v7/by-group type=official. */
+export async function fetchOfficialPostsDirect(appId: number, limit = 10): Promise<TapTapOfficialPost[]> {
+  const group = (await taptapGet("group/v1/detail", { app_id: appId })) as {
+    group?: { id?: number };
+  };
+  const groupId = group.group?.id;
+  if (!groupId) return [];
+  const feed = (await taptapGet("feed/v7/by-group", {
+    group_id: groupId,
+    type: "official",
+    limit,
+  })) as { list?: Array<{ moment?: Record<string, unknown> }> };
+  const posts: TapTapOfficialPost[] = [];
+  for (const item of feed.list ?? []) {
+    const moment = item.moment;
+    if (!moment) continue;
+    const topic = (moment.topic ?? {}) as { title?: unknown; summary?: unknown };
+    const publish = typeof moment.publish_time === "number" ? moment.publish_time : null;
+    posts.push({
+      title: typeof topic.title === "string" ? topic.title : "",
+      summary: typeof topic.summary === "string" ? topic.summary : "",
+      date: publish ? new Date(publish * 1000).toISOString().slice(0, 10) : null,
+    });
+  }
+  return posts;
 }
 
 function looksLikeTapTapAppDetail(obj: unknown): obj is Record<string, unknown> {

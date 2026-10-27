@@ -1,4 +1,4 @@
-import { cache, cacheHas, pruneCacheKeyPrefix, setForceRefresh } from "./utils/cache";
+import { cache, cacheHas, pruneCacheKeyPrefix, withForceRefresh } from "./utils/cache";
 import { waitForPrecomputeSlot } from "./utils/analysis-active-guard";
 import { withDbRetry, type DbRetryOptions } from "./utils/db-retry";
 import { logDiag, logDiagError } from "./utils/process-diagnostics";
@@ -175,9 +175,7 @@ async function precomputeDistribution(options: { force: boolean; label?: string 
   const phaseStart = Date.now();
   console.log("[precompute] Phase 4: Distribution analytics (sequential, soft-fail on DB)...");
 
-  setForceRefresh(false);
-  try {
-    await waitForPrecomputeSlot();
+  await waitForPrecomputeSlot();
     console.log("[precompute]   refreshing distribution cohort store...");
     try {
       await refreshCohortStore();
@@ -320,9 +318,6 @@ async function precomputeDistribution(options: { force: boolean; label?: string 
       skipped,
       failed,
     });
-  } finally {
-    setForceRefresh(false);
-  }
 }
 
 export async function precomputeAll(options?: {
@@ -330,9 +325,8 @@ export async function precomputeAll(options?: {
 }): Promise<{ durationMs: number; keys: number }> {
   const start = Date.now();
   const label = options?.label;
-  setForceRefresh(true);
 
-  try {
+  await withForceRefresh(async () => {
     await waitForPrecomputeSlot();
     console.log("[precompute] Phase 1: Dashboard + Rankings...");
     await runBatch([
@@ -430,6 +424,7 @@ export async function precomputeAll(options?: {
     await runAppBatches(extraIds, [7, 14], "extra");
     console.log(`[precompute] Phase 3 done (${((Date.now() - start) / 1000).toFixed(1)}s)`);
     logDiag("precompute-phase", { phase: 3, elapsedSec: Math.round((Date.now() - start) / 1000) });
+    });
 
     // Distribution last: heaviest RAM + DB; soft-fail so deploy never dies here.
     await precomputeDistribution({ force: shouldForceDistributionRefresh(label), label });
@@ -450,8 +445,16 @@ export async function precomputeAll(options?: {
         logDiagError("potential-top20-alert", err, { label });
       }
       try {
-        const { runRadarRecap } = await import("./services/radar-recap.service");
-        await runRadarRecap();
+        const { runRadarWatch } = await import("./services/radar-watch.service");
+        await runRadarWatch();
+      } catch (err) {
+        console.warn("[precompute] radar watch failed:", (err as Error).message);
+        logDiagError("radar-watch", err, { label });
+      }
+      try {
+        const { runRadarRecap, shouldRunWeeklyRadar } = await import("./services/radar-recap.service");
+        if (await shouldRunWeeklyRadar()) await runRadarRecap();
+        else console.log("[precompute] radar recap: chưa tới kỳ tuần (RADAR_RECAP_WEEKDAY)");
       } catch (err) {
         console.warn("[precompute] radar recap failed:", (err as Error).message);
         logDiagError("radar-recap", err, { label });
@@ -466,8 +469,5 @@ export async function precomputeAll(options?: {
       cacheKeys: cache.keys().length,
     });
 
-    return { durationMs: duration, keys: cache.keys().length };
-  } finally {
-    setForceRefresh(false);
-  }
+  return { durationMs: duration, keys: cache.keys().length };
 }

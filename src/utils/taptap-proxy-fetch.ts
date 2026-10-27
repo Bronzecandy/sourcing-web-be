@@ -1,7 +1,7 @@
 import { fetchWithLongConnect } from "./fetch-external";
 import { normalizeProxyBaseUrl, parseProxyResponseBody } from "./proxy-json";
-import { pickTapTapDetailFromProxyBundle } from "../services/taptap-client.service";
-import type { ExternalReview } from "../services/taptap-client.service";
+import { fetchOfficialPostsDirect, pickTapTapDetailFromProxyBundle } from "../services/taptap-client.service";
+import type { ExternalReview, TapTapOfficialPost } from "../services/taptap-client.service";
 
 const PROXY_BASE = normalizeProxyBaseUrl(process.env.TAPTAP_PROXY_URL || "");
 const PROXY_KEY = process.env.TAPTAP_PROXY_KEY || "";
@@ -99,6 +99,30 @@ export async function fetchTapTapDetailRawViaProxy(
     return null;
   } catch {
     return null;
+  }
+}
+
+/** Official posts: proxy first (IP BE có thể bị chặn), rồi gọi TapTap trực tiếp. Lỗi cả hai → []. */
+export async function fetchTapTapOfficialPosts(appId: number, limit = 10): Promise<TapTapOfficialPost[]> {
+  if (useTapTapProxy() && PROXY_BASE) {
+    try {
+      const res = await fetchWithLongConnect(`${PROXY_BASE}/api/official-posts/${appId}?limit=${limit}`, {
+        headers: proxyHeaders(),
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (res.ok) {
+        const json = parseProxyResponseBody(await res.text(), "TapTap proxy official posts");
+        const data = json.data as { posts?: TapTapOfficialPost[] } | undefined;
+        if (json.success && Array.isArray(data?.posts)) return data.posts;
+      }
+    } catch {
+      // fall through to direct
+    }
+  }
+  try {
+    return await fetchOfficialPostsDirect(appId, limit);
+  } catch {
+    return [];
   }
 }
 

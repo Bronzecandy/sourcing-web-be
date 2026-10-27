@@ -58,14 +58,14 @@ export function formatIctDate(date = calendarDateIct()): string {
   return date.toISOString().slice(0, 10);
 }
 
-function sortValue(row: PotentialScoreResult, sort: "momentum" | "composite"): number {
+export function sortValue(row: PotentialScoreResult, sort: "momentum" | "composite"): number {
   if (sort === "momentum") {
     return row.momentumScore ?? row.audienceGrowthAbsolute ?? Number.NEGATIVE_INFINITY;
   }
   return row.compositeScore;
 }
 
-function storedScore(row: PotentialScoreResult, sort: "momentum" | "composite"): number {
+export function storedScore(row: PotentialScoreResult, sort: "momentum" | "composite"): number {
   const v = sortValue(row, sort);
   return Number.isFinite(v) ? v : 0;
 }

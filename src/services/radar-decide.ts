@@ -2,14 +2,8 @@ import fs from "fs";
 import path from "path";
 import { jsonrepair } from "jsonrepair";
 import { callLLM } from "../utils/ai-client";
-import {
-  NEXT_ACTIONS,
-  actionFamily,
-  isNextAction,
-  type NextAction,
-  type RadarDecision,
-  type RadarGameFacts,
-} from "./radar-types";
+import { formatViDate, scheduleLabel } from "./radar-schedule";
+import type { RadarFlags, RadarGameFacts, RadarSchedule, ScheduleKind } from "./radar-types";
 
 let promptCache: string | null = null;
 
@@ -33,112 +27,146 @@ function parseJsonObject(text: string): Record<string, unknown> {
   }
 }
 
-function snapAction(value: unknown, playableNow: boolean): NextAction {
-  const text = typeof value === "string" ? value.trim() : "";
-  if (isNextAction(text)) {
-    if (text.startsWith("Test Viable") && !playableNow) {
-      if (text.includes("High")) return "Monitor - High Potential";
-      if (text.includes("Low")) return "Monitor - Low Potential";
-      return "Monitor - Mid Potential";
-    }
-    if (!text.startsWith("Test Viable") && playableNow && text.startsWith("Monitor")) {
-      if (text.includes("High")) return "Test Viable - High Potential";
-      if (text.includes("Low")) return "Test Viable - Low Potential";
-      return "Test Viable - Medium Potential";
-    }
-    return text;
-  }
-  const family = actionFamily(text);
-  if (playableNow) {
-    if (family === "high") return "Test Viable - High Potential";
-    if (family === "low") return "Test Viable - Low Potential";
-    if (family === "drop") return "Drop";
-    if (family === "ignore") return "Temporary Ignore";
-    if (family === "mid" || family === "viable") return "Test Viable - Medium Potential";
-  }
-  if (family === "high") return "Monitor - High Potential";
-  if (family === "low") return "Monitor - Low Potential";
-  if (family === "drop") return "Drop";
-  if (family === "ignore") return "Temporary Ignore";
-  if (family === "viable") return playableNow ? "Test Viable - Medium Potential" : "Monitor - Mid Potential";
-  return "Monitor - Mid Potential";
+function str(v: unknown): string {
+  return typeof v === "string" ? v.trim() : "";
 }
 
-export async function decideRadarGame(input: {
+function bool(v: unknown, fallback = false): boolean {
+  if (typeof v === "boolean") return v;
+  if (v === "true") return true;
+  if (v === "false") return false;
+  return fallback;
+}
+
+const SCHEDULE_KINDS = new Set<ScheduleKind>([
+  "launched",
+  "open_beta",
+  "launch_date",
+  "closed_beta",
+  "test_recruit",
+  "test_running",
+]);
+
+export interface RadarExtraction {
+  titleEn: string;
+  genre: string;
+  publisher: string;
+  insights: string;
+  flags: RadarFlags;
+  schedule: { kind: ScheduleKind; date: string | null; note: string } | null;
+}
+
+export async function extractRadarFacts(input: {
   facts: RadarGameFacts;
-  boardLabel: string;
-  rank: number;
+  boards: string[];
   score: number;
+  detected: RadarSchedule;
   previousAction: string | null;
-  previousDate: string | null;
-}): Promise<RadarDecision> {
-  const { facts } = input;
-  const user = JSON.stringify(
-    {
-      board: input.boardLabel,
-      rank: input.rank,
-      score: input.score,
-      previousAction: input.previousAction,
-      previousDate: input.previousDate,
-      game: facts,
-      allowed: NEXT_ACTIONS,
+  todayIso: string;
+}): Promise<RadarExtraction | null> {
+  const f = input.facts;
+  const payload = {
+    today: input.todayIso,
+    boards: input.boards,
+    score: Math.round(input.score * 10) / 10,
+    previousAction: input.previousAction,
+    game: {
+      appId: f.appId,
+      title: f.title,
+      tags: f.tags,
+      developer: f.developer,
+      publisher: f.publisher,
+      rating: f.rating,
+      reserveCount: f.reserveCount,
+      downloadCount: f.downloadCount,
+      fansCount: f.fansCount,
+      installSizeMb: f.installSizeMb,
+      online: f.online ?? null,
+      tapTapFlag: f.flag ?? null,
+      releaseDate: f.releaseDate ?? null,
+      updateDate: f.updateDate ?? null,
+      hints: f.hints ?? [],
+      information: f.notes,
+      developerNote: f.developerNote?.slice(0, 600) ?? null,
+      officialPosts: (f.officialPosts ?? []).slice(0, 6).map((p) => ({
+        date: p.date,
+        title: p.title.slice(0, 80),
+        summary: p.summary.slice(0, 160),
+      })),
     },
-    null,
-    2,
-  );
+    detectedSchedule: input.detected.label || null,
+  };
 
   try {
-    const res = await callLLM(systemPrompt(), user, 1200);
+    const res = await callLLM(systemPrompt(), JSON.stringify(payload, null, 2), 1200, { temperature: 0 });
     const data = parseJsonObject(res.content);
-    const playableNow = data.playableNow === true;
-    const nextAction = snapAction(data.nextAction, playableNow);
-    const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+    const sched = (data.schedule && typeof data.schedule === "object" ? data.schedule : {}) as Record<string, unknown>;
+    const kind = str(sched.kind) as ScheduleKind;
+    const date = str(sched.date);
     return {
       titleEn: str(data.titleEn),
-      insights: str(data.insights) || `${facts.title} nằm hạng ${input.rank} bảng ${input.boardLabel}.`,
-      nextAction,
-      reason: str(data.reason),
-      releaseLabel: str(data.releaseLabel),
-      playableNow: nextAction.startsWith("Test Viable"),
-      genre: str(data.genre) || facts.tags.slice(0, 3).join(", "),
-      publisher: str(data.publisher) || facts.publisher || facts.developer || "",
-      toolAdjustments: str(data.toolAdjustments),
+      genre: str(data.genre),
+      publisher: str(data.publisher),
+      insights: str(data.insights),
+      flags: {
+        liveService: bool(data.liveService, f.online !== false),
+        offlineSingle: bool(data.offlineSingle),
+        ugc: bool(data.ugc),
+        sensitiveTheme: str(data.sensitiveTheme),
+        nicheReason: str(data.nicheReason),
+        aaaGraphics: bool(data.aaaGraphics),
+        publishedInVn: bool(data.publishedInVn),
+        vnIp: bool(data.vnIp),
+        internationalRelease: bool(data.internationalRelease),
+      },
+      schedule: SCHEDULE_KINDS.has(kind)
+        ? { kind, date: /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null, note: str(sched.note) }
+        : null,
     };
   } catch (err) {
-    console.warn(
-      `[radar] decide failed appId=${facts.appId}:`,
-      err instanceof Error ? err.message : err,
-    );
-    return {
-      titleEn: "",
-      insights: `${facts.title}: chưa research đủ kỳ này.`,
-      nextAction: "Temporary Ignore",
-      reason: "thiếu dữ liệu kỳ này",
-      releaseLabel: "",
-      playableNow: false,
-      genre: facts.tags.slice(0, 3).join(", "),
-      publisher: facts.publisher || facts.developer || "",
-      toolAdjustments: "Game mới (chưa có ở recap kỳ trước)",
-    };
+    console.warn(`[radar] extract failed appId=${f.appId}:`, err instanceof Error ? err.message : err);
+    return null;
   }
 }
 
-export async function writeExecutiveParagraphs(brief: string): Promise<string[]> {
-  const system = [
-    "Bạn viết Phần 3 Executive Summary của Game Radar Recap.",
-    "Giọng nội bộ, tiếng Việt, 3 đến 5 đoạn ngắn.",
-    "Nêu game đáng theo dõi, game chơi được ngay, lịch test mới, và game nên bỏ.",
-    "Không kể công thức điểm. Không markdown. Trả JSON: {\"paragraphs\":[\"...\"]}",
-  ].join(" ");
-  try {
-    const res = await callLLM(system, brief, 1600);
-    const data = parseJsonObject(res.content);
-    const paragraphs = Array.isArray(data.paragraphs)
-      ? data.paragraphs.filter((p): p is string => typeof p === "string" && p.trim().length > 0)
-      : [];
-    if (paragraphs.length > 0) return paragraphs.map((p) => p.trim());
-  } catch (err) {
-    console.warn("[radar] executive summary failed:", err instanceof Error ? err.message : err);
+/**
+ * Trường chính thức trên TapTap (flag, ngày ra mắt, hints, bài đăng) thắng; LLM chỉ lấp chỗ trống.
+ * Game còn ở trạng thái đặt trước (flag = 1) không được coi là đã ra mắt.
+ */
+export function mergeSchedule(
+  detected: RadarSchedule,
+  llm: RadarExtraction["schedule"],
+  facts: RadarGameFacts,
+  todayIso: string,
+): RadarSchedule {
+  if (detected.kind && detected.kind !== "event") return detected;
+  if (!llm) return detected;
+  const reserveOnly = facts.flag === 1;
+  let kind: ScheduleKind = llm.kind;
+  if (reserveOnly && (kind === "launched" || kind === "open_beta")) {
+    if (!llm.date || llm.date <= todayIso) return detected;
+    kind = "launch_date";
   }
-  return ["Kỳ này đã chốt Next Action theo ba bảng Reserve tăng trưởng, Reserve quy mô và New Launch. Chi tiết từng game nằm ở phần Overview."];
+  if (kind === "launch_date" && llm.date && llm.date <= todayIso) {
+    if (reserveOnly) return detected;
+    kind = "launched";
+  }
+  const openBeta = /公测|open beta/i.test(llm.note);
+  const label =
+    kind === "launch_date" && openBeta && llm.date
+      ? `Open beta ${formatViDate(llm.date)}`
+      : scheduleLabel(kind, llm.date, todayIso);
+  return { kind, date: llm.date, label, source: "llm", raw: llm.note.slice(0, 160) || null };
 }
+
+export const EMPTY_FLAGS: RadarFlags = {
+  liveService: true,
+  offlineSingle: false,
+  ugc: false,
+  sensitiveTheme: "",
+  nicheReason: "",
+  aaaGraphics: false,
+  publishedInVn: false,
+  vnIp: false,
+  internationalRelease: false,
+};
