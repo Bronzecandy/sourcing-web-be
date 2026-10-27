@@ -1,7 +1,9 @@
 import { prisma } from "../utils/prisma";
 import { pool } from "../utils/prisma";
 import { getCachedOrFetch } from "../utils/cache";
-import { withDbRetry } from "../utils/db-retry";
+import { CrawlDbUnavailableError, isConnectionDeadError, withDbRetry } from "../utils/db-retry";
+import { isCrawlDbCircuitOpen } from "../utils/crawl-db-circuit";
+import { findCachedRankingGame } from "../utils/ranking-cache-lookup";
 import { translateTag, translateTags } from "../utils/tag-translator";
 import { translateText, translateVietnameseToEnglish } from "../utils/translator";
 import type {
@@ -338,6 +340,48 @@ export class GameService {
     );
   }
 
+  private gameDetailFromRankingCache(appId: number) {
+    const row = findCachedRankingGame(appId);
+    if (!row) return null;
+    return {
+      appId,
+      title: row.title,
+      iconUrl: row.iconUrl,
+      bannerUrl: null as string | null,
+      description: null as string | null,
+      developerNote: null as string | null,
+      developerName: null as string | null,
+      publisherName: null as string | null,
+      tags: row.tags,
+      rating: row.rating,
+      latestScore: null as string | null,
+      voteInfo: null as Record<string, number> | null,
+      reviewCount: row.reviewCount,
+      fansCount: row.fansCount,
+      reserveCount: row.reserveCount,
+      hitsTotal: null as number | null,
+      releaseDate: row.releaseDate ?? null,
+      isExclusive: row.isExclusive,
+      editorChoice: row.editorChoice,
+      screenshots: [] as string[],
+      platforms: [] as string[],
+      androidRank: row.androidRank,
+      iosRank: row.iosRank,
+      actualReviewCount: 0,
+      reviewDistribution: {} as Record<string, number>,
+      history: [] as Array<{
+        date: string;
+        androidRank: number | null;
+        iosRank: number | null;
+        rating: string | null;
+        reviewCount: number | null;
+        fansCount: number | null;
+        reserveCount: number | null;
+      }>,
+      degraded: true,
+    };
+  }
+
   async getGameDetail(
     appId: number,
     range: GameDetailRange = { kind: "days", days: 30 },
@@ -348,7 +392,12 @@ export class GameService {
         ? `game-detail-${appId}-d${range.days}-${contentLang}`
         : `game-detail-${appId}-${range.from}_${range.to}-${contentLang}`;
 
-    return getCachedOrFetch(cacheKey, async () => {
+    if (isCrawlDbCircuitOpen()) {
+      return this.gameDetailFromRankingCache(appId);
+    }
+
+    try {
+      return await getCachedOrFetch(cacheKey, async () => {
         const rankings =
           range.kind === "days"
             ? await prisma.appRank.findMany({
@@ -477,8 +526,14 @@ export class GameService {
           reviewDistribution,
           history,
         };
+      });
+    } catch (err) {
+      if (err instanceof CrawlDbUnavailableError || isConnectionDeadError(err)) {
+        console.warn(`[game-detail] crawl DB down for appId=${appId}, serving ranking cache`);
+        return this.gameDetailFromRankingCache(appId);
       }
-    );
+      throw err;
+    }
   }
 
   async getGameReviews(
@@ -486,7 +541,11 @@ export class GameService {
     page: number = 1,
     limit: number = 20
   ) {
+    if (isCrawlDbCircuitOpen()) {
+      return { data: [], total: 0, page, limit, totalPages: 0 };
+    }
     const skip = (page - 1) * limit;
+    try {
     const [rows, total] = await withDbRetry(
       () =>
         Promise.all([
@@ -520,6 +579,12 @@ export class GameService {
     });
 
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+    } catch (err) {
+      if (err instanceof CrawlDbUnavailableError || isConnectionDeadError(err)) {
+        return { data: [], total: 0, page, limit, totalPages: 0 };
+      }
+      throw err;
+    }
   }
 
   async compareGames(appIds: number[], days: number = 30) {

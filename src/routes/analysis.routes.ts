@@ -9,6 +9,7 @@ import {
   type ExternalReview,
 } from "../services/taptap-client.service";
 import { parseCsvBuffer } from "../utils/csv-parser";
+import { toPostgresIntAppId } from "../utils/pg-int-app-id";
 import {
   parseReviewWindow,
   filterReviewsByWindow,
@@ -125,13 +126,6 @@ async function fetchTapTapBundle(appId: number): Promise<{
   }
 }
 
-function hashStringToNumber(str: string): number {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
-  }
-  return Math.abs(hash);
-}
 
 function startKeepAlive(res: import("express").Response): NodeJS.Timeout {
   res.setHeader("Content-Type", "application/json");
@@ -616,7 +610,7 @@ router.post("/analyze-csv", upload.single("file"), async (req: AuthedRequest, re
       }
       progress({ percent: 2, phase: "parse", message: "Đang đọc file bình luận…" });
       const { reviews, gameName, appId } = parseCsvBuffer(req.file.buffer);
-      const numericId = /^\d+$/.test(appId) ? Number(appId) : hashStringToNumber(appId);
+      const numericId = toPostgresIntAppId(appId);
       const filtered = filterReviewsByWindow(reviews, reviewWindow);
       if (filtered.length === 0) {
         out.fail(
@@ -664,7 +658,7 @@ router.post("/analyze-csv", upload.single("file"), async (req: AuthedRequest, re
 
     const { reviews, gameName, appId } = parseCsvBuffer(req.file.buffer);
 
-    const numericId = /^\d+$/.test(appId) ? Number(appId) : hashStringToNumber(appId);
+    const numericId = toPostgresIntAppId(appId);
 
     const filtered = filterReviewsByWindow(reviews, reviewWindow);
     if (filtered.length === 0) {

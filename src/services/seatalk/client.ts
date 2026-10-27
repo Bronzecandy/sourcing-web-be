@@ -75,6 +75,25 @@ export async function pushToWebhook(content: string): Promise<void> {
   await postJson(cfg.webhookUrl, textMessage(content));
 }
 
+export async function sendGroupFile(groupId: string, filename: string, body: Buffer): Promise<string | undefined> {
+  const token = await appAccessToken();
+  const json = await postJson(
+    `${HOST}/messaging/v2/group_chat`,
+    {
+      group_id: groupId,
+      message: {
+        tag: "file",
+        file: {
+          filename: filename.slice(0, 100),
+          content: body.toString("base64"),
+        },
+      },
+    },
+    token,
+  );
+  return json.message_id;
+}
+
 export async function sendGroupMessage(groupId: string, content: string): Promise<string | undefined> {
   const token = await appAccessToken();
   const json = await postJson(

@@ -4,6 +4,7 @@ import app from "./app";
 import { precomputeAll } from "./precompute";
 import { warmLibraryCache } from "./services/library-store";
 import { loadResponseDiskCache } from "./utils/cache";
+import { startCrawlDbProbeLoop } from "./utils/crawl-db-circuit";
 import { installProcessDiagnostics, logDiag, logDiagError } from "./utils/process-diagnostics";
 
 installProcessDiagnostics();
@@ -45,6 +46,7 @@ async function start(): Promise<void> {
   if (diskKeys > 0) {
     console.log(`[cache] Loaded ${diskKeys} persisted response(s) from disk`);
   }
+  await startCrawlDbProbeLoop(60_000);
 
   app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);

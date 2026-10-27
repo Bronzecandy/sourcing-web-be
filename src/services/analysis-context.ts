@@ -1,6 +1,9 @@
 import { prisma } from "../utils/prisma";
 import { withDbRetry } from "../utils/db-retry";
 import type { TapTapRawApp } from "../types";
+import { isCrawlDbCircuitOpen } from "../utils/crawl-db-circuit";
+import { findCachedRankingGame } from "../utils/ranking-cache-lookup";
+import { fetchTapTapDetailRawViaProxy } from "../utils/taptap-proxy-fetch";
 
 export interface AnalysisContext {
   appId: number;
@@ -293,37 +296,69 @@ export function buildSearchHaystack(raw: TapTapRawApp | Record<string, unknown> 
 }
 
 export async function loadAnalysisContext(appId: number): Promise<AnalysisContext | null> {
-  const latestRank = await withDbRetry(
-    () =>
-      prisma.appRank.findFirst({
-        where: { appId },
-        orderBy: { date: "desc" },
-      }),
-    `analysis-context-rank-${appId}`,
-  );
-  const raw = (latestRank?.raw ?? null) as TapTapRawApp | null;
-  const gameName = raw?.title ?? `App #${appId}`;
-  const iconUrl = raw?.icon?.url ?? null;
-  const { developerName, publisherName, developerResolvedViaPublisherFallback } = extractDeveloperPublisher(raw);
-  const tagValues = extractTags(raw);
-  const installSizeMb = extractInstallSizeMb(raw as TapTapRawApp);
-  const daysSinceUpdate = extractDaysSinceUpdate(raw as TapTapRawApp);
-  const fansCount = extractFansCount(raw as TapTapRawApp);
-  const searchHaystack = buildSearchHaystack(raw as TapTapRawApp);
+  if (!isCrawlDbCircuitOpen()) {
+    try {
+      const latestRank = await withDbRetry(
+        () =>
+          prisma.appRank.findFirst({
+            where: { appId },
+            orderBy: { date: "desc" },
+          }),
+        `analysis-context-rank-${appId}`,
+      );
+      const raw = (latestRank?.raw ?? null) as TapTapRawApp | null;
+      const gameName = raw?.title ?? `App #${appId}`;
+      const iconUrl = raw?.icon?.url ?? null;
+      const { developerName, publisherName, developerResolvedViaPublisherFallback } = extractDeveloperPublisher(raw);
+      const tagValues = extractTags(raw);
+      const installSizeMb = extractInstallSizeMb(raw as TapTapRawApp);
+      const daysSinceUpdate = extractDaysSinceUpdate(raw as TapTapRawApp);
+      const fansCount = extractFansCount(raw as TapTapRawApp);
+      const searchHaystack = buildSearchHaystack(raw as TapTapRawApp);
 
-  return {
-    appId,
-    gameName,
-    iconUrl,
-    tagValues,
-    developerName,
-    publisherName,
-    developerResolvedViaPublisherFallback,
-    installSizeMb,
-    daysSinceUpdate,
-    fansCount,
-    searchHaystack,
-  };
+      return {
+        appId,
+        gameName,
+        iconUrl,
+        tagValues,
+        developerName,
+        publisherName,
+        developerResolvedViaPublisherFallback,
+        installSizeMb,
+        daysSinceUpdate,
+        fansCount,
+        searchHaystack,
+      };
+    } catch (err) {
+      console.warn(
+        `[analysis-context] crawl DB failed for appId=${appId}, using ranking cache / TapTap:`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
+  const row = findCachedRankingGame(appId);
+  const proxyRaw = row ? null : await fetchTapTapDetailRawViaProxy(appId);
+  if (row) {
+    const raw = {
+      title: row.title,
+      icon: row.iconUrl ? { url: row.iconUrl } : undefined,
+      tags: row.tags.map((value, i) => ({ id: i, value })),
+      stat: {
+        rating: row.rating ? { score: row.rating, max: 5 } : undefined,
+        fans_count: row.fansCount ?? undefined,
+        reserve_count: row.reserveCount ?? undefined,
+        review_count: row.reviewCount ?? undefined,
+      },
+    } as TapTapRawApp;
+    return buildAnalysisContextFromRaw(appId, row.title, row.iconUrl, raw);
+  }
+  if (proxyRaw) {
+    const title = typeof proxyRaw.title === "string" ? proxyRaw.title : `App #${appId}`;
+    const icon = proxyRaw.icon as { url?: string } | undefined;
+    return buildAnalysisContextFromRaw(appId, title, icon?.url ?? null, proxyRaw);
+  }
+  return null;
 }
 
 /** When raw app is already loaded (e.g. external analysis with icon/name) */

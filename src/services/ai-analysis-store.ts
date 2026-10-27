@@ -1,5 +1,10 @@
 import { prismaApp } from "../utils/prisma-app";
+import { toPostgresIntAppId } from "../utils/pg-int-app-id";
 import type { AIAnalysisResult } from "../types";
+
+function dbAppId(appId: number): number {
+  return toPostgresIntAppId(appId);
+}
 
 const LIST_ALL_LIMIT = Math.max(
   50,
@@ -26,13 +31,13 @@ export async function getAnalysisByKey(
 
   if (userId) {
     const row = await prismaApp.userAiAnalysis.findUnique({
-      where: { userId_appId_analyzedAt: { userId, appId, analyzedAt } },
+      where: { userId_appId_analyzedAt: { userId, appId: dbAppId(appId), analyzedAt } },
     });
     return row ? rowToResult(row) : null;
   }
 
   const row = await prismaApp.userAiAnalysis.findFirst({
-    where: { appId, analyzedAt },
+    where: { appId: dbAppId(appId), analyzedAt },
     orderBy: { createdAt: "desc" },
   });
   return row ? rowToResult(row) : null;
@@ -56,7 +61,7 @@ export async function listAnalysesForUser(userId: string): Promise<AIAnalysisRes
 
 export async function getLatestAnalysisForApp(appId: number): Promise<AIAnalysisResult | null> {
   const row = await prismaApp.userAiAnalysis.findFirst({
-    where: { appId },
+    where: { appId: dbAppId(appId) },
     orderBy: { analyzedAt: "desc" },
   });
   return row ? rowToResult(row) : null;
@@ -67,7 +72,7 @@ export async function getLatestAnalysisForUser(
   appId: number,
 ): Promise<AIAnalysisResult | null> {
   const row = await prismaApp.userAiAnalysis.findFirst({
-    where: { userId, appId },
+    where: { userId, appId: dbAppId(appId) },
     orderBy: { analyzedAt: "desc" },
   });
   return row ? rowToResult(row) : null;
@@ -75,7 +80,7 @@ export async function getLatestAnalysisForUser(
 
 export async function getAnalysisHistoryForApp(appId: number): Promise<AIAnalysisResult[]> {
   const rows = await prismaApp.userAiAnalysis.findMany({
-    where: { appId },
+    where: { appId: dbAppId(appId) },
     orderBy: { analyzedAt: "desc" },
   });
   return rows.map(rowToResult);
@@ -86,7 +91,7 @@ export async function getAnalysisHistoryForUser(
   appId: number,
 ): Promise<AIAnalysisResult[]> {
   const rows = await prismaApp.userAiAnalysis.findMany({
-    where: { userId, appId },
+    where: { userId, appId: dbAppId(appId) },
     orderBy: { analyzedAt: "desc" },
   });
   return rows.map(rowToResult);
@@ -100,7 +105,7 @@ export async function saveAnalysisForUser(
   const row = await prismaApp.userAiAnalysis.create({
     data: {
       userId,
-      appId: result.appId,
+      appId: dbAppId(result.appId),
       analyzedAt,
       payload: result as object,
     },
@@ -117,7 +122,7 @@ export async function deleteAnalysisForUser(
   try {
     await prismaApp.userAiAnalysis.delete({
       where: {
-        userId_appId_analyzedAt: { userId, appId, analyzedAt },
+        userId_appId_analyzedAt: { userId, appId: dbAppId(appId), analyzedAt },
       },
     });
     return true;
@@ -128,7 +133,7 @@ export async function deleteAnalysisForUser(
 
 export async function deleteAllAnalysesForUser(userId: string, appId: number): Promise<number> {
   const res = await prismaApp.userAiAnalysis.deleteMany({
-    where: { userId, appId },
+    where: { userId, appId: dbAppId(appId) },
   });
   return res.count;
 }

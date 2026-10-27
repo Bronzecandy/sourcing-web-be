@@ -1,5 +1,14 @@
 import { logDiag, logDbError } from "./process-diagnostics";
 import { classifyPgError, serializePgError } from "./pg-error";
+import {
+  CrawlDbUnavailableError,
+  isConnectionDeadError,
+  noteCrawlDbFailure,
+  noteCrawlDbSuccess,
+  throwIfCrawlDbCircuitOpen,
+} from "./crawl-db-circuit";
+
+export { isConnectionDeadError, CrawlDbUnavailableError };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -45,6 +54,7 @@ export function isRetryableDbError(err: unknown): boolean {
     msg.includes("write conflict") ||
     msg.includes("could not serialize") ||
     msg.includes("timed out") ||
+    msg.includes("timeout expired") ||
     msg.includes("timeout exceeded") ||
     msg.includes("sockettimeout") ||
     msg.includes("etimedout") ||
@@ -66,34 +76,46 @@ export async function withDbRetry<T>(
   label: string,
   options: DbRetryOptions = {},
 ): Promise<T> {
+  throwIfCrawlDbCircuitOpen();
   const maxAttempts = Math.max(1, options.maxAttempts ?? 5);
   const delayMs = Math.max(100, options.delayMs ?? 3000);
 
   let lastErr: unknown;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+  let attemptCap = maxAttempts;
+  for (let attempt = 1; attempt <= attemptCap; attempt++) {
     try {
-      return await fn();
+      const result = await fn();
+      noteCrawlDbSuccess();
+      return result;
     } catch (err: unknown) {
       lastErr = err;
+      if (err instanceof CrawlDbUnavailableError) {
+        throw err;
+      }
       if (!isRetryableDbError(err)) {
         logDbError("db-query-failed", err, { label, attempt, retryable: false });
         throw err;
       }
-      if (attempt === maxAttempts) {
-        logDbError("db-retry-exhausted", err, { label, attempt, maxAttempts });
+      // Dead replica / timed-out pool: 5 × 60s connect stalls every tab. Fail over to stale cache.
+      if (isConnectionDeadError(err)) {
+        attemptCap = Math.min(attemptCap, 2);
+      }
+      if (attempt >= attemptCap) {
+        noteCrawlDbFailure(err);
+        logDbError("db-retry-exhausted", err, { label, attempt, maxAttempts: attemptCap });
         throw err;
       }
       logDiag("db-retry", {
         label,
         attempt,
-        maxAttempts,
+        maxAttempts: attemptCap,
         dbKind: classifyPgError(err),
         ...serializePgError(err),
       });
-      const wait = delayMs * attempt;
+      const wait = isConnectionDeadError(err) ? Math.min(delayMs, 1000) : delayMs * attempt;
       const code = errorCode(err) ?? "unknown";
       console.warn(
-        `[db-retry] ${label} attempt ${attempt}/${maxAttempts} failed (${code}), retrying in ${wait}ms...`,
+        `[db-retry] ${label} attempt ${attempt}/${attemptCap} failed (${code}), retrying in ${wait}ms...`,
       );
       await sleep(wait);
     }

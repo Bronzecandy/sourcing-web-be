@@ -68,7 +68,15 @@ export function classifyPgError(err: unknown): string {
     return "query_timeout_or_canceled";
   }
   if (code === "57P03" || code === "53300") return "db_unavailable_or_connection_limit";
-  if (code === "P1008" || code === "P2024" || msg.includes("timed out")) return "connection_timeout";
+  if (
+    code === "P1008" ||
+    code === "P2024" ||
+    msg.includes("timed out") ||
+    msg.includes("timeout expired") ||
+    msg.includes("timeout exceeded")
+  ) {
+    return "connection_timeout";
+  }
   if (msg.includes("econnreset") || msg.includes("connection terminated")) return "connection_dropped";
   return "other_db_error";
 }

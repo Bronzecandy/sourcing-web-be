@@ -9,7 +9,7 @@ const poolMax = Math.max(4, parseInt(process.env.PG_POOL_MAX ?? "8", 10) || 8);
 export const pool = new pg.Pool({
   connectionString,
   max: poolMax,
-  connectionTimeoutMillis: 60_000,
+  connectionTimeoutMillis: 8_000,
   idleTimeoutMillis: 60_000,
   statement_timeout: 120_000,
   query_timeout: 120_000,

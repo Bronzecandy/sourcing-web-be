@@ -1,4 +1,5 @@
 import { callLLM, getModel } from "../utils/ai-client";
+import { toPostgresIntAppId } from "../utils/pg-int-app-id";
 import { pool } from "../utils/prisma";
 import { prisma } from "../utils/prisma";
 import type { AIAnalysisResult, TapTapRawApp, PotentialBreakdown, AnalysisPrepareResult, AnalysisPrepareExistingItem, GenrePackPlan, GameComparisonAI } from "../types";
@@ -44,7 +45,9 @@ import {
   saveAnalysisForUser,
 } from "./ai-analysis-store";
 import { gameService } from "./game.service";
-import { isRetryableDbError, withDbRetry } from "../utils/db-retry";
+import { isRetryableDbError, withDbRetry, CrawlDbUnavailableError, isConnectionDeadError } from "../utils/db-retry";
+import { isCrawlDbCircuitOpen } from "../utils/crawl-db-circuit";
+import { fetchTapTapViaProxy, useTapTapProxy } from "../utils/taptap-proxy-fetch";
 import { runDbQuery } from "../utils/db-diagnostics";
 import { classifyPgError, serializePgError } from "../utils/pg-error";
 import { aiInfoLog, aiVerboseLog } from "../utils/ai-logger";
@@ -88,14 +91,6 @@ const RATING_BUCKETS = [
   { label: "Positive", min: 4, max: 4 },
   { label: "Very Positive", min: 5, max: 5 },
 ] as const;
-
-function hashStringToNumber(str: string): number {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
-  }
-  return Math.abs(hash);
-}
 
 function intEnv(name: string, def: number): number {
   const v = process.env[name];
@@ -1640,7 +1635,7 @@ export class AIAnalysisService {
       if (!opts.csvBuffer) throw new Error("CSV file required for csv prepare");
       const { gameName: csvName, appId: csvAppId } = parseCsvBuffer(opts.csvBuffer);
       gameName = csvName;
-      appId = /^\d+$/.test(csvAppId) ? Number(csvAppId) : hashStringToNumber(csvAppId);
+      appId = toPostgresIntAppId(csvAppId);
       analysisContext = buildAnalysisContextFromRaw(appId, gameName, null, null);
     } else {
       const input = String(opts.input ?? "").trim();
@@ -1712,13 +1707,103 @@ export class AIAnalysisService {
   }
 
   async countDatabaseReviews(appId: number): Promise<number> {
-    return withDbRetry(
-      () => prisma.appReview.count({ where: { appId } }),
-      `ai-review-count-${appId}`,
-    );
+    if (isCrawlDbCircuitOpen()) return 0;
+    try {
+      return await withDbRetry(
+        () => prisma.appReview.count({ where: { appId } }),
+        `ai-review-count-${appId}`,
+      );
+    } catch {
+      return 0;
+    }
   }
 
   async analyzeGameReviews(
+    userId: string,
+    appId: number,
+    reviewWindow: ReviewWindow = { mode: "all" },
+    onProgress?: AnalysisProgressReporter,
+    progressFloor = 0,
+    genrePackPlan?: GenrePackPlan | null,
+  ): Promise<AIAnalysisResult> {
+    if (isCrawlDbCircuitOpen()) {
+      return this.analyzeGameReviewsViaTapTap(
+        userId,
+        appId,
+        reviewWindow,
+        onProgress,
+        progressFloor,
+        genrePackPlan,
+      );
+    }
+    try {
+      return await this.analyzeGameReviewsFromDb(
+        userId,
+        appId,
+        reviewWindow,
+        onProgress,
+        progressFloor,
+        genrePackPlan,
+      );
+    } catch (err) {
+      if (err instanceof CrawlDbUnavailableError || isConnectionDeadError(err)) {
+        return this.analyzeGameReviewsViaTapTap(
+          userId,
+          appId,
+          reviewWindow,
+          onProgress,
+          progressFloor,
+          genrePackPlan,
+        );
+      }
+      throw err;
+    }
+  }
+
+  private async analyzeGameReviewsViaTapTap(
+    userId: string,
+    appId: number,
+    reviewWindow: ReviewWindow,
+    onProgress?: AnalysisProgressReporter,
+    progressFloor = 0,
+    genrePackPlan?: GenrePackPlan | null,
+  ): Promise<AIAnalysisResult> {
+    const { step: report } = createProgressStepReporter(onProgress, progressFloor);
+    if (!useTapTapProxy()) {
+      throw new Error("Crawl DB đang gián đoạn và TapTap proxy chưa cấu hình — không lấy được bình luận.");
+    }
+    report(
+      Math.max(4, progressFloor),
+      "Crawl DB đang gián đoạn — đang tải bình luận từ TapTap (có thể mất vài phút)…",
+      "fetch",
+    );
+    const bundle = await fetchTapTapViaProxy(appId);
+    const filtered = filterReviewsByWindow(bundle.reviews, reviewWindow);
+    if (filtered.length === 0) {
+      throw new Error(`No reviews found for ${bundle.appInfo.title} (appId: ${appId})`);
+    }
+    report(
+      Math.max(10, progressFloor + 2),
+      `Đã tải ${filtered.length.toLocaleString("vi-VN")} bình luận TapTap — bắt đầu phân tích AI…`,
+      "fetch",
+      { collected: filtered.length, total: bundle.reviews.length, capped: false },
+    );
+    return this.analyzeExternalReviews(
+      userId,
+      appId,
+      bundle.appInfo.title,
+      bundle.appInfo.iconUrl,
+      filtered,
+      "external",
+      bundle.detailFromProxy,
+      reviewWindow,
+      onProgress,
+      Math.max(10, progressFloor + 2),
+      genrePackPlan,
+    );
+  }
+
+  private async analyzeGameReviewsFromDb(
     userId: string,
     appId: number,
     reviewWindow: ReviewWindow = { mode: "all" },

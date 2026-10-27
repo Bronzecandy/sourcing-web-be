@@ -1,6 +1,7 @@
 import { pool } from "../utils/prisma";
 import { getCachedOrFetch } from "../utils/cache";
-import { withDbRetry } from "../utils/db-retry";
+import { CrawlDbUnavailableError, withDbRetry } from "../utils/db-retry";
+import { isCrawlDbCircuitOpen } from "../utils/crawl-db-circuit";
 import type {
   PotentialScoreResult,
   PotentialScaleMetric,
@@ -651,16 +652,25 @@ export class RankingService {
   }
 
   private async fetchFirstLaunchDate(appId: number): Promise<Date | null> {
-    const { rows } = await pool.query<{ d: Date }>(
-      `SELECT MIN("date") AS d FROM "AppRank"
-       WHERE "appId" = $1 AND (
-         "hotAndroidRank" IS NOT NULL OR "hotIosRank" IS NOT NULL OR
-         "popAndroidRank" IS NOT NULL OR "popIosRank" IS NOT NULL OR
-         "newAndroidRank" IS NOT NULL OR "newIosRank" IS NOT NULL
-       )`,
-      [appId],
-    );
-    return rows[0]?.d ?? null;
+    try {
+      const { rows } = await withDbRetry(
+        () =>
+          pool.query<{ d: Date }>(
+            `SELECT MIN("date") AS d FROM "AppRank"
+             WHERE "appId" = $1 AND (
+               "hotAndroidRank" IS NOT NULL OR "hotIosRank" IS NOT NULL OR
+               "popAndroidRank" IS NOT NULL OR "popIosRank" IS NOT NULL OR
+               "newAndroidRank" IS NOT NULL OR "newIosRank" IS NOT NULL
+             )`,
+            [appId],
+          ),
+        `first-launch-${appId}`,
+        { maxAttempts: 2, delayMs: 500 },
+      );
+      return rows[0]?.d ?? null;
+    } catch {
+      return null;
+    }
   }
 
   private async fetchAppRowsInRange(
@@ -1098,6 +1108,9 @@ export class RankingService {
     platform: "combined" | "android" | "ios" = "combined",
     segment: PotentialSegment = "reserve",
   ) {
+    if (isCrawlDbCircuitOpen()) {
+      throw new CrawlDbUnavailableError();
+    }
     const firstLaunch = segment === "reserve" ? await this.fetchFirstLaunchDate(appId) : null;
     const launchKey = firstLaunch ? firstLaunch.toISOString().split("T")[0] : "rolling";
     return getCachedOrFetch(
@@ -1116,6 +1129,9 @@ export class RankingService {
     days: number = 14,
     platform: "combined" | "android" | "ios" = "combined",
   ): Promise<PotentialBreakdown> {
+    if (isCrawlDbCircuitOpen()) {
+      throw new CrawlDbUnavailableError();
+    }
     const firstLaunch = await this.fetchFirstLaunchDate(appId);
     const launchKey = firstLaunch ? firstLaunch.toISOString().split("T")[0] : "none";
     return getCachedOrFetch(
