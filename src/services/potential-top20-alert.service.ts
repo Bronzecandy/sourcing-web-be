@@ -5,6 +5,7 @@ import type { AppRankRow } from "../utils/app-rank";
 import { rankingService } from "./ranking.service";
 import { aiAnalysisService } from "./ai-analysis.service";
 import { getLatestAnalysisForApp } from "./ai-analysis-store";
+import { getRubricManifestSync, warmLibraryCache } from "./library-store";
 import { knownGame } from "./radar-known";
 import { canDeliver, canSendAsBot, seatalkConfig } from "./seatalk/config";
 import { deliver } from "./seatalk/client";
@@ -280,6 +281,12 @@ async function ensureAnalyses(games: PotentialAlertGame[]): Promise<number> {
   }
   const cap = aiMax();
   const maxAge = reanalyzeDays();
+  try {
+    getRubricManifestSync();
+  } catch {
+    // Chạy từ script (không qua server): nạp rubric + libraries trước khi phân tích.
+    await warmLibraryCache();
+  }
   let analyzed = 0;
   for (const g of games) {
     if (analyzed >= cap) break;
