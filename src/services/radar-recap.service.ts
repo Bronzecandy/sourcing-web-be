@@ -165,19 +165,103 @@ export async function getRadarRecap(dateIso?: string): Promise<RadarRecapView | 
   };
 }
 
-export async function listRadarRuns(limit = 26): Promise<Array<{ date: string; periodCode: string; status: string }>> {
+export interface RadarRunListItem {
+  date: string;
+  periodCode: string;
+  /** completed | imported (báo cáo làm tay) | stale | failed | started */
+  status: string;
+  source: "tool" | "sheet";
+  /** Tuần chứa kỳ (từ ngày RADAR_RECAP_WEEKDAY). */
+  weekStart: string;
+  weekEnd: string;
+  games: number;
+  actions: { testViable: number; monitor: number; ignore: number; drop: number; other: number };
+  newGames: number;
+  scheduleUpdates: number;
+  hasDocx: boolean;
+}
+
+const LEGACY_DIR = path.join(process.cwd(), "data", "radar", "legacy");
+
+function legacyDocx(summary: unknown): string | null {
+  const name = (summary as { docx?: unknown } | null)?.docx;
+  if (typeof name !== "string" || !name) return null;
+  const file = path.join(LEGACY_DIR, path.basename(name));
+  return fs.existsSync(file) ? file : null;
+}
+
+export async function listRadarRuns(limit = 60): Promise<RadarRunListItem[]> {
   const runs = await prismaApp.radarRecapRun.findMany({
     orderBy: { date: "desc" },
     take: limit,
-    select: { date: true, periodCode: true, status: true },
+    select: { date: true, periodCode: true, status: true, summary: true },
   });
-  return runs.map((r) => ({ date: isoOf(r.date), periodCode: r.periodCode, status: r.status }));
+  if (runs.length === 0) return [];
+  const oldest = runs[runs.length - 1]!.date;
+  const stats = await prismaApp.$queryRaw<
+    Array<{
+      date: Date;
+      games: number;
+      testViable: number;
+      monitor: number;
+      ignore: number;
+      drop: number;
+      newGames: number;
+      scheduleUpdates: number;
+    }>
+  >`
+    SELECT "date",
+      count(DISTINCT "appId")::int AS "games",
+      count(DISTINCT "appId") FILTER (WHERE "nextAction" LIKE 'Test Viable%')::int AS "testViable",
+      count(DISTINCT "appId") FILTER (WHERE "nextAction" LIKE 'Monitor%')::int AS "monitor",
+      count(DISTINCT "appId") FILTER (WHERE "nextAction" LIKE 'Temporary Ignore%')::int AS "ignore",
+      count(DISTINCT "appId") FILTER (WHERE "nextAction" LIKE 'Drop%')::int AS "drop",
+      count(DISTINCT "appId") FILTER (WHERE "payload"->>'newThisPeriod' = 'true')::int AS "newGames",
+      count(DISTINCT "appId") FILTER (WHERE "payload"->>'scheduleChanged' = 'true')::int AS "scheduleUpdates"
+    FROM "RadarRecapRow"
+    WHERE "date" >= ${oldest}
+    GROUP BY "date"
+  `;
+  const byDate = new Map(stats.map((s) => [isoOf(s.date), s]));
+  return runs.map((r) => {
+    const date = isoOf(r.date);
+    const s = byDate.get(date);
+    const weekStart = periodWindowStart(date);
+    const known = s ? s.testViable + s.monitor + s.ignore + s.drop : 0;
+    const legacy = r.status === "imported";
+    return {
+      date,
+      periodCode: r.periodCode,
+      status: r.status,
+      source: legacy ? "sheet" : "tool",
+      weekStart,
+      weekEnd: isoOf(new Date(dbDate(weekStart).getTime() + 6 * 86_400_000)),
+      games: s?.games ?? 0,
+      actions: {
+        testViable: s?.testViable ?? 0,
+        monitor: s?.monitor ?? 0,
+        ignore: s?.ignore ?? 0,
+        drop: s?.drop ?? 0,
+        other: Math.max(0, (s?.games ?? 0) - known),
+      },
+      newGames: s?.newGames ?? 0,
+      scheduleUpdates: s?.scheduleUpdates ?? 0,
+      hasDocx: legacy ? legacyDocx(r.summary) != null : r.status === "completed",
+    };
+  });
 }
 
 export async function radarFile(dateIso: string, kind: "docx" | "xlsx"): Promise<{ filename: string; body: Buffer } | null> {
   const view = await getRadarRecap(dateIso);
   if (!view?.summary) return null;
   const code = view.periodCode;
+  if (view.status === "imported") {
+    if (kind === "xlsx") {
+      return { filename: `Game Radar Recap ${code}.xlsx`, body: await radarXlsxBuffer(code, view.rows) };
+    }
+    const file = legacyDocx(view.summary);
+    return file ? { filename: path.basename(file), body: fs.readFileSync(file) } : null;
+  }
   if (kind === "docx") {
     return {
       filename: `Executive Summary - Radar ${code}.docx`,
@@ -190,9 +274,10 @@ export async function radarFile(dateIso: string, kind: "docx" | "xlsx"): Promise
   };
 }
 
+/** Kỳ trước = báo cáo tuần trước: lần chạy completed gần nhất trước ngày bắt đầu tuần của `today`. */
 async function previousRun(today: Date): Promise<{ date: string; periodCode: string; rows: RadarRowPayload[] } | null> {
   const run = await prismaApp.radarRecapRun.findFirst({
-    where: { date: { lt: today }, status: "completed" },
+    where: { date: { lt: dbDate(periodWindowStart(isoOf(today))) }, status: "completed" },
     orderBy: { date: "desc" },
     include: { rows: true },
   });
