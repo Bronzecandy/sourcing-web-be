@@ -1,22 +1,25 @@
 import { prismaApp } from "../utils/prisma-app";
 import { toPostgresIntAppId } from "../utils/pg-int-app-id";
 import { logDiag, logDiagError } from "../utils/process-diagnostics";
+import type { AppRankRow } from "../utils/app-rank";
 import { rankingService } from "./ranking.service";
 import { aiAnalysisService } from "./ai-analysis.service";
 import { getLatestAnalysisForApp } from "./ai-analysis-store";
+import { knownGame } from "./radar-known";
 import { canDeliver, canSendAsBot, seatalkConfig } from "./seatalk/config";
 import { deliver } from "./seatalk/client";
-import type { PotentialScoreResult, PotentialSegment } from "../types";
+import type { AIAnalysisResult, PotentialScoreResult, PotentialSegment } from "../types";
 import {
   POTENTIAL_ALERT_BOARDS,
   POTENTIAL_TOP20_DAYS,
   POTENTIAL_TOP20_LIMIT,
   POTENTIAL_TOP20_PLATFORM,
-  formatPotentialTop20Messages,
+  formatPotentialAlertMessages,
+  formatStaleMessage,
   messageHeader,
   type PotentialAlertBoardId,
+  type PotentialAlertGame,
   type PotentialTop20Entry,
-  type PotentialTop20Newcomer,
 } from "./potential-top20-message";
 
 export {
@@ -24,21 +27,44 @@ export {
   POTENTIAL_TOP20_DAYS,
   POTENTIAL_TOP20_LIMIT,
   POTENTIAL_TOP20_PLATFORM,
-  formatPotentialTop20Messages,
+  formatPotentialAlertMessages,
 };
-export type { PotentialAlertBoardId, PotentialTop20Entry, PotentialTop20Newcomer };
+export type { PotentialAlertBoardId, PotentialAlertGame, PotentialTop20Entry };
 
 export interface PotentialTop20AlertResult {
   date: string;
   baseline: boolean;
   skipped: boolean;
   skipReason?: string;
+  stale: boolean;
   newCount: number;
   analyzedCount: number;
   sent: boolean;
   dryRun: boolean;
   messages: string[];
-  newcomers: PotentialTop20Newcomer[];
+  games: PotentialAlertGame[];
+}
+
+const DAY_MS = 86_400_000;
+
+function envInt(name: string, fallback: number): number {
+  const n = parseInt(process.env[name] ?? "", 10);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
+/** Game vắng top 20 ít nhất chừng này ngày thì vào lại được tính là game mới. */
+export function alertLookbackDays(): number {
+  return Math.max(1, envInt("POTENTIAL_ALERT_LOOKBACK_DAYS", 60));
+}
+
+/** Phân tích AI cũ hơn chừng này ngày thì chạy lại khi game được báo. */
+function reanalyzeDays(): number {
+  return envInt("POTENTIAL_ALERT_REANALYZE_DAYS", 30);
+}
+
+/** Số game tối đa chạy AI mỗi ngày. */
+function aiMax(): number {
+  return envInt("POTENTIAL_ALERT_AI_MAX", 15);
 }
 
 function calendarDateIct(now = new Date()): Date {
@@ -89,15 +115,7 @@ function takeTop20(
   }));
 }
 
-export async function computePotentialTop20Boards(): Promise<PotentialTop20Entry[]> {
-  const [reserve, launched] = await Promise.all([
-    rankingService.calculatePotentialScores(POTENTIAL_TOP20_DAYS, POTENTIAL_TOP20_PLATFORM, "reserve"),
-    rankingService.calculatePotentialScores(POTENTIAL_TOP20_DAYS, POTENTIAL_TOP20_PLATFORM, "launched"),
-  ]);
-  const bySegment: Record<PotentialSegment, PotentialScoreResult[]> = {
-    reserve,
-    launched,
-  };
+function buildBoards(bySegment: Record<PotentialSegment, PotentialScoreResult[]>): PotentialTop20Entry[] {
   const out: PotentialTop20Entry[] = [];
   for (const board of POTENTIAL_ALERT_BOARDS) {
     out.push(...takeTop20(board.id, bySegment[board.segment], board.sort));
@@ -105,18 +123,31 @@ export async function computePotentialTop20Boards(): Promise<PotentialTop20Entry
   return out;
 }
 
-function uniqueAppIds(newcomers: PotentialTop20Newcomer[]): number[] {
-  const seen = new Set<number>();
-  const ids: number[] = [];
-  for (const board of POTENTIAL_ALERT_BOARDS) {
-    const rows = newcomers.filter((n) => n.board === board.id).sort((a, b) => a.rank - b.rank);
-    for (const row of rows) {
-      if (seen.has(row.appId)) continue;
-      seen.add(row.appId);
-      ids.push(row.appId);
-    }
-  }
-  return ids;
+export async function computePotentialTop20Boards(): Promise<PotentialTop20Entry[]> {
+  const [reserve, launched] = await Promise.all([
+    rankingService.calculatePotentialScores(POTENTIAL_TOP20_DAYS, POTENTIAL_TOP20_PLATFORM, "reserve"),
+    rankingService.calculatePotentialScores(POTENTIAL_TOP20_DAYS, POTENTIAL_TOP20_PLATFORM, "launched"),
+  ]);
+  return buildBoards({ reserve, launched });
+}
+
+/** Top 20 4 bảng như cron chạy vào ngày `asOfIso` — dựng lại lịch sử (backfill). */
+export async function computePotentialTop20BoardsAsOf(asOfIso: string, rows: AppRankRow[]): Promise<PotentialTop20Entry[]> {
+  const reserve = await rankingService.calculatePotentialScoresAsOf(
+    asOfIso,
+    POTENTIAL_TOP20_DAYS,
+    POTENTIAL_TOP20_PLATFORM,
+    "reserve",
+    rows,
+  );
+  const launched = await rankingService.calculatePotentialScoresAsOf(
+    asOfIso,
+    POTENTIAL_TOP20_DAYS,
+    POTENTIAL_TOP20_PLATFORM,
+    "launched",
+    rows,
+  );
+  return buildBoards({ reserve, launched });
 }
 
 async function resolveBootstrapUserId(): Promise<string | null> {
@@ -152,7 +183,7 @@ async function loadSnapshot(date: Date): Promise<PotentialTop20Entry[]> {
   }));
 }
 
-async function saveSnapshot(date: Date, entries: PotentialTop20Entry[]): Promise<void> {
+export async function saveSnapshot(date: Date, entries: PotentialTop20Entry[]): Promise<void> {
   const data = entries.map((e) => ({
     date,
     board: e.board,
@@ -167,36 +198,123 @@ async function saveSnapshot(date: Date, entries: PotentialTop20Entry[]): Promise
   }
 }
 
-async function markFirstEver(
-  today: Date,
-  newcomers: PotentialTop20Entry[],
-): Promise<PotentialTop20Newcomer[]> {
-  if (newcomers.length === 0) return [];
-  const history = await prismaApp.potentialBoardDay.findMany({
-    where: {
-      date: { lt: today },
-      OR: newcomers.map((n) => ({ board: n.board, appId: toPostgresIntAppId(n.appId) })),
-    },
-    select: { board: true, appId: true },
-  });
-  const seen = new Set(history.map((h) => `${h.board}:${h.appId}`));
-  return newcomers.map((n) => ({
-    ...n,
-    firstEver: !seen.has(`${n.board}:${toPostgresIntAppId(n.appId)}`),
-  }));
+/** Cùng game, cùng hạng, cùng điểm ở cả 4 bảng — dấu hiệu dữ liệu chưa cập nhật. */
+function sameBoards(a: PotentialTop20Entry[], b: PotentialTop20Entry[]): boolean {
+  if (a.length === 0 || a.length !== b.length) return false;
+  const key = (e: PotentialTop20Entry) => `${e.board}|${e.rank}|${toPostgresIntAppId(e.appId)}|${Math.round(e.score * 10)}`;
+  const prev = new Set(b.map(key));
+  return a.every((e) => prev.has(key(e)));
 }
 
-function diffNewcomers(
-  todayEntries: PotentialTop20Entry[],
-  prevEntries: PotentialTop20Entry[],
-): PotentialTop20Entry[] {
-  const prevByBoard = new Map<string, Set<number>>();
-  for (const row of prevEntries) {
-    const set = prevByBoard.get(row.board) ?? new Set<number>();
-    set.add(row.appId);
-    prevByBoard.set(row.board, set);
+/** Game có trong top 20 hôm nay nhưng không có ở bảng nào trong `lookback` ngày trước đó. */
+async function detectNewGames(today: Date, entries: PotentialTop20Entry[], lookback: number): Promise<PotentialAlertGame[]> {
+  const ids = [...new Set(entries.map((e) => toPostgresIntAppId(e.appId)))];
+  if (ids.length === 0) return [];
+  const since = new Date(today.getTime() - lookback * DAY_MS);
+  const recent = await prismaApp.potentialBoardDay.findMany({
+    where: { date: { gte: since, lt: today }, appId: { in: ids } },
+    select: { appId: true },
+    distinct: ["appId"],
+  });
+  const seen = new Set(recent.map((r) => r.appId));
+  const fresh = ids.filter((id) => !seen.has(id));
+  if (fresh.length === 0) return [];
+
+  const older = await prismaApp.potentialBoardDay.groupBy({
+    by: ["appId"],
+    where: { date: { lt: since }, appId: { in: fresh } },
+    _max: { date: true },
+  });
+  const lastSeen = new Map(older.map((o) => [o.appId, o._max.date ? o._max.date.toISOString().slice(0, 10) : null]));
+
+  const games: PotentialAlertGame[] = [];
+  for (const id of fresh) {
+    const mine = entries.filter((e) => toPostgresIntAppId(e.appId) === id);
+    const boardOrder = (b: PotentialAlertBoardId) => POTENTIAL_ALERT_BOARDS.findIndex((x) => x.id === b);
+    mine.sort((x, y) => boardOrder(x.board) - boardOrder(y.board) || x.rank - y.rank);
+    const seenBefore = lastSeen.get(id) ?? null;
+    games.push({
+      appId: mine[0]!.appId,
+      title: mine[0]!.title,
+      titleEn: null,
+      boards: mine.map((e) => ({ board: e.board, rank: e.rank, score: e.score })),
+      firstEver: !lastSeen.has(id),
+      lastSeen: seenBefore,
+      analysisId: null,
+      analysisScore: null,
+      analyzedAt: null,
+    });
   }
-  return todayEntries.filter((row) => !prevByBoard.get(row.board)?.has(row.appId));
+  return games.sort((a, b) => Math.min(...a.boards.map((x) => x.rank)) - Math.min(...b.boards.map((x) => x.rank)));
+}
+
+async function englishTitle(appId: number): Promise<string | null> {
+  const known = knownGame(appId)?.titleEn?.trim();
+  if (known) return known;
+  const row = await prismaApp.radarRecapRow.findFirst({
+    where: { appId: toPostgresIntAppId(appId), titleEn: { not: null } },
+    orderBy: { date: "desc" },
+    select: { titleEn: true },
+  });
+  return row?.titleEn?.trim() || null;
+}
+
+function analysisScore(a: AIAnalysisResult): number | null {
+  const v = a.rubric?.aggregate?.weightedScore ?? a.sentimentScore ?? null;
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+function isFresh(a: AIAnalysisResult | null, maxAgeDays: number): boolean {
+  if (!a) return false;
+  const t = Date.parse(a.analyzedAt);
+  return Number.isFinite(t) && Date.now() - t <= maxAgeDays * DAY_MS;
+}
+
+/** Chạy AI cho game mới chưa có phân tích (hoặc phân tích quá cũ), lần lượt theo hạng. */
+async function ensureAnalyses(games: PotentialAlertGame[]): Promise<number> {
+  if (games.length === 0) return 0;
+  const userId = await resolveBootstrapUserId();
+  if (!userId) {
+    console.warn("[top20-alert] ADMIN_BOOTSTRAP_EMAIL user not found — skip auto AI (game links only)");
+    return 0;
+  }
+  const cap = aiMax();
+  const maxAge = reanalyzeDays();
+  let analyzed = 0;
+  for (const g of games) {
+    if (analyzed >= cap) break;
+    try {
+      if (isFresh(await getLatestAnalysisForApp(g.appId), maxAge)) {
+        console.log(`[top20-alert] skip AI appId=${g.appId} (analysis < ${maxAge} days)`);
+        continue;
+      }
+      console.log(`[top20-alert] AI analyze appId=${g.appId}…`);
+      await aiAnalysisService.analyzeGameReviews(userId, g.appId, { mode: "all" });
+      analyzed += 1;
+      console.log(`[top20-alert] AI done appId=${g.appId}`);
+    } catch (err) {
+      console.warn(`[top20-alert] AI failed appId=${g.appId}:`, err instanceof Error ? err.message : err);
+      logDiagError("potential-top20-ai-failed", err, { appId: g.appId });
+    }
+  }
+  return analyzed;
+}
+
+async function attachDetails(games: PotentialAlertGame[]): Promise<PotentialAlertGame[]> {
+  const out: PotentialAlertGame[] = [];
+  for (const g of games) {
+    let next = { ...g, titleEn: await englishTitle(g.appId).catch(() => null) };
+    try {
+      const latest = await getLatestAnalysisForApp(g.appId);
+      if (latest?.analysisId) {
+        next = { ...next, analysisId: latest.analysisId, analysisScore: analysisScore(latest), analyzedAt: latest.analyzedAt };
+      }
+    } catch (err) {
+      console.warn(`[top20-alert] lookup analysis failed for ${g.appId}:`, err instanceof Error ? err.message : err);
+    }
+    out.push(next);
+  }
+  return out;
 }
 
 const TERMINAL_STATUSES = new Set(["completed", "baseline"]);
@@ -207,14 +325,9 @@ async function claimRun(today: Date): Promise<{ skipped: boolean; reason?: strin
     return { skipped: true, reason: `already ${existing.status}` };
   }
   if (!existing) {
-    await prismaApp.potentialAlertRun.create({
-      data: { date: today, status: "started" },
-    });
+    await prismaApp.potentialAlertRun.create({ data: { date: today, status: "started" } });
   } else {
-    await prismaApp.potentialAlertRun.update({
-      where: { date: today },
-      data: { status: "started" },
-    });
+    await prismaApp.potentialAlertRun.update({ where: { date: today }, data: { status: "started" } });
   }
   return { skipped: false };
 }
@@ -222,11 +335,7 @@ async function claimRun(today: Date): Promise<{ skipped: boolean; reason?: strin
 async function finishRun(
   today: Date,
   status: string,
-  fields: {
-    newCount: number;
-    analyzedCount: number;
-    payload: Record<string, unknown>;
-  },
+  fields: { newCount: number; analyzedCount: number; payload: Record<string, unknown> },
 ): Promise<void> {
   await prismaApp.potentialAlertRun.update({
     where: { date: today },
@@ -239,56 +348,13 @@ async function finishRun(
   });
 }
 
-async function attachAnalysisIds(
-  newcomers: PotentialTop20Newcomer[],
-): Promise<PotentialTop20Newcomer[]> {
-  const ids = uniqueAppIds(newcomers);
-  const map = new Map<number, string>();
-  for (const appId of ids) {
-    try {
-      const latest = await getLatestAnalysisForApp(appId);
-      if (latest?.analysisId) map.set(appId, latest.analysisId);
-    } catch (err) {
-      console.warn(
-        `[top20-alert] lookup analysis failed for ${appId}:`,
-        err instanceof Error ? err.message : err,
-      );
-    }
-  }
-  return newcomers.map((n) => ({ ...n, analysisId: map.get(n.appId) ?? null }));
-}
-
-async function runAiForApps(appIds: number[]): Promise<number> {
-  if (appIds.length === 0) return 0;
-  const userId = await resolveBootstrapUserId();
-  if (!userId) {
-    console.warn(
-      "[top20-alert] ADMIN_BOOTSTRAP_EMAIL user not found — skip auto AI (game links only)",
-    );
-    return 0;
-  }
-
-  let analyzed = 0;
-  for (const appId of appIds) {
-    try {
-      const existing = await getLatestAnalysisForApp(appId);
-      if (existing) {
-        console.log(`[top20-alert] skip AI appId=${appId} (already has analysis)`);
-        continue;
-      }
-      console.log(`[top20-alert] AI analyze appId=${appId}…`);
-      await aiAnalysisService.analyzeGameReviews(userId, appId, { mode: "all" });
-      analyzed += 1;
-      console.log(`[top20-alert] AI done appId=${appId}`);
-    } catch (err) {
-      console.warn(
-        `[top20-alert] AI failed appId=${appId}:`,
-        err instanceof Error ? err.message : err,
-      );
-      logDiagError("potential-top20-ai-failed", err, { appId });
-    }
-  }
-  return analyzed;
+async function previousRunWasStale(today: Date): Promise<boolean> {
+  const prev = await prismaApp.potentialAlertRun.findFirst({
+    where: { date: { lt: today } },
+    orderBy: { date: "desc" },
+    select: { status: true },
+  });
+  return prev?.status === "stale";
 }
 
 async function sendMessages(messages: string[]): Promise<boolean> {
@@ -307,139 +373,103 @@ async function sendMessages(messages: string[]): Promise<boolean> {
   return true;
 }
 
-export async function runPotentialTop20Alert(opts?: {
-  dryRun?: boolean;
-}): Promise<PotentialTop20AlertResult> {
+function emptyResult(dateLabel: string, dryRun: boolean, extra: Partial<PotentialTop20AlertResult>): PotentialTop20AlertResult {
+  return {
+    date: dateLabel,
+    baseline: false,
+    skipped: false,
+    stale: false,
+    newCount: 0,
+    analyzedCount: 0,
+    sent: false,
+    dryRun,
+    messages: [],
+    games: [],
+    ...extra,
+  };
+}
+
+/**
+ * Alert hằng ngày: game mới vào top 20 của 4 bảng Potential (14 ngày, combined).
+ * Game mới = lần đầu vào top 20 hoặc vắng top 20 (mọi bảng) từ `POTENTIAL_ALERT_LOOKBACK_DAYS` ngày.
+ */
+export async function runPotentialTop20Alert(opts?: { dryRun?: boolean }): Promise<PotentialTop20AlertResult> {
   const dryRun = opts?.dryRun === true;
   const today = calendarDateIct();
   const dateLabel = formatIctDate(today);
+  const lookback = alertLookbackDays();
   const cfg = seatalkConfig();
 
-  console.log(`[top20-alert] start date=${dateLabel} dryRun=${dryRun}`);
-  logDiag("potential-top20-start", { date: dateLabel, dryRun });
+  console.log(`[top20-alert] start date=${dateLabel} lookback=${lookback}d dryRun=${dryRun}`);
+  logDiag("potential-top20-start", { date: dateLabel, dryRun, lookback });
 
   if (!dryRun) {
     const claim = await claimRun(today);
     if (claim.skipped) {
       console.log(`[top20-alert] skip: ${claim.reason}`);
-      return {
-        date: dateLabel,
-        baseline: false,
-        skipped: true,
-        skipReason: claim.reason,
-        newCount: 0,
-        analyzedCount: 0,
-        sent: false,
-        dryRun,
-        messages: [],
-        newcomers: [],
-      };
+      return emptyResult(dateLabel, dryRun, { skipped: true, skipReason: claim.reason });
     }
   }
 
-  const todayEntries = await computePotentialTop20Boards();
-  const prevDate = await previousSnapshotDate(today);
+  try {
+    const todayEntries = await computePotentialTop20Boards();
+    const prevDate = await previousSnapshotDate(today);
 
-  if (!prevDate) {
-    const messages = [
-      `${messageHeader(dateLabel)}\n\nĐã ghi baseline top 20. Alert game mới bắt đầu từ ngày mai.`,
-    ];
-    let sent = false;
+    if (!prevDate) {
+      const messages = [`${messageHeader(dateLabel, lookback)}\n\nĐã ghi baseline top 20. Alert game mới bắt đầu từ lần chạy sau.`];
+      let sent = false;
+      if (!dryRun) {
+        await saveSnapshot(today, todayEntries);
+        sent = await sendMessages(messages).catch(() => false);
+        await finishRun(today, "baseline", { newCount: 0, analyzedCount: 0, payload: { baseline: true, sent, messages } });
+      }
+      return emptyResult(dateLabel, dryRun, { baseline: true, sent, messages });
+    }
+
+    const prevIso = formatIctDate(prevDate);
+    if (sameBoards(todayEntries, await loadSnapshot(prevDate))) {
+      console.warn(`[top20-alert] stale: boards identical to ${prevIso}`);
+      const warnAgain = !(await previousRunWasStale(today));
+      const messages = warnAgain ? [formatStaleMessage(dateLabel, prevIso)] : [];
+      let sent = false;
+      if (!dryRun) {
+        if (messages.length > 0) sent = await sendMessages(messages).catch(() => false);
+        await finishRun(today, "stale", { newCount: 0, analyzedCount: 0, payload: { stale: true, prevDate: prevIso, sent, messages } });
+      }
+      return emptyResult(dateLabel, dryRun, { stale: true, sent, messages });
+    }
+
+    let games = await detectNewGames(today, todayEntries, lookback);
+    let analyzedCount = 0;
     if (!dryRun) {
       await saveSnapshot(today, todayEntries);
-      try {
-        sent = await sendMessages(messages);
-      } catch (err) {
-        console.warn("[top20-alert] baseline SeaTalk failed:", err instanceof Error ? err.message : err);
-        logDiagError("potential-top20-seatalk-failed", err, { date: dateLabel, baseline: true });
-      }
-      await finishRun(today, "baseline", {
-        newCount: 0,
-        analyzedCount: 0,
-        payload: { baseline: true, sent, messages },
-      });
+      analyzedCount = await ensureAnalyses(games);
     }
-    console.log(`[top20-alert] baseline recorded (${todayEntries.length} rows)`);
-    return {
-      date: dateLabel,
-      baseline: true,
-      skipped: false,
-      newCount: 0,
-      analyzedCount: 0,
-      sent,
-      dryRun,
-      messages,
-      newcomers: [],
-    };
-  }
+    games = await attachDetails(games);
+    const messages = formatPotentialAlertMessages({ dateLabel, games, publicUrl: cfg.publicUrl, lookbackDays: lookback });
 
-  const prevEntries = await loadSnapshot(prevDate);
-  const entered = diffNewcomers(todayEntries, prevEntries);
-  let newcomers = await markFirstEver(today, entered);
-  let analyzedCount = 0;
-
-  if (!dryRun) {
-    await saveSnapshot(today, todayEntries);
-    analyzedCount = await runAiForApps(uniqueAppIds(newcomers));
-  }
-
-  newcomers = await attachAnalysisIds(newcomers);
-  const messages = formatPotentialTop20Messages({
-    dateLabel,
-    newcomers,
-    publicUrl: cfg.publicUrl,
-  });
-
-  let sent = false;
-  if (!dryRun) {
-    try {
+    let sent = false;
+    if (!dryRun) {
       sent = await sendMessages(messages);
       await finishRun(today, "completed", {
-        newCount: newcomers.length,
+        newCount: games.length,
         analyzedCount,
-        payload: {
-          sent,
-          prevDate: formatIctDate(prevDate),
-          newcomers,
-          messages,
-        },
+        payload: { sent, prevDate: prevIso, lookbackDays: lookback, games, messages },
       });
-    } catch (err) {
-      logDiagError("potential-top20-seatalk-failed", err, { date: dateLabel });
-      await finishRun(today, "failed", {
-        newCount: newcomers.length,
-        analyzedCount,
-        payload: {
-          sent: false,
-          error: err instanceof Error ? err.message : String(err),
-          newcomers,
-          messages,
-        },
-      });
-      throw err;
     }
+
+    console.log(`[top20-alert] done new=${games.length} analyzed=${analyzedCount} sent=${sent} dryRun=${dryRun}`);
+    logDiag("potential-top20-done", { date: dateLabel, newCount: games.length, analyzedCount, sent, dryRun });
+    return emptyResult(dateLabel, dryRun, { newCount: games.length, analyzedCount, sent, messages, games });
+  } catch (err) {
+    logDiagError("potential-top20-failed", err, { date: dateLabel });
+    if (!dryRun) {
+      await finishRun(today, "failed", {
+        newCount: 0,
+        analyzedCount: 0,
+        payload: { error: err instanceof Error ? err.message : String(err) },
+      }).catch(() => undefined);
+    }
+    throw err;
   }
-
-  console.log(
-    `[top20-alert] done new=${newcomers.length} analyzed=${analyzedCount} sent=${sent} dryRun=${dryRun}`,
-  );
-  logDiag("potential-top20-done", {
-    date: dateLabel,
-    newCount: newcomers.length,
-    analyzedCount,
-    sent,
-    dryRun,
-  });
-
-  return {
-    date: dateLabel,
-    baseline: false,
-    skipped: false,
-    newCount: newcomers.length,
-    analyzedCount,
-    sent,
-    dryRun,
-    messages,
-    newcomers,
-  };
 }

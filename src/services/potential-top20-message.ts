@@ -42,13 +42,26 @@ export interface PotentialTop20Entry {
   score: number;
 }
 
-export interface PotentialTop20Newcomer extends PotentialTop20Entry {
+/** Một game mới vào top 20 (có thể vào nhiều bảng cùng lúc). */
+export interface PotentialAlertGame {
+  appId: number;
+  title: string;
+  titleEn: string | null;
+  boards: Array<{ board: PotentialAlertBoardId; rank: number; score: number }>;
+  /** Chưa từng có trong top 20 của bảng nào. */
   firstEver: boolean;
-  analysisId?: string | null;
+  /** Ngày gần nhất có trong top 20 trước kỳ vắng (khi quay lại). */
+  lastSeen: string | null;
+  analysisId: string | null;
+  analysisScore: number | null;
+  analyzedAt: string | null;
 }
 
-export function messageHeader(dateLabel: string): string {
-  return `Potential top 20 — ${dateLabel}\nCửa sổ ${POTENTIAL_TOP20_DAYS} ngày · ${POTENTIAL_TOP20_PLATFORM}`;
+const BOARD_LABEL = new Map<string, string>(POTENTIAL_ALERT_BOARDS.map((b) => [b.id, b.labelVi]));
+
+function viDate(iso: string): string {
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}/${y}`;
 }
 
 function formatScore(n: number): string {
@@ -57,72 +70,75 @@ function formatScore(n: number): string {
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 
-function gameBlock(n: PotentialTop20Newcomer, publicUrl: string): string {
-  const flag = n.firstEver ? "lần đầu" : "đã từng vào";
-  const path = n.analysisId ? `/ai-analysis/a/${n.analysisId}` : `/game/${n.appId}`;
-  return `#${n.rank} ${n.title} — ${flag} — ${formatScore(n.score)}\n${publicUrl}${path}`;
+function daysBetween(fromIso: string, toIso: string): number {
+  return Math.round((Date.parse(`${toIso}T00:00:00Z`) - Date.parse(`${fromIso}T00:00:00Z`)) / 86_400_000);
 }
 
-function appendChunks(out: string[], header: string, pieces: string[]): void {
+export function messageHeader(dateLabel: string, lookbackDays: number): string {
+  return (
+    `**Potential: game mới vào top 20 (${viDate(dateLabel)})**\n` +
+    `4 bảng Potential ${POTENTIAL_TOP20_DAYS} ngày (Android + iOS). ` +
+    `Game mới = lần đầu vào top 20 hoặc vắng top 20 từ ${lookbackDays} ngày trở lên.`
+  );
+}
+
+function gameBlock(g: PotentialAlertGame, index: number, dateLabel: string, publicUrl: string): string {
+  const name = g.titleEn && g.titleEn !== g.title ? `${g.title} (${g.titleEn})` : g.title;
+  const boards = g.boards.map((b) => `${BOARD_LABEL.get(b.board) ?? b.board} #${b.rank}`).join(", ");
+  const status = g.firstEver
+    ? "Lần đầu vào top 20"
+    : g.lastSeen
+      ? `Quay lại sau ${daysBetween(g.lastSeen, dateLabel)} ngày (lần cuối ${viDate(g.lastSeen)})`
+      : "Quay lại top 20";
+  const best = Math.max(...g.boards.map((b) => b.score));
+  const ai =
+    g.analysisId != null
+      ? `Phân tích AI: ${g.analysisScore != null ? `${Math.round(g.analysisScore)}/100` : "xem chi tiết"}`
+      : "Chưa có phân tích AI";
+  const lines = [
+    `**${index}. ${name}**`,
+    `${boards} · ${status}`,
+    `Điểm Potential ${formatScore(best)} · ${ai}`,
+  ];
+  if (g.analysisId) lines.push(`${publicUrl}/ai-analysis/a/${g.analysisId}`);
+  lines.push(`Trang game: ${publicUrl}/game/${g.appId}`);
+  return lines.join("\n");
+}
+
+function chunk(header: string, blocks: string[]): string[] {
+  const out: string[] = [];
   let current = header;
-  for (const piece of pieces) {
-    const next = `${current}\n\n${piece}`;
+  for (const block of blocks) {
+    const next = `${current}\n\n${block}`;
     if (next.length <= POTENTIAL_TOP20_MESSAGE_MAX_CHARS) {
       current = next;
       continue;
     }
     if (current !== header) out.push(current);
-    const alone = `${header}\n\n${piece}`;
-    if (alone.length <= POTENTIAL_TOP20_MESSAGE_MAX_CHARS) {
-      current = alone;
-    } else {
-      out.push(alone.slice(0, POTENTIAL_TOP20_MESSAGE_MAX_CHARS));
-      current = header;
-    }
+    current = `${header}\n\n${block}`.slice(0, POTENTIAL_TOP20_MESSAGE_MAX_CHARS);
   }
   if (current !== header) out.push(current);
+  return out;
 }
 
-export function formatPotentialTop20Messages(opts: {
+export function formatPotentialAlertMessages(opts: {
   dateLabel: string;
-  newcomers: PotentialTop20Newcomer[];
+  games: PotentialAlertGame[];
   publicUrl: string;
+  lookbackDays: number;
 }): string[] {
-  const header = messageHeader(opts.dateLabel);
-  if (opts.newcomers.length === 0) {
-    return [`${header}\n\nKhông có game mới vào top 20.`];
+  const header = messageHeader(opts.dateLabel, opts.lookbackDays);
+  if (opts.games.length === 0) {
+    return [`${header}\n\nHôm nay không có game mới vào top 20.`];
   }
+  const blocks = opts.games.map((g, i) => gameBlock(g, i + 1, opts.dateLabel, opts.publicUrl));
+  return chunk(`${header}\n${opts.games.length} game mới:`, blocks);
+}
 
-  const sections: string[] = [];
-  for (const board of POTENTIAL_ALERT_BOARDS) {
-    const rows = opts.newcomers
-      .filter((n) => n.board === board.id)
-      .sort((a, b) => a.rank - b.rank);
-    if (rows.length === 0) continue;
-    const games = rows.map((n) => gameBlock(n, opts.publicUrl)).join("\n\n");
-    sections.push(`[${board.labelVi}]\n${games}`);
-  }
-
-  const joined = [header, ...sections].join("\n\n");
-  if (joined.length <= POTENTIAL_TOP20_MESSAGE_MAX_CHARS) return [joined];
-
-  const out: string[] = [];
-  for (const board of POTENTIAL_ALERT_BOARDS) {
-    const rows = opts.newcomers
-      .filter((n) => n.board === board.id)
-      .sort((a, b) => a.rank - b.rank);
-    if (rows.length === 0) continue;
-    const title = `[${board.labelVi}]`;
-    const section = `${title}\n${rows.map((n) => gameBlock(n, opts.publicUrl)).join("\n\n")}`;
-    if (`${header}\n\n${section}`.length <= POTENTIAL_TOP20_MESSAGE_MAX_CHARS) {
-      out.push(`${header}\n\n${section}`);
-    } else {
-      appendChunks(
-        out,
-        header,
-        rows.map((n) => `${title}\n${gameBlock(n, opts.publicUrl)}`),
-      );
-    }
-  }
-  return out.length > 0 ? out : [joined.slice(0, POTENTIAL_TOP20_MESSAGE_MAX_CHARS)];
+export function formatStaleMessage(dateLabel: string, prevDate: string): string {
+  return (
+    `**Potential: game mới vào top 20 (${viDate(dateLabel)})**\n` +
+    `Dữ liệu Potential hôm nay trùng 100% với ngày ${viDate(prevDate)} (cùng game, cùng hạng, cùng điểm), ` +
+    `nên chưa xét được game mới. Hệ thống thử lại ở lần chạy sau.`
+  );
 }

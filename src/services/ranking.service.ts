@@ -40,6 +40,21 @@ import {
   type PercentileAnchors,
 } from "../utils/distribution-percentile";
 
+/** Cột AppRank.date (DATE) được pg parse thành nửa đêm giờ local — so ngày bằng giờ local. */
+function localIsoDay(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function localMidnight(iso: string): Date {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y!, m! - 1, d!);
+}
+
+function shiftIsoDay(iso: string, days: number): string {
+  const t = new Date(`${iso}T00:00:00.000Z`).getTime() + days * 86_400_000;
+  return new Date(t).toISOString().slice(0, 10);
+}
+
 // Distribution tier pillars; bump when the formula changes so caches refresh.
 const ALGO_VERSION_RESERVE = "v13";
 const ALGO_VERSION_LAUNCHED = "v19";
@@ -1217,27 +1232,67 @@ export class RankingService {
         await ensurePotentialScorers();
         await this.ensureGrowthCalibration(platform);
         const rows = await this.fetchLightRows(days);
-
-        const grouped = new Map<number, AppRankRow[]>();
-        for (const row of rows) {
-          if (!grouped.has(row.appId)) grouped.set(row.appId, []);
-          grouped.get(row.appId)!.push(row);
-        }
-
-        const results: PotentialScoreResult[] = [];
-        for (const [appId, appRows] of grouped) {
-          if (segment === "reserve" && !this.isReserveOnlyApp(appRows)) continue;
-          if (segment === "launched" && !this.isLaunchedApp(appRows)) continue;
-
-          const scored = this.scoreAppRows(appId, appRows, days, platform, segment);
-          if (scored) results.push(scored);
-        }
-
-        const withMomentum = this.applyGrowthMomentumPostPass(results, days, platform, segment);
-        withMomentum.sort((a, b) => b.compositeScore - a.compositeScore);
-        return withMomentum;
+        return this.scorePotentialRows(rows, days, platform, segment);
       },
     );
+  }
+
+  /** Chấm danh sách Potential từ dòng AppRank light đã lấy sẵn (sắp theo ngày tăng dần). */
+  private scorePotentialRows(
+    rows: AppRankRow[],
+    days: number,
+    platform: "combined" | "android" | "ios",
+    segment: PotentialSegment,
+  ): PotentialScoreResult[] {
+    const grouped = new Map<number, AppRankRow[]>();
+    for (const row of rows) {
+      if (!grouped.has(row.appId)) grouped.set(row.appId, []);
+      grouped.get(row.appId)!.push(row);
+    }
+
+    const results: PotentialScoreResult[] = [];
+    for (const [appId, appRows] of grouped) {
+      if (segment === "reserve" && !this.isReserveOnlyApp(appRows)) continue;
+      if (segment === "launched" && !this.isLaunchedApp(appRows)) continue;
+
+      const scored = this.scoreAppRows(appId, appRows, days, platform, segment);
+      if (scored) results.push(scored);
+    }
+
+    const withMomentum = this.applyGrowthMomentumPostPass(results, days, platform, segment);
+    withMomentum.sort((a, b) => b.compositeScore - a.compositeScore);
+    return withMomentum;
+  }
+
+  /**
+   * Danh sách Potential như cron chạy vào ngày `asOfIso` (YYYY-MM-DD): cửa sổ `days` ngày crawl
+   * kết thúc tại ngày đó. Không cache — dùng để dựng lại lịch sử top 20.
+   * `rows`: dòng light đã lấy sẵn (phủ cả cửa sổ) để backfill nhiều ngày chỉ query 1 lần.
+   */
+  async calculatePotentialScoresAsOf(
+    asOfIso: string,
+    days: number,
+    platform: "combined" | "android" | "ios",
+    segment: PotentialSegment,
+    rows?: AppRankRow[],
+  ): Promise<PotentialScoreResult[]> {
+    await ensurePotentialScorers();
+    await this.ensureGrowthCalibration(platform);
+    // Process mới (script): chờ hiệu chỉnh tăng trưởng build xong, không dùng thang dự phòng.
+    if (growthCalibrationInFlight) await growthCalibrationInFlight;
+    const fromIso = shiftIsoDay(asOfIso, -(days - 1));
+    const source = rows ?? (await this.fetchLightRowsSince(localMidnight(fromIso)));
+    const windowRows = source.filter((r) => {
+      const day = localIsoDay(r.date);
+      return day >= fromIso && day <= asOfIso;
+    });
+    return this.scorePotentialRows(windowRows, days, platform, segment);
+  }
+
+  /** Dòng AppRank light từ ngày `from` (gồm) tới hiện tại, không cache. */
+  async fetchLightRowsSince(from: Date): Promise<AppRankRow[]> {
+    const { rows } = await pool.query<AppRankRow>(APP_RANK_LIGHT_SELECT_SQL, [from]);
+    return rows;
   }
 
   async getTopReserveGrowth(

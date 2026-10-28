@@ -320,12 +320,39 @@ async function precomputeDistribution(options: { force: boolean; label?: string 
     });
 }
 
+/** Job hằng ngày của cron: alert top 20 Potential, đọc lại TapTap cho Radar, Radar tuần. */
+async function runDailyJobs(label: string): Promise<void> {
+  try {
+    const { runPotentialTop20Alert } = await import("./services/potential-top20-alert.service");
+    await runPotentialTop20Alert();
+  } catch (err) {
+    console.warn("[precompute] potential top20 alert failed:", (err as Error).message);
+    logDiagError("potential-top20-alert", err, { label });
+  }
+  try {
+    const { runRadarWatch } = await import("./services/radar-watch.service");
+    await runRadarWatch();
+  } catch (err) {
+    console.warn("[precompute] radar watch failed:", (err as Error).message);
+    logDiagError("radar-watch", err, { label });
+  }
+  try {
+    const { runRadarRecap, shouldRunWeeklyRadar } = await import("./services/radar-recap.service");
+    if (await shouldRunWeeklyRadar()) await runRadarRecap();
+    else console.log("[precompute] radar recap: chưa tới kỳ tuần (RADAR_RECAP_WEEKDAY)");
+  } catch (err) {
+    console.warn("[precompute] radar recap failed:", (err as Error).message);
+    logDiagError("radar-recap", err, { label });
+  }
+}
+
 export async function precomputeAll(options?: {
   label?: string;
 }): Promise<{ durationMs: number; keys: number }> {
   const start = Date.now();
   const label = options?.label;
 
+  let potentialError: unknown = null;
   await withForceRefresh(async () => {
     await waitForPrecomputeSlot();
     console.log("[precompute] Phase 1: Dashboard + Rankings...");
@@ -390,7 +417,15 @@ export async function precomputeAll(options?: {
     }
     console.log(`[precompute] Phase 2 done (${((Date.now() - start) / 1000).toFixed(1)}s)`);
     logDiag("precompute-phase", { phase: 2, elapsedSec: Math.round((Date.now() - start) / 1000) });
+  }).catch((err: unknown) => {
+    potentialError = err;
+  });
 
+  // Bảng Potential vừa tính lại: chạy alert + Radar ngay, không chờ Phase 3/4 (có thể mất vài giờ).
+  if (label === "cron") await runDailyJobs(label);
+  if (potentialError) throw potentialError;
+
+  await withForceRefresh(async () => {
     await waitForPrecomputeSlot();
     const { top: topIds, extra: extraIds } = await collectPrecomputeAppIds();
     console.log(
@@ -434,31 +469,6 @@ export async function precomputeAll(options?: {
       await refreshPotentialScorers();
     } catch (err) {
       console.warn("[precompute]   potential scorers post-refresh failed:", (err as Error).message);
-    }
-
-    if (label === "cron") {
-      try {
-        const { runPotentialTop20Alert } = await import("./services/potential-top20-alert.service");
-        await runPotentialTop20Alert();
-      } catch (err) {
-        console.warn("[precompute] potential top20 alert failed:", (err as Error).message);
-        logDiagError("potential-top20-alert", err, { label });
-      }
-      try {
-        const { runRadarWatch } = await import("./services/radar-watch.service");
-        await runRadarWatch();
-      } catch (err) {
-        console.warn("[precompute] radar watch failed:", (err as Error).message);
-        logDiagError("radar-watch", err, { label });
-      }
-      try {
-        const { runRadarRecap, shouldRunWeeklyRadar } = await import("./services/radar-recap.service");
-        if (await shouldRunWeeklyRadar()) await runRadarRecap();
-        else console.log("[precompute] radar recap: chưa tới kỳ tuần (RADAR_RECAP_WEEKDAY)");
-      } catch (err) {
-        console.warn("[precompute] radar recap failed:", (err as Error).message);
-        logDiagError("radar-recap", err, { label });
-      }
     }
 
     const duration = Date.now() - start;

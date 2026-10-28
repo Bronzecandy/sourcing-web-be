@@ -26,6 +26,7 @@
     "bench:distribution-concurrency": "tsx src/scripts/bench-distribution-concurrency.ts",
     "peek:tags": "tsx src/scripts/peek-app-raw-tags.ts",
     "seatalk:top20": "tsx src/scripts/seatalk-top20.ts",
+    "potential:backfill": "tsx src/scripts/potential-top20-backfill.ts",
     "radar:recap": "tsx src/scripts/radar-recap.ts",
     "tester:extract-config": "tsx src/scripts/tester-extract-config.ts",
     "tester:seed": "tsx src/scripts/tester-seed.ts",
