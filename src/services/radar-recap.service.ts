@@ -229,6 +229,8 @@ export async function listRadarRuns(limit = 60): Promise<RadarRunListItem[]> {
     const weekStart = periodWindowStart(date);
     const known = s ? s.testViable + s.monitor + s.ignore + s.drop : 0;
     const legacy = r.status === "imported";
+    // Cùng số với mục "Mới xuất hiện" / "Cập nhật lịch trình mới" của Executive Summary khi kỳ có section 3.
+    const section3 = (r.summary as RadarSummary | null)?.section3;
     return {
       date,
       periodCode: r.periodCode,
@@ -244,8 +246,8 @@ export async function listRadarRuns(limit = 60): Promise<RadarRunListItem[]> {
         drop: s?.drop ?? 0,
         other: Math.max(0, (s?.games ?? 0) - known),
       },
-      newGames: s?.newGames ?? 0,
-      scheduleUpdates: s?.scheduleUpdates ?? 0,
+      newGames: section3?.newEntries?.length ?? s?.newGames ?? 0,
+      scheduleUpdates: section3?.scheduleUpdates?.length ?? s?.scheduleUpdates ?? 0,
       hasDocx: legacy ? legacyDocx(r.summary) != null : r.status === "completed",
     };
   });
