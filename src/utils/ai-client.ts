@@ -13,7 +13,7 @@ function getClient(): OpenAI {
 }
 
 export function getModel(): string {
-  return process.env.OPENAI_MODEL || "gpt-4.1";
+  return process.env.OPENAI_MODEL || "gpt-5.4";
 }
 
 export interface LLMResponse {
@@ -32,9 +32,13 @@ export async function callLLM(
   const model = getModel();
   const client = getClient();
 
+  // gpt-5.x từ chối max_tokens; quota này gồm cả token suy luận.
+  const tokenLimit = model.startsWith("gpt-5")
+    ? { max_completion_tokens: maxTokens }
+    : { max_tokens: maxTokens };
   const response = await client.chat.completions.create({
     model,
-    max_tokens: maxTokens,
+    ...tokenLimit,
     ...(opts.temperature != null ? { temperature: opts.temperature } : {}),
     messages: [
       { role: "system", content: systemPrompt },
