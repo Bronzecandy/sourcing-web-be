@@ -15,7 +15,7 @@ import { formatViDate, ictIsoDate, playableFrom, resolveSchedule, scheduleSignat
 import { loadRadarSnapshotFacts, radarScheduleAsOf, saveRadarSnapshot } from "./radar-watch.service";
 import { loadInternalTests, testingThisWeek } from "./radar-internal-tests";
 import { knownGame } from "./radar-known";
-import { buildRadarSummary, buildSeatalkMessages, uniqueGames } from "./radar-copy";
+import { buildRadarSummary, buildSeatalkMessages, uniqueGames, withDigest } from "./radar-copy";
 import { radarDocxBuffer, radarXlsxBuffer } from "./radar-export";
 import {
   needsScreening,
@@ -144,6 +144,18 @@ function rowsFromDb(raw: Array<{ payload: unknown }>): RadarRowPayload[] {
   return raw.map((r) => r.payload as RadarRowPayload);
 }
 
+function radarReportUrl(dateIso: string): string {
+  return `${seatalkConfig().publicUrl}/radar?date=${dateIso}`;
+}
+
+/** Kỳ Radar cho trang web: Executive Summary dựng lại từ dòng đã lưu nên áp cả cho kỳ cũ. */
+export async function getRadarReport(dateIso?: string): Promise<RadarRecapView | null> {
+  const view = await getRadarRecap(dateIso);
+  if (!view?.summary || view.status !== "completed") return view;
+  const prev = await previousRun(dbDate(view.date));
+  return { ...view, summary: withDigest(view.summary, view.rows, prev?.rows ?? [], view.date, radarReportUrl(view.date)) };
+}
+
 export async function getRadarRecap(dateIso?: string): Promise<RadarRecapView | null> {
   const run = dateIso
     ? await prismaApp.radarRecapRun.findUnique({
@@ -176,6 +188,8 @@ export interface RadarRunListItem {
   weekEnd: string;
   games: number;
   actions: { testViable: number; monitor: number; ignore: number; drop: number; other: number };
+  highPotential: number;
+  /** Game High/Mid mới vào radar và có lịch mới — cùng số với Executive Summary trên web. */
   newGames: number;
   scheduleUpdates: number;
   hasDocx: boolean;
@@ -206,6 +220,7 @@ export async function listRadarRuns(limit = 60): Promise<RadarRunListItem[]> {
       monitor: number;
       ignore: number;
       drop: number;
+      high: number;
       newGames: number;
       scheduleUpdates: number;
     }>
@@ -216,8 +231,13 @@ export async function listRadarRuns(limit = 60): Promise<RadarRunListItem[]> {
       count(DISTINCT "appId") FILTER (WHERE "nextAction" LIKE 'Monitor%')::int AS "monitor",
       count(DISTINCT "appId") FILTER (WHERE "nextAction" LIKE 'Temporary Ignore%')::int AS "ignore",
       count(DISTINCT "appId") FILTER (WHERE "nextAction" LIKE 'Drop%')::int AS "drop",
-      count(DISTINCT "appId") FILTER (WHERE "payload"->>'newThisPeriod' = 'true')::int AS "newGames",
-      count(DISTINCT "appId") FILTER (WHERE "payload"->>'scheduleChanged' = 'true')::int AS "scheduleUpdates"
+      count(DISTINCT "appId") FILTER (WHERE "nextAction" LIKE '%High Potential')::int AS "high",
+      count(DISTINCT "appId") FILTER (
+        WHERE "payload"->>'newThisPeriod' = 'true' AND "nextAction" ~ '(High|Mid|Medium) Potential$'
+      )::int AS "newGames",
+      count(DISTINCT "appId") FILTER (
+        WHERE "payload"->>'scheduleChanged' = 'true' AND "nextAction" ~ '(High|Mid|Medium) Potential$'
+      )::int AS "scheduleUpdates"
     FROM "RadarRecapRow"
     WHERE "date" >= ${oldest}
     GROUP BY "date"
@@ -229,8 +249,6 @@ export async function listRadarRuns(limit = 60): Promise<RadarRunListItem[]> {
     const weekStart = periodWindowStart(date);
     const known = s ? s.testViable + s.monitor + s.ignore + s.drop : 0;
     const legacy = r.status === "imported";
-    // Cùng số với mục "Mới xuất hiện" / "Cập nhật lịch trình mới" của Executive Summary khi kỳ có section 3.
-    const section3 = (r.summary as RadarSummary | null)?.section3;
     return {
       date,
       periodCode: r.periodCode,
@@ -246,8 +264,9 @@ export async function listRadarRuns(limit = 60): Promise<RadarRunListItem[]> {
         drop: s?.drop ?? 0,
         other: Math.max(0, (s?.games ?? 0) - known),
       },
-      newGames: section3?.newEntries?.length ?? s?.newGames ?? 0,
-      scheduleUpdates: section3?.scheduleUpdates?.length ?? s?.scheduleUpdates ?? 0,
+      highPotential: s?.high ?? 0,
+      newGames: s?.newGames ?? 0,
+      scheduleUpdates: s?.scheduleUpdates ?? 0,
       hasDocx: legacy ? legacyDocx(r.summary) != null : r.status === "completed",
     };
   });
@@ -725,6 +744,7 @@ export async function runRadarRecap(opts: RunRadarOptions = {}): Promise<RunRada
       prevPeriodCode: prev?.periodCode ?? null,
       carryOver,
       testingThisWeek: await testingThisWeek(todayIso),
+      reportUrl: radarReportUrl(todayIso),
     });
     const view: RadarRecapView = { date: todayIso, periodCode, status: dryRun ? "dry-run" : "completed", summary, rows };
 
@@ -819,6 +839,7 @@ export async function republishRadarRecap(dateIso?: string, opts: { send?: boole
     prevPeriodCode: prev?.periodCode ?? null,
     carryOver: view.summary.carryOver ?? [],
     testingThisWeek: await testingThisWeek(view.date),
+    reportUrl: radarReportUrl(view.date),
   });
   await prismaApp.radarRecapRun.update({
     where: { date: dbDate(view.date) },

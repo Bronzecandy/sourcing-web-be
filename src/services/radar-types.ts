@@ -193,9 +193,52 @@ export interface RadarCarryOver {
   overviewUrl: string;
 }
 
+/** Một dòng Executive Summary trên web/SeaTalk: tên game + điều đáng chú ý trong kỳ. */
+export interface RadarDigestLine {
+  appId: number;
+  name: string;
+  url: string;
+  /** Next Action hiện tại; rỗng khi game đã rời Top 20. */
+  nextAction: string;
+  note: string;
+  /** NPH top-tier khớp `top-tier-publishers.json`. */
+  publisher: string | null;
+  /** Có thẻ ở mục Game Overview (High Potential). */
+  card: boolean;
+}
+
+export type RadarDigestGroupKey = "testable" | "schedule" | "new" | "upgraded" | "downgraded";
+
+export interface RadarDigestGroup {
+  key: RadarDigestGroupKey;
+  title: string;
+  lines: RadarDigestLine[];
+  /** Câu hiển thị khi nhóm trống (chỉ nhóm luôn hiện). */
+  empty?: string;
+}
+
+/**
+ * Báo cáo web + tin SeaTalk: mỗi game nhắc 1 lần ở nhóm quan trọng nhất,
+ * chỉ High Potential và game Mid/Medium có biến động (mới vào radar, lịch mới).
+ */
+export interface RadarDigest {
+  stats: Array<{ key: string; label: string; value: number }>;
+  internalTests: string[];
+  groups: RadarDigestGroup[];
+  /** High Potential chưa có biến động trong kỳ. */
+  quiet: RadarDigestLine[];
+  /** Tóm tắt các game còn lại theo nhãn. */
+  others: string | null;
+  /** Thẻ Game Overview: Test Viable - High → Monitor - High, điểm giảm dần. */
+  cards: Array<{ appId: number; badges: string[]; boards: string }>;
+  /** Bảng đếm, cột theo PRIORITY_ORDER. */
+  counts: { columns: string[]; rows: RadarCountRow[] };
+}
+
 export interface RadarSummary {
   periodCode: string;
   dateLabel: string;
+  /** Tin SeaTalk + nút "Copy để gửi" (Executive Summary ngắn). */
   copyText: string;
   executiveParagraphs: string[];
   testableNow: string[];
@@ -207,6 +250,7 @@ export interface RadarSummary {
   testingThisWeek?: string[];
   section3?: RadarSection3;
   carryOver?: RadarCarryOver[];
+  digest?: RadarDigest;
 }
 
 export function boardLabel(board: string): string {
@@ -235,4 +279,28 @@ export function needsScreening(action: string): boolean {
 export function actionRank(action: string): number {
   const idx = (NEXT_ACTIONS as readonly string[]).indexOf(action);
   return idx === -1 ? NEXT_ACTIONS.length : idx;
+}
+
+/** Thứ tự trình bày báo cáo web: theo mức potential trước, trong cùng mức Test Viable trước Monitor. */
+export const PRIORITY_ORDER = [
+  "Test Viable - High Potential",
+  "Monitor - High Potential",
+  "Test Viable - Medium Potential",
+  "Monitor - Mid Potential",
+  "Test Viable - Low Potential",
+  "Monitor - Low Potential",
+  "Temporary Ignore",
+  "Drop",
+] as const;
+
+export function priorityRank(action: string): number {
+  const idx = (PRIORITY_ORDER as readonly string[]).indexOf(action);
+  return idx === -1 ? PRIORITY_ORDER.length : idx;
+}
+
+export function potentialLevel(action: string): "high" | "mid" | "low" | null {
+  if (action.endsWith("High Potential")) return "high";
+  if (action.endsWith("Mid Potential") || action.endsWith("Medium Potential")) return "mid";
+  if (action.endsWith("Low Potential")) return "low";
+  return null;
 }

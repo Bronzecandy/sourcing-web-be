@@ -1,7 +1,7 @@
 import { Router } from "express";
 import type { AuthedRequest } from "../middleware/auth";
 import { requirePanelAdmin } from "../middleware/auth";
-import { getRadarRecap, listRadarRuns, radarFile, runRadarRecap } from "../services/radar-recap.service";
+import { getRadarReport, listRadarRuns, radarFile, runRadarRecap } from "../services/radar-recap.service";
 import { logDiagError } from "../utils/process-diagnostics";
 
 const router = Router();
@@ -10,7 +10,7 @@ let manualRun: Promise<unknown> | null = null;
 
 router.get("/latest", async (_req, res) => {
   try {
-    const data = await getRadarRecap();
+    const data = await getRadarReport();
     res.json({ success: true, data });
   } catch (err) {
     console.error("[radar] latest:", err);
@@ -48,7 +48,7 @@ router.get("/:date", async (req, res) => {
     return;
   }
   try {
-    res.json({ success: true, data: await getRadarRecap(req.params.date) });
+    res.json({ success: true, data: await getRadarReport(req.params.date) });
   } catch (err) {
     res.status(503).json({ success: false, error: err instanceof Error ? err.message : "Radar unavailable" });
   }

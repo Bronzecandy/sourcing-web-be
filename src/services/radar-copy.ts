@@ -1,3 +1,4 @@
+import { buildRadarDigest, digestCopyText } from "./radar-digest";
 import { matchPublisher, scaleLabel } from "./radar-rules";
 import { hasAnyTiming, hasFutureDate, scheduleSignature } from "./radar-schedule";
 import {
@@ -247,6 +248,8 @@ export function buildRadarSummary(input: {
   prevPeriodCode: string | null;
   carryOver: RadarCarryOver[];
   testingThisWeek: string[];
+  /** Link báo cáo web của kỳ, đưa vào tin SeaTalk. */
+  reportUrl?: string | null;
 }): RadarSummary {
   const { rows, todayIso } = input;
   const testableNow = playableNowGames(rows).map((r) => `${playableNowLine(r)}\n${r.overviewUrl}`);
@@ -268,141 +271,41 @@ export function buildRadarSummary(input: {
     section3: buildSection3(rows, input.prevRows, todayIso),
     carryOver: input.carryOver,
   };
-  summary.copyText = buildCopyText(summary, rows, todayIso);
-  return summary;
+  return withDigest(summary, rows, input.prevRows, todayIso, input.reportUrl ?? null);
 }
 
-function mdCell(value: string, max = 160): string {
-  const clean = value.replace(/\|/g, "/").replace(/\s+/g, " ").trim();
-  if (!clean) return "—";
-  return clean.length <= max ? clean : `${clean.slice(0, max - 1)}…`;
+/** Executive Summary trên web + tin SeaTalk, dựng từ các dòng của kỳ. */
+export function withDigest(
+  summary: RadarSummary,
+  rows: RadarRowPayload[],
+  prevRows: RadarRowPayload[],
+  todayIso: string,
+  reportUrl: string | null,
+): RadarSummary {
+  const digest = buildRadarDigest({ rows, prevRows, todayIso, testingThisWeek: summary.testingThisWeek ?? [] });
+  const copyText = digestCopyText(digest, {
+    periodCode: summary.periodCode,
+    dateLabel: summary.dateLabel,
+    previousPeriodCode: summary.previousPeriodCode,
+    reportUrl,
+  });
+  return { ...summary, digest, copyText };
 }
-
-function markdownTable(headers: string[], body: string[][]): string {
-  const head = `| ${headers.map((h) => mdCell(h, 40)).join(" | ")} |`;
-  const rule = `| ${headers.map(() => "---").join(" | ")} |`;
-  const lines = body.map((row) => `| ${row.map((cell) => mdCell(cell)).join(" | ")} |`);
-  return [head, rule, ...lines].join("\n");
-}
-
-function bulletLine(b: RadarBullet): string {
-  const name = b.nameEn ? `${b.nameCn} (${b.nameEn})` : b.nameCn;
-  return `- ${b.isNew ? "**MỚI —** " : ""}**${name}**${b.text}`;
-}
-
-function screeningShort(row: RadarRowPayload): string {
-  if (!row.screeningUrl) return "AI: chưa có";
-  return row.analysisScore != null ? `AI ${Math.round(row.analysisScore)}` : "AI: có";
-}
-
-function overviewLine(row: RadarRowPayload): string[] {
-  const parts = [
-    `Điểm ${row.score.toFixed(1)}`,
-    screeningShort(row),
-    row.genre || "—",
-    row.publisher ? `NPH **${row.publisher}**` : "",
-    row.releaseLabel || "",
-  ].filter(Boolean);
-  return [`- **${displayName(row)}** — ${parts.join(" · ")}`, `  Lý do: ${reasonDetail(row)}`, `  ${row.overviewUrl}`];
-}
-
-export function buildCopyText(summary: RadarSummary, rows: RadarRowPayload[], todayIso: string): string {
-  const lines: string[] = [
-    "**GAME RADAR & TESTING RECAP**",
-    `Executive Summary — Kỳ ${summary.periodCode} (${summary.dateLabel})`,
-    "",
-    "**1. Overview**",
-    "",
-    "**Số liệu nhanh:**",
-  ];
-  if (summary.testingThisWeek && summary.testingThisWeek.length > 0) {
-    lines.push("**Game đang test trong tuần:**", ...summary.testingThisWeek.map((t) => `- ${t}`));
-  }
-  const now = playableNowGames(rows);
-  lines.push("**Game hiện có thể test:**");
-  if (now.length === 0) lines.push("- Không có game nào đang mở test/đã ra mắt tại thời điểm chốt kỳ.");
-  for (const r of now) lines.push(`- ${playableNowLine(r)}`);
-  lines.push(`**Game Monitor chưa có thời gian:** ${summary.monitorNoDateCount}`, "");
-
-  lines.push(
-    "**Bảng đếm số lượng game theo Next Action:**",
-    "",
-    markdownTable(
-      ["Bảng", ...COUNT_KEYS],
-      summary.counts.map((c) => [c.label, ...COUNT_KEYS.map((k) => String(c.counts[k] ?? 0))]),
-    ),
-    "",
-    "**Bảng tổng quan — toàn bộ game đang ở Test Viable / Monitor trong kỳ:**",
-    "",
-  );
-  const overview = overviewGames(rows);
-  lines.push(
-    overview.length === 0
-      ? "Không có game Test Viable hoặc Monitor trong kỳ này."
-      : markdownTable(["Tên game", "Next Action"], overview.map((r) => [displayName(r), r.nextAction])),
-  );
-
-  lines.push("", "**2. Game Overview**", "", "**Game hiện có thể test:**");
-  if (now.length === 0) lines.push("- Không có");
-  for (const r of now) lines.push(...overviewLine(r));
-  const upcoming = upcomingGames(rows, todayIso);
-  lines.push("", "**Game sắp có thể test:**");
-  if (upcoming.length === 0) lines.push("- Không có");
-  for (const r of upcoming) lines.push(...overviewLine(r));
-
-  const s3 = summary.section3;
-  lines.push("", "**3. Executive Summary**", "", "**Biến động đáng chú ý trong tuần:**", "Mới xuất hiện:");
-  if (!s3 || s3.newEntries.length === 0) lines.push("- Không có game mới cần Monitor trong kỳ này.");
-  else lines.push(...s3.newEntries.map(bulletLine));
-  lines.push("Cập nhật lịch trình mới:");
-  if (!s3 || s3.scheduleUpdates.length === 0) lines.push("- Không có lịch ra mắt/test mới trong kỳ này.");
-  else lines.push(...s3.scheduleUpdates.map(bulletLine));
-  lines.push("", "**Game có thể test:**");
-  if (!s3 || s3.testable.length === 0) lines.push("- Không có game nào ở mức Test Viable trong kỳ này.");
-  else lines.push(...s3.testable.map(bulletLine));
-  lines.push("", "**Thông tin game thị trường mới**");
-  if (!s3 || s3.market.length === 0) lines.push("- Không có game của NPH lớn trong kỳ này.");
-  for (const block of s3?.market ?? []) {
-    lines.push(`**${block.publisher}**`, ...block.items.map(bulletLine));
-  }
-  lines.push(
-    "",
-    `File đính kèm: Executive Summary - Radar ${summary.periodCode}.docx và Game Radar Recap ${summary.periodCode}.xlsx.`,
-  );
-  return lines.join("\n").trim() + "\n";
-}
-
-const SECTION_MARKERS = ["**2. Game Overview**", "**3. Executive Summary**"];
 
 export function buildSeatalkMessages(copyText: string, limit = 3900): string[] {
-  const parts: string[] = [];
-  let rest = copyText;
-  for (const marker of SECTION_MARKERS) {
-    const idx = rest.indexOf(marker);
-    if (idx <= 0) continue;
-    parts.push(rest.slice(0, idx).trim());
-    rest = rest.slice(idx);
-  }
-  parts.push(rest.trim());
-
+  const text = copyText.trim();
+  if (text.length <= limit) return text ? [text] : [];
   const chunks: string[] = [];
-  for (const part of parts) {
-    if (!part) continue;
-    if (part.length <= limit) {
-      chunks.push(part);
-      continue;
+  let buf = "";
+  for (const line of text.split("\n")) {
+    const next = buf ? `${buf}\n${line}` : line;
+    if (next.length > limit) {
+      if (buf) chunks.push(buf);
+      buf = line.length <= limit ? line : `${line.slice(0, limit - 10)}…`;
+    } else {
+      buf = next;
     }
-    let buf = "";
-    for (const line of part.split("\n")) {
-      const next = buf ? `${buf}\n${line}` : line;
-      if (next.length > limit) {
-        if (buf) chunks.push(buf);
-        buf = line.length <= limit ? line : `${line.slice(0, limit - 10)}…`;
-      } else {
-        buf = next;
-      }
-    }
-    if (buf) chunks.push(buf);
   }
-  return chunks.filter(Boolean);
+  if (buf) chunks.push(buf);
+  return chunks;
 }
