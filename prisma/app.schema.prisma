@@ -317,6 +317,7 @@ model TestCampaign {
   id            String           @id @default(cuid())
   gameName      String
   appId         Int?
+  iconUrl       String?
   genre         String?
   platform      String?
   mainTags      String[]
@@ -356,18 +357,30 @@ model TestAssignment {
   @@index([userId])
 }
 
-/// Benefit đã dùng (cột Used_benefit cũ); benefit có = round(giờ test hoàn thành / 3).
+/// Lượt đổi quà bằng benefit (benefit có = round(giờ test hoàn thành / 3)). Tester tự gửi yêu cầu, PIC trao quà.
 model BenefitRedemption {
-  id        String   @id @default(cuid())
-  userId    String
-  amount    Int
-  item      String
-  note      String?
-  createdBy String?
-  createdAt DateTime @default(now()) @db.Timestamptz(6)
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id          String    @id @default(cuid())
+  userId      String
+  amount      Int
+  item        String
+  note        String?
+  createdBy   String?
+  createdAt   DateTime  @default(now()) @db.Timestamptz(6)
+  /// pending (chờ trao) | fulfilled (đã trao) | rejected | cancelled — pending + fulfilled trừ vào benefit
+  status      String    @default("fulfilled")
+  /// Vị trí tier/phần quà trong benefits.json lúc đổi
+  tier        Int?
+  game        String?
+  reward      String?
+  /// Tài khoản nhận quà tester nhập (UID, tên nhân vật, server…)
+  gameAccount String?
+  adminNote   String?
+  processedBy String?
+  processedAt DateTime? @db.Timestamptz(6)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([status, createdAt])
 }
 
 /// Snapshot TapTap hằng ngày của game trong 3 bảng Radar — so lịch ra mắt/test giữa 2 kỳ.

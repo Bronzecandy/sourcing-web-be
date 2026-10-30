@@ -3,16 +3,16 @@ import type { AuthedRequest } from "../middleware/auth";
 import { requireAuth } from "../middleware/auth";
 import {
   TesterAdminError,
-  addRedemption,
   adminMeta,
   assignTesters,
   campaignDetail,
   createCampaign,
   deleteCampaign,
-  deleteRedemption,
   exportTesterWorkbook,
   listCampaigns,
+  listRedemptions,
   listTesters,
+  processRedemption,
   recommendTesters,
   removeAssignment,
   rescoreTester,
@@ -22,6 +22,7 @@ import {
   updateCampaign,
   updateTester,
 } from "../services/tester-admin.service";
+import { searchCampaignGames } from "../services/tester-taptap.service";
 
 /** /api/tester/admin — apiPermissionGuard đã chặn theo quyền tester.manage. */
 const router = Router();
@@ -73,8 +74,12 @@ router.post("/campaigns/:id/assignments", (req, res) =>
 router.patch("/assignments/:id", (req, res) => handle(res, () => updateAssignment(req.params.id, req.body ?? {})));
 router.delete("/assignments/:id", (req, res) => handle(res, () => removeAssignment(req.params.id)));
 
-router.post("/benefits", (req: AuthedRequest, res) => handle(res, () => addRedemption(req.body ?? {}, req.authUser!.email)));
-router.delete("/benefits/:id", (req, res) => handle(res, () => deleteRedemption(req.params.id)));
+router.get("/taptap-search", (req, res) => handle(res, () => searchCampaignGames(String(req.query.q ?? ""))));
+
+router.get("/redemptions", (req, res) => handle(res, () => listRedemptions(String(req.query.status ?? "pending"))));
+router.patch("/redemptions/:id", (req: AuthedRequest, res) =>
+  handle(res, () => processRedemption(String(req.params.id), req.body ?? {}, req.authUser!.email)),
+);
 
 router.get("/survey", (_req, res) => handle(res, () => surveyReport()));
 

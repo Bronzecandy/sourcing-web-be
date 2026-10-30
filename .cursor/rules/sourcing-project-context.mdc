@@ -35,7 +35,7 @@ Tính năng chính:
 - `src/routes/` — `game`, `ranking`, `analysis`, `libraries`, `translate`, `radar`, `tester`, `tester-admin`
 - `src/services/` — logic: `game`, `ranking`, `ai-analysis`, `libraries`, `taptap-client`, `steam-client`, `radar-*`, `tester-*`
 - `data/radar/` — prompt trích dữ kiện, `top-tier-publishers.json`, `known-games.json` (tên EN/NPH/genre từ report cũ)
-- `data/tester/` — `questionnaire.json` (format survey-toolkit), `mapping.json`, `genres.json`, `scoring.json`, `workload.json`, `benefits.json`, `game-library.json` (sinh bằng `npm run tester:extract-config`)
+- `data/tester/` — `questionnaire.json` (format survey-toolkit), `mapping.json`, `genres.json`, `scoring.json`, `workload.json`, `benefits.json`, `game-library.json` (sinh bằng `npm run tester:extract-config`); sửa tay, không bị extract ghi đè: `redeem-rules.json` (luật đổi quà theo tier: `cost`, `monthlyLimit`, `requirement`), `taptap-tags.json` (tag TapTap → genre key tester)
 - `src/precompute.ts` + `src/utils/cache.ts` — cache warmup; cron 10:15 `Asia/Ho_Chi_Minh`
 - `prisma/schema.prisma` — `AppRank`, `AppReview` (field `raw` = JSON TapTap)
 - `data/libraries/*.json` — tier (studio, genre, game-size, community-size, system-requirement, …), `pending-additions.json`
@@ -54,7 +54,7 @@ Tính năng chính:
 
 ### Proxy (`taptap-proxy`)
 
-- `index.js` — Express; BE gọi `GET {TAPTAP_PROXY_URL}/api/full/:appId`, `/api/detail/:appId`, `/api/official-posts/:appId` khi env proxy được set
+- `index.js` — Express; BE gọi `GET {TAPTAP_PROXY_URL}/api/full/:appId`, `/api/detail/:appId`, `/api/official-posts/:appId`, `/api/search?kw=` khi env proxy được set
 - FE **không** gọi proxy; chỉ gọi BE
 
 ## API & phân tách trách nhiệm
@@ -117,6 +117,6 @@ Tối ưu tốc độ: disk cache `data/response-cache/` (Distribution overview+
 
 Game Radar Recap + Executive Summary chạy **mỗi tuần** (Thứ Hai, chạy bù nếu lỗi): LLM chỉ trích dữ kiện, `radar-rules.ts` áp rule skill game-radar-recap (Drop → tier điểm/quy mô → barrier ép Low → ra mắt/open beta = Test Viable → Monitor kể cả chưa có ngày → Temporary Ignore); New Launch chỉ game ra mắt ≤ 60 ngày; report docx theo `report_template.js` (3 phần, "Cập nhật lịch trình mới" từ snapshot), xlsx 3 sheet + cột chỉ số; "kỳ trước" để so sánh = báo cáo completed gần nhất trước tuần hiện tại; web `/radar` có dải lịch sử theo tuần (`?date=` mở kỳ), admin chạy tay `POST /api/radar/run`. 15 kỳ làm tay 06–10/2026 nhập từ `Game Radar Recap.xlsx` (`python scripts/radar-legacy-extract.py` → `data/radar/legacy/` → `npm run radar:import-legacy`, status `imported`, kèm docx gốc 0918/0929/1001).
 
-Tester Program `/tester`: landing công khai (API `GET /api/tester/public`), nút Đăng nhập trên header → Google `?portal=tester` → `/tester/profile`; bảng hỏi 26 câu từ tab Questionnaire (CONNECT Q8 → Q9–Q23), bắt đầu từ Hồ sơ; chấm hardcore 0–100/dòng game (port `Hardcore Score.gs`, cache `TesterScoreCache`). `TestCampaign.appId` đồng bộ vào Radar (đang test trong tuần, plan test, kết quả không phù hợp → Drop).
+Tester Program `/tester`: landing công khai (API `GET /api/tester/public`), nút Đăng nhập trên header → Google `?portal=tester` → `/tester/profile`; bảng hỏi 26 câu từ tab Questionnaire (CONNECT Q8 → Q9–Q23), bắt đầu từ Hồ sơ; chấm hardcore 0–100/dòng game (port `Hardcore Score.gs`, cache `TesterScoreCache`). `TestCampaign.appId` đồng bộ vào Radar (đang test trong tuần, plan test, kết quả không phù hợp → Drop). Tạo đợt test: chọn game TapTap (`GET /api/tester/admin/taptap-search?q=` tên/link/ID, qua proxy) → tự điền tên (EN nếu Radar biết), appId, `iconUrl`, genre, platform, main/secondary tag (`tester-taptap.service.ts`). Benefit: tester tự đổi quà ở `/tester/benefits` (`POST /api/tester/benefits/redeem` với `tier`, `item`, `option` khi quà có "HOẶC", `gameAccount`; `POST /api/tester/benefits/:id/cancel`) → `BenefitRedemption` `pending` trừ benefit ngay; PIC xử lý ở tab Benefit tester (`GET /api/tester/admin/redemptions?status=`, `PATCH /api/tester/admin/redemptions/:id` → `fulfilled` | `rejected` + lý do, hoàn benefit). Tier tích cực: ≥3 game hoặc ≥10 giờ hoàn thành trong tháng ICT, tối đa 1 lần/tháng.
 
 Nhiều role: `User.roles UserRole[]` = tối đa 1 role Sourcing (SUPER_ADMIN/ADMIN/STAFF/USER) + `TESTER`; DTO có `roles` + `role` (role cao nhất, `TESTER` = chỉ là tester) + `isTester`. Đăng ký qua `/tester` → `[TESTER]`; gửi khảo sát tự thêm `TESTER`. Quản lý tester nằm trong admin Sourcing `/admin/users` (lọc Tất cả / Sourcing / Tester / Chờ duyệt, drawer có tab Hồ sơ tester) + tab Đợt test / Benefit tester / Bảng hỏi tester; Admin tự có `tester.manage`; Staff chỉ có `tester.manage` dùng `/admin/testers`. PATCH `/api/admin/users/:id` nhận `{ roles }` (vẫn nhận `role`).

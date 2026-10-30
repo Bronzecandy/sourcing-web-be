@@ -3,7 +3,7 @@ import { prismaApp } from "../utils/prisma-app";
 import { genreLabel, testerConfig } from "./tester-config";
 import { queueTesterScoring } from "./tester-scoring.service";
 import { getActiveSurvey, validateQuestionnaire, type SurveyAnswers } from "./tester-survey.service";
-import { assignmentHours, statsFor } from "./tester.service";
+import { assignmentHours, redemptionTotals, statsFor } from "./tester.service";
 
 const PLATFORMS = new Set(["MB", "PC", "CS"]);
 const STATUSES = new Set(["planned", "running", "done", "cancelled"]);
@@ -40,6 +40,11 @@ function parseAppId(v: unknown): number | null | undefined {
   return n;
 }
 
+function iconUrl(v: unknown): string | null {
+  const s = typeof v === "string" ? v.trim() : "";
+  return /^https:\/\/[^\s]+$/.test(s) && s.length <= 500 ? s : null;
+}
+
 function tags(v: unknown): string[] | undefined {
   if (v === undefined) return undefined;
   const keys = new Set(testerConfig.genres().map((g) => g.key));
@@ -69,8 +74,16 @@ const ROW_USER_SELECT = {
   avatarUrl: true,
   roles: true,
   testAssignments: { include: { campaign: true } },
-  benefitRedemptions: { select: { amount: true } },
+  benefitRedemptions: { select: { amount: true, status: true } },
 } as const;
+
+function rowStats(user: {
+  testAssignments: Parameters<typeof statsFor>[0];
+  benefitRedemptions: Array<{ amount: number; status: string }>;
+}) {
+  const totals = redemptionTotals(user.benefitRedemptions);
+  return statsFor(user.testAssignments, totals.used, totals.pending);
+}
 
 interface TesterRow {
   userId: string;
@@ -125,10 +138,7 @@ async function testerRows(userIds?: string[]): Promise<TesterRow[]> {
     active: p.active,
     scoringStatus: p.scoringStatus,
     scores: Object.fromEntries(p.genreScores.map((s) => [s.genre, s.finalScore])),
-    stats: statsFor(
-      p.user.testAssignments,
-      p.user.benefitRedemptions.reduce((sum, r) => sum + r.amount, 0),
-    ),
+    stats: rowStats(p.user),
     submittedAt: p.user.surveyResponses[0]?.submittedAt.toISOString() ?? null,
   }));
 }
@@ -161,10 +171,7 @@ async function noSurveyRows(userIds?: string[]): Promise<TesterRow[]> {
     active: true,
     scoringStatus: "no_survey",
     scores: {},
-    stats: statsFor(
-      u.testAssignments,
-      u.benefitRedemptions.reduce((sum, r) => sum + r.amount, 0),
-    ),
+    stats: rowStats(u),
     submittedAt: null,
   }));
 }
@@ -227,7 +234,11 @@ export async function testerDetail(userId: string) {
       amount: r.amount,
       item: r.item,
       note: r.note,
+      status: r.status,
+      gameAccount: r.gameAccount,
+      adminNote: r.adminNote,
       createdAt: r.createdAt.toISOString(),
+      processedAt: r.processedAt?.toISOString() ?? null,
     })),
   };
 }
@@ -251,6 +262,7 @@ interface CampaignRow {
   id: string;
   gameName: string;
   appId: number | null;
+  iconUrl: string | null;
   genre: string | null;
   platform: string | null;
   mainTags: string[];
@@ -277,6 +289,7 @@ function campaignDto(c: CampaignRow) {
     id: c.id,
     gameName: c.gameName,
     appId: c.appId,
+    iconUrl: c.iconUrl,
     genre: c.genre,
     platform: c.platform,
     mainTags: c.mainTags,
@@ -331,6 +344,7 @@ function campaignData(body: Record<string, unknown>) {
   return {
     ...(body.gameName !== undefined ? { gameName: String(body.gameName).trim() } : {}),
     ...(body.appId !== undefined ? { appId: parseAppId(body.appId) } : {}),
+    ...(body.iconUrl !== undefined ? { iconUrl: iconUrl(body.iconUrl) } : {}),
     ...(body.genre !== undefined ? { genre: body.genre ? String(body.genre).trim() : null } : {}),
     ...(platform !== undefined ? { platform } : {}),
     ...(mainTags !== undefined ? { mainTags } : {}),
@@ -449,22 +463,60 @@ export async function removeAssignment(id: string) {
   return { deleted: true };
 }
 
-export async function addRedemption(body: Record<string, unknown>, actorEmail: string) {
-  const userId = String(body.userId ?? "");
-  const amount = Number(body.amount);
-  const item = String(body.item ?? "").trim();
-  if (!userId || !Number.isInteger(amount) || amount <= 0 || !item) {
-    throw new TesterAdminError("Cần tester, số benefit (số nguyên dương) và phần quà");
-  }
-  const r = await prismaApp.benefitRedemption.create({
-    data: { userId, amount, item, note: body.note ? String(body.note) : null, createdBy: actorEmail },
-  });
-  return { id: r.id };
+const REDEMPTION_FILTERS: Record<string, string[] | null> = {
+  pending: ["pending"],
+  fulfilled: ["fulfilled"],
+  closed: ["rejected", "cancelled"],
+  all: null,
+};
+
+/** Yêu cầu đổi quà của tester (mặc định: đang chờ trao). */
+export async function listRedemptions(filter = "pending") {
+  const statuses = REDEMPTION_FILTERS[filter] ?? REDEMPTION_FILTERS.pending!;
+  const [rows, counts] = await Promise.all([
+    prismaApp.benefitRedemption.findMany({
+      where: statuses ? { status: { in: statuses } } : undefined,
+      orderBy: { createdAt: statuses?.includes("pending") ? "asc" : "desc" },
+      take: 300,
+      include: { user: { select: { email: true, name: true, avatarUrl: true, testerProfile: { select: { name: true } } } } },
+    }),
+    prismaApp.benefitRedemption.groupBy({ by: ["status"], _count: { _all: true } }),
+  ]);
+  return {
+    counts: Object.fromEntries(counts.map((c) => [c.status, c._count._all])) as Record<string, number>,
+    items: rows.map((r) => ({
+      id: r.id,
+      userId: r.userId,
+      name: r.user.testerProfile?.name ?? r.user.name ?? r.user.email,
+      email: r.user.email,
+      avatarUrl: r.user.avatarUrl,
+      amount: r.amount,
+      item: r.item,
+      game: r.game,
+      reward: r.reward,
+      gameAccount: r.gameAccount,
+      note: r.note,
+      status: r.status,
+      adminNote: r.adminNote,
+      createdAt: r.createdAt.toISOString(),
+      processedBy: r.processedBy,
+      processedAt: r.processedAt?.toISOString() ?? null,
+    })),
+  };
 }
 
-export async function deleteRedemption(id: string) {
-  await prismaApp.benefitRedemption.delete({ where: { id } });
-  return { deleted: true };
+/** PIC xử lý yêu cầu: đã trao quà hoặc từ chối (benefit được hoàn lại). */
+export async function processRedemption(id: string, body: { status?: unknown; adminNote?: unknown }, actorEmail: string) {
+  const status = body.status === "fulfilled" || body.status === "rejected" ? body.status : null;
+  if (!status) throw new TesterAdminError("Trạng thái phải là fulfilled hoặc rejected");
+  const adminNote = String(body.adminNote ?? "").trim().slice(0, 300) || null;
+  if (status === "rejected" && !adminNote) throw new TesterAdminError("Nhập lý do từ chối để tester biết");
+  const r = await prismaApp.benefitRedemption.updateMany({
+    where: { id, status: "pending" },
+    data: { status, adminNote, processedBy: actorEmail, processedAt: new Date() },
+  });
+  if (r.count === 0) throw new TesterAdminError("Yêu cầu đã được xử lý hoặc không tồn tại", 409);
+  return { id, status };
 }
 
 export async function surveyReport() {
@@ -483,7 +535,7 @@ export async function exportTesterWorkbook(): Promise<Buffer> {
           select: {
             email: true,
             testAssignments: { include: { campaign: true } },
-            benefitRedemptions: { select: { amount: true } },
+            benefitRedemptions: { select: { amount: true, status: true } },
           },
         },
       },
@@ -570,8 +622,7 @@ export async function exportTesterWorkbook(): Promise<Buffer> {
   const test = book.addWorksheet("Test Data");
   test.addRow(["Email", "Tên", "Cur_test_num", "Cur_test_game", "All_game_tested", "All_test_hour", "All_benefit (3 hour = 1 benefit)", "Used_benefit", "Cur_benefit"]);
   for (const p of profiles) {
-    const used = p.user.benefitRedemptions.reduce((sum, r) => sum + r.amount, 0);
-    const s = statsFor(p.user.testAssignments, used);
+    const s = rowStats(p.user);
     test.addRow([
       p.user.email,
       p.name,

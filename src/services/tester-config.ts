@@ -58,6 +58,21 @@ export interface BenefitsConfig {
   teamRequests: Array<{ team: string; items: string[] }>;
 }
 
+export interface RedeemTierRule {
+  cost: number;
+  monthlyLimit: number | null;
+  requirement: { minGamesPerMonth?: number; minHoursPerMonth?: number } | null;
+}
+
+export interface RedeemRules {
+  tiers: RedeemTierRule[];
+}
+
+export interface TapTapTagMap {
+  generic: string[];
+  genres: Record<string, string[]>;
+}
+
 export interface ScoringConfig {
   volume: { hours: Array<[number, number]>; matches: Array<[number, number]>; vagueHours: number };
   rank: { levels: Array<{ score: number; label: string }>; games: Array<{ game: string; tiers: string[] }> };
@@ -90,6 +105,8 @@ export const testerConfig = {
   mapping: () => load<TesterMapping>("mapping.json"),
   workload: () => load<WorkloadConfig>("workload.json"),
   benefits: () => load<BenefitsConfig>("benefits.json"),
+  redeemRules: () => load<RedeemRules>("redeem-rules.json"),
+  taptapTags: () => load<TapTapTagMap>("taptap-tags.json"),
   scoring: () => load<ScoringConfig>("scoring.json"),
   library: () => load<LibrarySeed[]>("game-library.json"),
 };

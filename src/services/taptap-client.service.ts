@@ -111,6 +111,55 @@ export async function fetchAppDetailRaw(appId: number): Promise<Record<string, u
   }
 }
 
+/** Một kết quả tìm game trên TapTap (cùng dạng với route /api/search của taptap-proxy). */
+export interface TapTapSearchApp {
+  id: number;
+  title: string;
+  iconUrl: string | null;
+  tags: string[];
+  developers: Array<{ name: string; type: string }>;
+  /** android | ios | pc */
+  platforms: string[];
+  console: boolean;
+  rating: string | null;
+  reserveCount: number | null;
+  fansCount: number | null;
+  downloads: number | null;
+}
+
+export type TapTapRawApp = {
+  id: number;
+  title?: string;
+  icon?: { url?: string; medium_url?: string };
+  tags?: Array<{ value?: string }>;
+  developers?: Array<{ name?: string; type?: string }>;
+  supported_platforms?: Array<{ key?: string }>;
+  is_console_game?: boolean;
+  stat?: { rating?: { score?: string }; reserve_count?: number; fans_count?: number; hits_total?: number };
+};
+
+export function normalizeTapTapSearchApp(app: TapTapRawApp): TapTapSearchApp {
+  return {
+    id: app.id,
+    title: app.title ?? "",
+    iconUrl: app.icon?.url ?? app.icon?.medium_url ?? null,
+    tags: (app.tags ?? []).map((t) => t.value ?? "").filter(Boolean),
+    developers: (app.developers ?? []).map((d) => ({ name: d.name ?? "", type: d.type ?? "" })).filter((d) => d.name),
+    platforms: (app.supported_platforms ?? []).map((p) => p.key ?? "").filter(Boolean),
+    console: Boolean(app.is_console_game),
+    rating: app.stat?.rating?.score ?? null,
+    reserveCount: app.stat?.reserve_count ?? null,
+    fansCount: app.stat?.fans_count ?? null,
+    downloads: app.stat?.hits_total ?? null,
+  };
+}
+
+/** Tìm game theo từ khóa (app-search/v1/by-keyword) — gọi thẳng TapTap. */
+export async function searchTapTapAppsDirect(kw: string, limit = 10): Promise<TapTapSearchApp[]> {
+  const data = (await taptapGet("app-search/v1/by-keyword", { kw, from: 0, limit })) as { list?: TapTapRawApp[] };
+  return (data.list ?? []).map(normalizeTapTapSearchApp);
+}
+
 export interface TapTapOfficialPost {
   title: string;
   summary: string;

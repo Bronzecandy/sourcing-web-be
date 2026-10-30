@@ -1,0 +1,7 @@
+{
+  "_note": "Luật tester tự đổi quà, theo thứ tự tier trong benefits.json. cost = số benefit mỗi lần đổi; monthlyLimit = số lần đổi tối đa mỗi tháng (null = không giới hạn); requirement = điều kiện hoạt động trong tháng (game test xong hoặc giờ test xong, đạt một trong hai là đủ). File này không sinh từ sheet.",
+  "tiers": [
+    { "cost": 1, "monthlyLimit": null, "requirement": null },
+    { "cost": 1, "monthlyLimit": 1, "requirement": { "minGamesPerMonth": 3, "minHoursPerMonth": 10 } }
+  ]
+}

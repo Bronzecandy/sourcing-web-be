@@ -1,7 +1,11 @@
 import { fetchWithLongConnect } from "./fetch-external";
 import { normalizeProxyBaseUrl, parseProxyResponseBody } from "./proxy-json";
-import { fetchOfficialPostsDirect, pickTapTapDetailFromProxyBundle } from "../services/taptap-client.service";
-import type { ExternalReview, TapTapOfficialPost } from "../services/taptap-client.service";
+import {
+  fetchOfficialPostsDirect,
+  pickTapTapDetailFromProxyBundle,
+  searchTapTapAppsDirect,
+} from "../services/taptap-client.service";
+import type { ExternalReview, TapTapOfficialPost, TapTapSearchApp } from "../services/taptap-client.service";
 
 const PROXY_BASE = normalizeProxyBaseUrl(process.env.TAPTAP_PROXY_URL || "");
 const PROXY_KEY = process.env.TAPTAP_PROXY_KEY || "";
@@ -124,6 +128,27 @@ export async function fetchTapTapOfficialPosts(appId: number, limit = 10): Promi
   } catch {
     return [];
   }
+}
+
+/** Tìm game TapTap theo từ khóa: proxy trước (IP BE bị chặn), rồi gọi thẳng. */
+export async function searchTapTapApps(kw: string, limit = 10): Promise<TapTapSearchApp[]> {
+  if (useTapTapProxy() && PROXY_BASE) {
+    try {
+      const qs = new URLSearchParams({ kw, limit: String(limit) });
+      const res = await fetchWithLongConnect(`${PROXY_BASE}/api/search?${qs}`, {
+        headers: proxyHeaders(),
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (res.ok) {
+        const json = parseProxyResponseBody(await res.text(), "TapTap proxy search");
+        const data = json.data as { list?: TapTapSearchApp[] } | undefined;
+        if (json.success && Array.isArray(data?.list)) return data.list;
+      }
+    } catch {
+      // fall through to direct
+    }
+  }
+  return searchTapTapAppsDirect(kw, limit);
 }
 
 export function formatFetchError(err: unknown): string {

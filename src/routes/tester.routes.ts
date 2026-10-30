@@ -1,8 +1,17 @@
-import { Router } from "express";
+import { Router, type Response } from "express";
 import type { AuthedRequest } from "../middleware/auth";
 import { requireAuth } from "../middleware/auth";
 import { getActiveSurvey, SurveyValidationError } from "../services/tester-survey.service";
-import { getTesterMe, myBenefits, myTests, submitTesterSurvey, testerPublicInfo } from "../services/tester.service";
+import {
+  BenefitRedeemError,
+  cancelRedemption,
+  getTesterMe,
+  myBenefits,
+  myTests,
+  redeemBenefit,
+  submitTesterSurvey,
+  testerPublicInfo,
+} from "../services/tester.service";
 
 const router = Router();
 
@@ -65,5 +74,26 @@ router.get("/benefits", async (req: AuthedRequest, res) => {
     res.status(500).json({ success: false, error: "Không tải được benefit" });
   }
 });
+
+async function redeemRoute(res: Response, fn: () => Promise<unknown>): Promise<void> {
+  try {
+    res.json({ success: true, data: await fn() });
+  } catch (err) {
+    if (err instanceof BenefitRedeemError) {
+      res.status(err.status).json({ success: false, error: err.message });
+      return;
+    }
+    console.error("[tester] redeem:", err);
+    res.status(500).json({ success: false, error: "Không đổi được quà, thử lại sau" });
+  }
+}
+
+router.post("/benefits/redeem", (req: AuthedRequest, res) =>
+  redeemRoute(res, () => redeemBenefit(req.authUser!, req.body ?? {})),
+);
+
+router.post("/benefits/:id/cancel", (req: AuthedRequest, res) =>
+  redeemRoute(res, () => cancelRedemption(req.authUser!, String(req.params.id))),
+);
 
 export default router;

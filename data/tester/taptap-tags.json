@@ -1,0 +1,20 @@
+{
+  "_note": "Tag TapTap (tiếng Trung) → dòng game tester, dùng gợi ý Main/Secondary tag khi chọn game cho đợt test. Tag trong 'generic' chỉ dùng khi game không có tag cụ thể hơn. File này không sinh từ sheet.",
+  "generic": ["动作", "角色扮演", "冒险", "开放世界"],
+  "genres": {
+    "MOBA": ["MOBA", "多人在线战术竞技"],
+    "FPS": ["射击", "FPS", "TPS", "第一人称射击", "第三人称射击", "枪战", "战术射击"],
+    "BR": ["大逃杀", "吃鸡", "战术竞技"],
+    "Autochess": ["自走棋"],
+    "CardRPG": ["卡牌", "卡牌RPG", "放置", "挂机", "养成", "回合制", "卡组构筑", "DBG"],
+    "ARPG": ["ARPG", "动作角色扮演", "魂系", "魂类", "动作冒险", "共斗", "动作", "角色扮演", "冒险", "开放世界"],
+    "MMORPG": ["MMORPG", "MMO", "大型多人在线"],
+    "Sport": ["体育", "足球", "篮球", "赛车", "竞速", "台球", "网球", "高尔夫", "棒球", "排球", "乒乓球"],
+    "Extraction": ["搜打撤", "撤离", "搜刮"],
+    "SLG": ["策略", "SLG", "战争策略", "战略", "塔防", "4X", "战棋"],
+    "Simulator": ["模拟", "模拟经营", "经营", "农场", "种田", "生活模拟", "建造经营"],
+    "Casual": ["休闲", "益智", "消除", "三消", "解谜", "跑酷", "超休闲", "合成"],
+    "Sandbox": ["沙盒", "建造", "生存建造"],
+    "Party": ["派对", "聚会", "社交推理", "狼人杀", "桌游"]
+  }
+}
