@@ -1,11 +1,14 @@
 /**
- * Steam Store public APIs (no Steamworks key): appreviews pagination + appdetails metadata.
- * @see https://partner.steamgames.com/doc/store/getreviews (partner variant differs; we use community endpoint)
+ * Steam public APIs (no Steamworks key): appdetails cho metadata,
+ * IUserReviewsService/GetAppReviews cho review. Endpoint cũ
+ * store.steampowered.com/appreviews bị tắt 22/10/2026 (302 về trang chủ HTML).
+ * @see https://partner.steamgames.com/doc/webapi/IUserReviewsService
  */
 
 import type { ExternalReview } from "./taptap-client.service";
 
 const STEAM_STORE_BASE = "https://store.steampowered.com";
+const STEAM_REVIEWS_API = "https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/";
 const USER_AGENT =
   process.env.STEAM_USER_AGENT ||
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36";
@@ -53,6 +56,9 @@ function stripHtml(html: string): string {
     .trim();
 }
 
+/** Trang HTML (redirect, age gate) không phải lỗi tạm thời — thử lại cũng ra HTML. */
+class SteamHtmlResponseError extends Error {}
+
 async function fetchJsonWithRetry(url: string): Promise<unknown> {
   let lastErr = "";
   for (let attempt = 1; attempt <= FETCH_RETRIES; attempt++) {
@@ -62,13 +68,15 @@ async function fetchJsonWithRetry(url: string): Promise<unknown> {
         redirect: "follow",
       });
       const body = await res.text();
-      if (res.ok) {
-        return JSON.parse(body) as unknown;
+      if (body.trimStart().startsWith("<")) {
+        throw new SteamHtmlResponseError(`Steam trả về HTML (HTTP ${res.status}) thay vì JSON`);
       }
+      if (res.ok) return JSON.parse(body) as unknown;
       lastErr = `HTTP ${res.status}: ${body.slice(0, 400)}`;
       const backoff = RETRY_BASE_MS * Math.pow(2, attempt - 1) * (res.status === 403 || res.status === 429 ? 3 : 1);
       await sleep(backoff);
     } catch (e) {
+      if (e instanceof SteamHtmlResponseError) throw e;
       lastErr = e instanceof Error ? e.message : String(e);
       await sleep(RETRY_BASE_MS * Math.pow(2, attempt - 1));
     }
@@ -144,12 +152,13 @@ function steamReviewToExternal(review: Record<string, unknown>): ExternalReview 
 }
 
 interface SteamReviewsApiResponse {
-  success?: number | boolean;
-  reviews?: Record<string, unknown>[];
-  cursor?: string;
+  response?: {
+    reviews?: Record<string, unknown>[];
+    cursor?: string;
+  };
 }
 
-/** Cursor pagination; dừng tại maxReviews hoặc hết cursor. */
+/** Cursor pagination; dừng tại maxReviews hoặc hết trang. */
 export async function fetchSteamReviewsUpTo(appId: number, maxReviews: number = MAX_REVIEWS_CAP): Promise<ExternalReview[]> {
   const cap = Math.min(maxReviews, MAX_REVIEWS_CAP);
   const out: ExternalReview[] = [];
@@ -158,24 +167,23 @@ export async function fetchSteamReviewsUpTo(appId: number, maxReviews: number = 
   let pages = 0;
 
   while (out.length < cap) {
-    const params = new URLSearchParams({
-      json: "1",
-      filter: "recent",
-      language: "all",
-      review_type: "all",
-      purchase_type: "all",
-      num_per_page: String(NUM_PER_PAGE),
-      cursor: cursor || "*",
-      filter_offtopic_activity: "0",
-    });
-    const url = `${STEAM_STORE_BASE}/appreviews/${appId}?${params.toString()}`;
+    // Enum: filter 1 = Recent, review_type 0 = All, purchase_type 1 = All (0 chỉ tính mua trên Steam).
+    const input = {
+      appid: appId,
+      filter: 1,
+      languages: ["all"],
+      review_type: 0,
+      purchase_type: 1,
+      num_per_page: NUM_PER_PAGE,
+      filter_offtopic_activity: false,
+      cursor,
+    };
+    const url = `${STEAM_REVIEWS_API}?input_json=${encodeURIComponent(JSON.stringify(input))}`;
     const data = (await fetchJsonWithRetry(url)) as SteamReviewsApiResponse;
+    const page = data.response;
+    if (!page) throw new Error("Steam GetAppReviews trả về dữ liệu không hợp lệ");
 
-    if (data.success !== 1 && data.success !== true) {
-      throw new Error(`Steam appreviews returned success=${String(data.success)}`);
-    }
-
-    const batch = data.reviews ?? [];
+    const batch = page.reviews ?? [];
     if (batch.length === 0) break;
 
     for (const rev of batch) {
@@ -188,7 +196,7 @@ export async function fetchSteamReviewsUpTo(appId: number, maxReviews: number = 
       if (out.length >= cap) break;
     }
 
-    const next = data.cursor;
+    const next = page.cursor;
     if (!next || next === cursor) break;
     cursor = next;
     pages++;

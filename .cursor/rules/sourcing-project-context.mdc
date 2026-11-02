@@ -68,7 +68,7 @@ Tính năng chính:
 
 1. Ranking/review đã crawl → DB (`AppRank.raw`, `AppReview.raw`)
 2. Phân tích ngoài (URL TapTap/Steam, CSV) → `POST /api/analysis/...` → (env) `taptap-proxy` hoặc `taptap-client` trực tiếp → `AIAnalysisService` + libraries
-3. Steam: BE gọi trực tiếp, không qua proxy
+3. Steam: BE gọi trực tiếp, không qua proxy; review qua `IUserReviewsService/GetAppReviews` (endpoint `appreviews` tắt từ 22/10/2026, trả 302 về trang HTML)
 4. Chỉnh tier: `data/libraries/*.json` hoặc UI `/libraries` → `/api/libraries`
 
 ## Dev & env
