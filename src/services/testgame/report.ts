@@ -111,7 +111,10 @@ export async function getReport(campaignId: string, opts: { share?: boolean } = 
   const { c, tpl, testers, report, invited } = await loadReportData(campaignId);
   const saved = (report.sections ?? {}) as Record<string, SectionText>;
   const computed = tpl ? computeSections(tpl, testers, saved) : { sections: [], overall: null };
-  const footage = c.assignments.flatMap((a, i) => a.files.map((f) => ({ ...fileDto(f), tester: opts.share ? `Tester ${i + 1}` : a.user?.testerProfile?.name ?? a.email })));
+  const testerIndex = new Map(testers.map((t) => [t.assignmentId, t.index]));
+  const footage = c.assignments
+    .filter((a) => !opts.share || testerIndex.has(a.id))
+    .flatMap((a) => a.files.map((f) => ({ ...fileDto(f), tester: opts.share ? `Tester ${testerIndex.get(a.id)}` : a.user?.testerProfile?.name ?? a.email })));
   const footageLinks = tpl
     ? testers.flatMap((t) => tpl.questions.filter((q) => q.key === "footage").flatMap((q) => (Array.isArray(t.answers[q.id]) ? (t.answers[q.id] as string[]) : []).map((url) => ({ url, tester: opts.share ? `Tester ${t.index}` : t.name }))))
     : [];

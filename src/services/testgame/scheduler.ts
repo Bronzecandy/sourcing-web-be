@@ -1,5 +1,5 @@
 import { prismaApp } from "../../utils/prisma-app";
-import { addDays, audit, getSettings, hourIct, ictDateOf, isoDate, todayIct } from "./common";
+import { addDays, audit, getSettings, hourIct, ictDateOf, isoDate, TestGameError, todayIct } from "./common";
 import { responseDeadline, sendCampaignMail } from "./mail";
 
 interface RunSummary {
@@ -37,7 +37,7 @@ export async function startDueCampaigns(where: { id?: string } = {}): Promise<st
  * Trạng thái tester được đọc lại ngay lúc gửi, nên ai nộp / phản hồi trước giờ gửi không bị nhắc.
  */
 export async function runTestGameSchedule(opts: { actor?: string } = {}): Promise<RunSummary> {
-  if (running) throw new Error("Lịch Test Game đang chạy");
+  if (running) throw new TestGameError("Lịch Test Game đang chạy — đợi lượt hiện tại xong", 409);
   running = true;
   const today = todayIct();
   const summary: RunSummary = { date: today, at: new Date().toISOString(), campaigns: 0, mails: {}, failed: 0, transitions: [] };

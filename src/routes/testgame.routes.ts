@@ -44,7 +44,11 @@ testGameShareRouter.get("/:key/files/:fileId", async (req, res) => {
   try {
     const campaignId = await resolveShareKey(String(req.params.key));
     const f = await prismaApp.testFile.findUnique({ where: { id: String(req.params.fileId) } });
-    if (!f || f.campaignId !== campaignId || f.kind !== "footage") {
+    const owner = f?.assignmentId
+      ? await prismaApp.testAssignment.findUnique({ where: { id: f.assignmentId }, select: { status: true, reviewStatus: true } })
+      : null;
+    const counted = owner?.status === "submitted" && owner.reviewStatus !== "rejected";
+    if (!f || f.campaignId !== campaignId || f.kind !== "footage" || !counted) {
       res.status(404).json({ success: false, error: "Không tìm thấy tệp" });
       return;
     }
