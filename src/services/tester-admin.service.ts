@@ -5,10 +5,6 @@ import { queueTesterScoring } from "./tester-scoring.service";
 import { getActiveSurvey, validateQuestionnaire, type SurveyAnswers } from "./tester-survey.service";
 import { assignmentHours, redemptionTotals, statsFor } from "./tester.service";
 
-const PLATFORMS = new Set(["MB", "PC", "CS"]);
-const STATUSES = new Set(["planned", "running", "done", "cancelled"]);
-const RESULTS = new Set(["suitable", "unsuitable"]);
-
 export class TesterAdminError extends Error {
   constructor(
     message: string,
@@ -20,36 +16,6 @@ export class TesterAdminError extends Error {
 
 function isoDate(d: Date | null): string | null {
   return d ? d.toISOString().slice(0, 10) : null;
-}
-
-function parseDate(v: unknown): Date | null | undefined {
-  if (v === undefined) return undefined;
-  if (v === null || v === "") return null;
-  if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v)) return new Date(`${v}T00:00:00.000Z`);
-  throw new TesterAdminError("Ngày không hợp lệ (YYYY-MM-DD)");
-}
-
-function parseAppId(v: unknown): number | null | undefined {
-  if (v === undefined) return undefined;
-  if (v === null || v === "") return null;
-  const s = String(v).trim();
-  const m = s.match(/\/app\/(\d+)/) ?? s.match(/^(\d+)$/);
-  if (!m) throw new TesterAdminError("TapTap ID không hợp lệ");
-  const n = Number(m[1]);
-  if (n > 2_147_483_647) throw new TesterAdminError("TapTap ID quá lớn");
-  return n;
-}
-
-function iconUrl(v: unknown): string | null {
-  const s = typeof v === "string" ? v.trim() : "";
-  return /^https:\/\/[^\s]+$/.test(s) && s.length <= 500 ? s : null;
-}
-
-function tags(v: unknown): string[] | undefined {
-  if (v === undefined) return undefined;
-  const keys = new Set(testerConfig.genres().map((g) => g.key));
-  const list = Array.isArray(v) ? v : String(v ?? "").split(/[,;|\n]/);
-  return [...new Set(list.map((x) => String(x).trim()).filter((x) => keys.has(x)))];
 }
 
 export function adminMeta() {
@@ -99,6 +65,7 @@ interface TesterRow {
   weeklyPlayLabel: string | null;
   testTimeLabel: string | null;
   payTier: string | null;
+  testerType: string | null;
   active: boolean;
   scoringStatus: string;
   scores: Record<string, number>;
@@ -107,7 +74,7 @@ interface TesterRow {
 }
 
 /** Hồ sơ tester; `userIds` không truyền = chỉ user đang có role TESTER. */
-async function testerRows(userIds?: string[]): Promise<TesterRow[]> {
+export async function testerRows(userIds?: string[]): Promise<TesterRow[]> {
   const profiles = await prismaApp.testerProfile.findMany({
     where: userIds ? { userId: { in: userIds } } : { user: { roles: { has: "TESTER" } } },
     include: {
@@ -135,6 +102,7 @@ async function testerRows(userIds?: string[]): Promise<TesterRow[]> {
     weeklyPlayLabel: p.weeklyPlayLabel,
     testTimeLabel: p.testTimeLabel,
     payTier: p.payTier,
+    testerType: p.testerType,
     active: p.active,
     scoringStatus: p.scoringStatus,
     scores: Object.fromEntries(p.genreScores.map((s) => [s.genre, s.finalScore])),
@@ -168,6 +136,7 @@ async function noSurveyRows(userIds?: string[]): Promise<TesterRow[]> {
     weeklyPlayLabel: null,
     testTimeLabel: null,
     payTier: null,
+    testerType: null,
     active: true,
     scoringStatus: "no_survey",
     scores: {},
@@ -192,7 +161,11 @@ export async function testerDetail(userId: string) {
   const [latest, scores, assignments, redemptions] = await Promise.all([
     prismaApp.surveyResponse.findFirst({ where: { userId }, orderBy: { submittedAt: "desc" } }),
     prismaApp.testerGenreScore.findMany({ where: { userId }, orderBy: { finalScore: "desc" } }),
-    prismaApp.testAssignment.findMany({ where: { userId }, include: { campaign: true }, orderBy: { createdAt: "desc" } }),
+    prismaApp.testAssignment.findMany({
+      where: { OR: [{ userId }, { email: row.email.toLowerCase() }], status: { not: "added" } },
+      include: { campaign: true },
+      orderBy: { createdAt: "desc" },
+    }),
     prismaApp.benefitRedemption.findMany({ where: { userId }, orderBy: { createdAt: "desc" } }),
   ]);
   return {
@@ -215,6 +188,9 @@ export async function testerDetail(userId: string) {
     })),
     assignments: assignments.map((a) => ({
       id: a.id,
+      status: a.status,
+      reviewStatus: a.reviewStatus,
+      submittedAt: a.submittedAt?.toISOString() ?? null,
       completed: a.completed,
       completedAt: a.completedAt?.toISOString() ?? null,
       workloadHours: assignmentHours(a),
@@ -256,211 +232,6 @@ export async function updateTester(userId: string, body: { active?: unknown }) {
 export function rescoreTester(userId: string): { queued: boolean } {
   queueTesterScoring(userId, { force: true });
   return { queued: true };
-}
-
-interface CampaignRow {
-  id: string;
-  gameName: string;
-  appId: number | null;
-  iconUrl: string | null;
-  genre: string | null;
-  platform: string | null;
-  mainTags: string[];
-  secondaryTags: string[];
-  workloadHours: number;
-  startDate: Date | null;
-  endDate: Date | null;
-  team: string | null;
-  status: string;
-  result: string | null;
-  resultNote: string | null;
-  assignments: Array<{ completed: boolean }>;
-}
-
-async function loadCampaign(id: string) {
-  return prismaApp.testCampaign.findUnique({
-    where: { id },
-    include: { assignments: { include: { user: { select: { email: true, name: true, testerProfile: { select: { name: true } } } } } } },
-  });
-}
-
-function campaignDto(c: CampaignRow) {
-  return {
-    id: c.id,
-    gameName: c.gameName,
-    appId: c.appId,
-    iconUrl: c.iconUrl,
-    genre: c.genre,
-    platform: c.platform,
-    mainTags: c.mainTags,
-    secondaryTags: c.secondaryTags,
-    workloadHours: c.workloadHours,
-    startDate: isoDate(c.startDate),
-    endDate: isoDate(c.endDate),
-    team: c.team,
-    status: c.status,
-    result: c.result,
-    resultNote: c.resultNote,
-    assignedCount: c.assignments.length,
-    completedCount: c.assignments.filter((a) => a.completed).length,
-  };
-}
-
-export async function listCampaigns() {
-  const rows = await prismaApp.testCampaign.findMany({
-    include: { assignments: { select: { completed: true } } },
-    orderBy: [{ startDate: "desc" }, { createdAt: "desc" }],
-  });
-  return rows.map((c) => campaignDto(c));
-}
-
-export async function campaignDetail(id: string) {
-  const c = await loadCampaign(id);
-  if (!c) throw new TesterAdminError("Không tìm thấy đợt test", 404);
-  return {
-    ...campaignDto(c),
-    assignments: c.assignments.map((a) => ({
-      id: a.id,
-      userId: a.userId,
-      name: a.user.testerProfile?.name ?? a.user.name ?? a.user.email,
-      email: a.user.email,
-      workloadHours: a.workloadHours ?? c.workloadHours,
-      completed: a.completed,
-      completedAt: a.completedAt?.toISOString() ?? null,
-    })),
-  };
-}
-
-function campaignData(body: Record<string, unknown>) {
-  const mainTags = tags(body.mainTags);
-  const platform = body.platform === undefined ? undefined : body.platform ? String(body.platform) : null;
-  if (platform && !PLATFORMS.has(platform)) throw new TesterAdminError("Platform phải là MB, PC hoặc CS");
-  const status = body.status === undefined ? undefined : String(body.status);
-  if (status && !STATUSES.has(status)) throw new TesterAdminError("Trạng thái không hợp lệ");
-  const result = body.result === undefined ? undefined : body.result ? String(body.result) : null;
-  if (result && !RESULTS.has(result)) throw new TesterAdminError("Kết quả không hợp lệ");
-  const workload = body.workloadHours === undefined || body.workloadHours === "" ? undefined : Number(body.workloadHours);
-  if (workload !== undefined && (!Number.isFinite(workload) || workload < 0)) throw new TesterAdminError("Khối lượng không hợp lệ");
-  return {
-    ...(body.gameName !== undefined ? { gameName: String(body.gameName).trim() } : {}),
-    ...(body.appId !== undefined ? { appId: parseAppId(body.appId) } : {}),
-    ...(body.iconUrl !== undefined ? { iconUrl: iconUrl(body.iconUrl) } : {}),
-    ...(body.genre !== undefined ? { genre: body.genre ? String(body.genre).trim() : null } : {}),
-    ...(platform !== undefined ? { platform } : {}),
-    ...(mainTags !== undefined ? { mainTags } : {}),
-    ...(body.secondaryTags !== undefined ? { secondaryTags: tags(body.secondaryTags) } : {}),
-    ...(workload !== undefined ? { workloadHours: workload } : {}),
-    ...(body.startDate !== undefined ? { startDate: parseDate(body.startDate) } : {}),
-    ...(body.endDate !== undefined ? { endDate: parseDate(body.endDate) } : {}),
-    ...(body.team !== undefined ? { team: body.team ? String(body.team).trim() : null } : {}),
-    ...(status !== undefined ? { status } : {}),
-    ...(result !== undefined ? { result } : {}),
-    ...(body.resultNote !== undefined ? { resultNote: body.resultNote ? String(body.resultNote) : null } : {}),
-  };
-}
-
-export async function createCampaign(body: Record<string, unknown>, actorEmail: string) {
-  const data = campaignData(body);
-  if (!data.gameName) throw new TesterAdminError("Cần tên game");
-  const created = await prismaApp.testCampaign.create({
-    data: {
-      ...data,
-      gameName: data.gameName,
-      workloadHours: data.workloadHours ?? defaultWorkload(data.mainTags?.[0]),
-      createdBy: actorEmail,
-    },
-  });
-  return campaignDetail(created.id);
-}
-
-export async function updateCampaign(id: string, body: Record<string, unknown>) {
-  const data = campaignData(body);
-  if (data.gameName === "") throw new TesterAdminError("Cần tên game");
-  await prismaApp.testCampaign.update({ where: { id }, data });
-  return campaignDetail(id);
-}
-
-export async function deleteCampaign(id: string) {
-  await prismaApp.testCampaign.delete({ where: { id } });
-  return { deleted: true };
-}
-
-/**
- * Port recommendTestersSimple (Profile Analyst.gs): trung bình có trọng số điểm dòng game
- * (main 1.0, secondary 0.5), cờ Favorite khi main tag trùng dòng thích nhất; thêm lọc platform.
- */
-export async function recommendTesters(campaignId: string, opts: { limit?: number; platformFilter?: boolean } = {}) {
-  const campaign = await prismaApp.testCampaign.findUnique({
-    where: { id: campaignId },
-    include: { assignments: { select: { userId: true } } },
-  });
-  if (!campaign) throw new TesterAdminError("Không tìm thấy đợt test", 404);
-  const main = campaign.mainTags;
-  const secondary = campaign.secondaryTags.filter((t) => !main.includes(t));
-  if (main.length === 0 && secondary.length === 0) throw new TesterAdminError("Đợt test chưa có Main/Secondary tag");
-  const assigned = new Set(campaign.assignments.map((a) => a.userId));
-  const rows = await testerRows();
-  const limit = Math.max(1, Math.min(50, opts.limit ?? 7));
-  return rows
-    .filter((r) => r.active)
-    .filter((r) => !(opts.platformFilter !== false && campaign.platform) || r.platforms.includes(campaign.platform!))
-    .map((r) => {
-      let sum = 0;
-      let weight = 0;
-      for (const t of main) {
-        sum += (r.scores[t] ?? 0) * 1;
-        weight += 1;
-      }
-      for (const t of secondary) {
-        sum += (r.scores[t] ?? 0) * 0.5;
-        weight += 0.5;
-      }
-      return {
-        userId: r.userId,
-        name: r.name,
-        email: r.email,
-        score: weight > 0 ? Math.round(sum / weight) : 0,
-        favorite: Boolean(r.favoriteGenre && main.includes(r.favoriteGenre)),
-        platforms: r.platforms,
-        activeTests: r.stats.activeTests,
-        testTimeLabel: r.testTimeLabel,
-        assigned: assigned.has(r.userId),
-      };
-    })
-    .filter((r) => r.score > 0)
-    .sort((a, b) => b.score - a.score || Number(b.favorite) - Number(a.favorite))
-    .slice(0, limit);
-}
-
-export async function assignTesters(campaignId: string, userIds: unknown) {
-  const ids = Array.isArray(userIds) ? userIds.filter((x): x is string => typeof x === "string") : [];
-  if (ids.length === 0) throw new TesterAdminError("Chưa chọn tester");
-  await prismaApp.testAssignment.createMany({
-    data: ids.map((userId) => ({ campaignId, userId })),
-    skipDuplicates: true,
-  });
-  return campaignDetail(campaignId);
-}
-
-export async function updateAssignment(id: string, body: { completed?: unknown; workloadHours?: unknown }) {
-  const data: { completed?: boolean; completedAt?: Date | null; workloadHours?: number | null } = {};
-  if (typeof body.completed === "boolean") {
-    data.completed = body.completed;
-    data.completedAt = body.completed ? new Date() : null;
-  }
-  if (body.workloadHours === null || body.workloadHours === "") data.workloadHours = null;
-  else if (body.workloadHours !== undefined) {
-    const n = Number(body.workloadHours);
-    if (!Number.isFinite(n) || n < 0) throw new TesterAdminError("Khối lượng không hợp lệ");
-    data.workloadHours = n;
-  }
-  const a = await prismaApp.testAssignment.update({ where: { id }, data });
-  return { id: a.id };
-}
-
-export async function removeAssignment(id: string) {
-  await prismaApp.testAssignment.delete({ where: { id } });
-  return { deleted: true };
 }
 
 const REDEMPTION_FILTERS: Record<string, string[] | null> = {
@@ -542,7 +313,7 @@ export async function exportTesterWorkbook(): Promise<Buffer> {
       orderBy: { createdAt: "asc" },
     }),
     prismaApp.testCampaign.findMany({
-      include: { assignments: { include: { user: { select: { email: true } } } } },
+      include: { assignments: true },
       orderBy: { createdAt: "asc" },
     }),
   ]);
@@ -596,7 +367,7 @@ export async function exportTesterWorkbook(): Promise<Buffer> {
     game.addRow([
       c.gameName,
       c.genre,
-      c.assignments.map((a) => a.user.email).join("\n"),
+      c.assignments.map((a) => a.email).join("\n"),
       c.workloadHours,
       isoDate(c.startDate),
       isoDate(c.endDate),
@@ -614,7 +385,7 @@ export async function exportTesterWorkbook(): Promise<Buffer> {
   instance.addRow(["Name", "Tester Email", "Workload", "Start_date", "End_date", "Complete_test"]);
   for (const c of campaigns) {
     for (const a of c.assignments) {
-      instance.addRow([c.gameName, a.user.email, a.workloadHours ?? c.workloadHours, isoDate(c.startDate), isoDate(c.endDate), a.completed ? "TRUE" : "FALSE"]);
+      instance.addRow([c.gameName, a.email, a.workloadHours ?? c.workloadHours, isoDate(c.startDate), isoDate(c.endDate), a.completed ? "TRUE" : "FALSE"]);
     }
   }
   header(instance);

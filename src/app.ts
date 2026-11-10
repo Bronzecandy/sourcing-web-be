@@ -13,6 +13,8 @@ import authRoutes from "./routes/auth.routes";
 import adminRoutes from "./routes/admin.routes";
 import testerRoutes from "./routes/tester.routes";
 import testerAdminRoutes from "./routes/tester-admin.routes";
+import testGameAdminRoutes from "./routes/testgame-admin.routes";
+import testGameRoutes, { testGameShareRouter } from "./routes/testgame.routes";
 import { errorHandler } from "./middleware/error-handler";
 import { precomputeAll } from "./precompute";
 import { cache } from "./utils/cache";
@@ -38,7 +40,7 @@ app.use(
   }),
 );
 app.use(cookieParser());
-app.use(express.json());
+app.use(express.json({ limit: "2mb" }));
 
 app.use("/api", (_req, res, next) => {
   res.set("Cache-Control", "no-store, no-cache, must-revalidate");
@@ -73,6 +75,9 @@ app.use("/api/analytics", analyticsRoutes);
 app.use("/api/radar", radarRoutes);
 app.use("/api/tester/admin", testerAdminRoutes);
 app.use("/api/tester", testerRoutes);
+app.use("/api/testgame/share", testGameShareRouter);
+app.use("/api/testgame/admin", testGameAdminRoutes);
+app.use("/api/testgame", testGameRoutes);
 
 app.get("/admin/libraries", (_req, res) => {
   res.sendFile(path.join(process.cwd(), "public", "admin", "libraries.html"));

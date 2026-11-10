@@ -56,3 +56,35 @@ export async function callLLM(
     outputTokens: response.usage?.completion_tokens,
   };
 }
+
+/** Như callLLM, kèm ảnh (data URL hoặc https) cho model đọc. */
+export async function callLLMWithImages(
+  systemPrompt: string,
+  userPrompt: string,
+  images: Array<{ url: string; label?: string }>,
+  maxTokens: number = 8192,
+): Promise<LLMResponse> {
+  const model = getModel();
+  const tokenLimit = model.startsWith("gpt-5") ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens };
+  const content: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [{ type: "text", text: userPrompt }];
+  for (const img of images) {
+    if (img.label) content.push({ type: "text", text: img.label });
+    content.push({ type: "image_url", image_url: { url: img.url, detail: "high" } });
+  }
+  const response = await getClient().chat.completions.create({
+    model,
+    ...tokenLimit,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content },
+    ],
+  });
+  const text = response.choices[0]?.message?.content;
+  if (!text) throw new Error("LLM returned no content");
+  return {
+    content: text,
+    model: response.model ?? model,
+    inputTokens: response.usage?.prompt_tokens,
+    outputTokens: response.usage?.completion_tokens,
+  };
+}

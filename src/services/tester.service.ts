@@ -27,8 +27,12 @@ export interface TesterStats {
 type AssignmentWithCampaign = {
   completed: boolean;
   workloadHours: number | null;
+  status?: string;
   campaign: { gameName: string; workloadHours: number; status: string };
 };
+
+/** Tester đang test: đã xác nhận / đang chơi, game test chưa kết thúc. */
+const ACTIVE_ASSIGNMENT_STATUSES = ["confirmed", "in_test"];
 
 /** Lượt đổi quà ở các trạng thái này trừ vào benefit; rejected/cancelled được hoàn lại. */
 export const ACTIVE_REDEMPTION_STATUSES = ["pending", "fulfilled"];
@@ -55,7 +59,13 @@ export function assignmentHours(a: AssignmentWithCampaign): number {
 }
 
 export function statsFor(assignments: AssignmentWithCampaign[], used: number, pending = 0): TesterStats {
-  const active = assignments.filter((a) => !a.completed && a.campaign.status !== "cancelled" && a.campaign.status !== "done");
+  const active = assignments.filter(
+    (a) =>
+      !a.completed &&
+      a.campaign.status !== "cancelled" &&
+      a.campaign.status !== "done" &&
+      (a.status === undefined || ACTIVE_ASSIGNMENT_STATUSES.includes(a.status)),
+  );
   const done = assignments.filter((a) => a.completed);
   const completedHours = done.reduce((sum, a) => sum + assignmentHours(a), 0);
   const earned = benefitUnits(completedHours);

@@ -253,7 +253,7 @@ async function main() {
     if (!gameName) continue;
     const startDate = dayOnly(dateOf(row.getCell(5).value));
     const endDate = dayOnly(dateOf(row.getCell(6).value));
-    const status = endDate && endDate < today ? "done" : startDate && startDate <= today ? "running" : "planned";
+    const status = endDate && endDate < today ? "done" : startDate && startDate <= today ? "testing" : "pending";
     const genreText = text(row.getCell(2).value).trim() || null;
     const genreKey = genreText ? genres.find((g) => g.toLowerCase() === genreText.toLowerCase()) : undefined;
     const existing = await prismaApp.testCampaign.findFirst({ where: { gameName, startDate } });
@@ -286,15 +286,18 @@ async function main() {
     const completed = text(row.getCell(6).value).trim().toUpperCase() === "TRUE";
     const workload = Number(text(row.getCell(3).value));
     await prismaApp.testAssignment.upsert({
-      where: { campaignId_userId: { campaignId, userId } },
+      where: { campaignId_email: { campaignId, email } },
       create: {
         campaignId,
+        email,
         userId,
+        status: completed ? "submitted" : "confirmed",
+        reviewStatus: completed ? "approved" : null,
         completed,
         completedAt: completed ? dayOnly(dateOf(row.getCell(5).value)) ?? new Date() : null,
         workloadHours: Number.isFinite(workload) ? workload : null,
       },
-      update: { completed },
+      update: { completed, ...(completed ? { status: "submitted", reviewStatus: "approved" } : {}) },
     });
     assignments += 1;
   }

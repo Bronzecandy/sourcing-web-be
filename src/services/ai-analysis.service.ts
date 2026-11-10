@@ -51,6 +51,7 @@ import { fetchTapTapViaProxy, useTapTapProxy } from "../utils/taptap-proxy-fetch
 import { runDbQuery } from "../utils/db-diagnostics";
 import { classifyPgError, serializePgError } from "../utils/pg-error";
 import { aiInfoLog, aiVerboseLog } from "../utils/ai-logger";
+import { formatResearchForPrompt, researchMissingRubricFacts } from "./analysis-web-research";
 import { logDiag, logDiagBrief, logDiagVerbose, logDbError } from "../utils/process-diagnostics";
 import {
   inferGenrePackPlanWithAI,
@@ -989,6 +990,7 @@ function buildAnalysisPrompt(
   finalSpec: string,
   contextBlock: string,
   libraryBlock: string,
+  researchBlock: string,
 ): string {
   const reviewBlock = buildReviewTextBlock(reviews, 1);
 
@@ -1000,7 +1002,7 @@ ${contextBlock}
 
 ${libraryBlock}
 
-Research / external knowledge: When TapTap or stored metadata is incomplete, you may use widely known public facts and external signals about "${gameName}" (genre, franchise/IP, art direction, **community size via Google Trends / Steam / Discord / Reddit / forums**, developer reputation) to inform rubric reasoning. For socialization.community_size you must always output a 0–100 score even without fans_count snapshot. Cross-check any inference against the deterministic library scores above when those scores apply.
+${researchBlock}
 
 Reviews:
 ${reviewBlock}
@@ -1080,6 +1082,7 @@ function buildReduceUserPrompt(
   finalSpec: string,
   contextBlock: string,
   libraryBlock: string,
+  researchBlock: string,
 ): string {
   return `Tổng hợp MỘT bản phân tích cho game "${gameName}" từ ${mapRawJsonStrings.length} lô trích xuất rời nhau, cùng phủ toàn bộ ${totalReviews} review đã thu thập (không bỏ sót; thứ tự lô không nhất thiết theo thời gian).
 
@@ -1092,6 +1095,8 @@ Số liệu tham chiếu:
 ${contextBlock}
 
 ${libraryBlock}
+
+${researchBlock}
 
 Dữ liệu từng lô (JSON, mỗi lô một khối):
 ${mapRawJsonStrings.map((s, i) => `--- lô ${i + 1} ---\n${s}`).join("\n\n")}
@@ -1361,9 +1366,15 @@ export class AIAnalysisService {
     const contextBlock = formatContextForPrompt(opts.analysisContext);
     const libraryEntries = resolveLibraryScores(opts.analysisContext, manifest);
     const libraryBlock = formatLibraryScoresForPrompt(libraryEntries);
+    report(16, "Đang tra cứu web cho tiêu chí chưa có điểm thư viện…", "research");
+    const webResearch = await researchMissingRubricFacts(
+      opts.analysisContext,
+      libraryEntries.map((entry) => entry.criterionId),
+    );
+    const researchBlock = formatResearchForPrompt(webResearch);
 
     const model = getModel();
-    const oneShot = buildAnalysisPrompt(gameName, prepared, finalSpec, contextBlock, libraryBlock);
+    const oneShot = buildAnalysisPrompt(gameName, prepared, finalSpec, contextBlock, libraryBlock, researchBlock);
     const estTokens = (s: string) => Math.ceil(s.length / 3);
 
     let content: string;
@@ -1468,6 +1479,7 @@ export class AIAnalysisService {
         finalSpec,
         contextBlock,
         libraryBlock,
+        researchBlock,
       );
       try {
         const response = await runWithLlmHeartbeat(

@@ -793,11 +793,11 @@ export function formatContextForPrompt(ctx: AnalysisContext): string {
     `- Tags mapped to English (tag-translator TAG_MAP → aligns English genre lib): ${tagsEn}`,
     `- Developer (ưu tiên cho overview.developer — có thể trùng publisher khi API chỉ khai báo một đơn vị): ${ctx.developerName ?? "(không có)"}${devFb}`,
     `- Publisher (snapshot): ${ctx.publisherName ?? "(không có)"}`,
-    `- Tiêu chí overview.developer: nếu có tên Developer hoặc Publisher ở trên, phải cho điểm 0–100 + đánh giá uy tín/năng lực (research có kiểm soát từ kiến thức chung + review); không để score null chỉ vì không khớp file studio-tiers.`,
+    `- Tiêu chí overview.developer: nếu có tên Developer hoặc Publisher ở trên, phải cho điểm 0–100. Chưa có điểm thư viện thì CHỈ dùng finding trong khối Web research; không dùng kiến thức huấn luyện. Không có finding thì ~50 và ghi "không có nguồn web".`,
     `- Dung lượng gói (MB, nếu có trong raw): ${mb}`,
     `- Ngày từ lần cập nhật snapshot (update_time): ${upd}`,
     `- fans_count (snapshot): ${fans}`,
-    `- Tiêu chí socialization.community_size: nếu fans_count là "(không có)" hoặc không khớp thư viện, **bắt buộc** research công khai (Google Trends, Steam reviews/player estimates, Discord/Reddit/sub, forum TapTap, báo chí/benchmark game cùng IP) để ước lượng quy mô cộng đồng và cho điểm 0–100; ghi rõ nguồn suy luận trong reasoning; **không** để score null chỉ vì thiếu snapshot.`,
+    `- Tiêu chí socialization.community_size: nếu đã có điểm thư viện thì giữ nguyên. Nếu không, CHỈ ước lượng từ finding Web research có URL và ghi URL đó trong reasoning. Không có finding thì điểm 55 và ghi "tra cứu web không có nguồn". Không bịa fans_count.`,
   ].join("\n");
 }
 
@@ -859,10 +859,11 @@ const PAGE_LIB_LLM_RULES = `
 Quy tắc chấm cho tiêu chí input=page_lib khi ĐÃ LIỆT KÊ ĐIỂM THƯ VIỆN ở trên: giữ đúng điểm thư viện, có thể thêm nhận xét ngắn trong reasoning/strengths nếu không mâu thuẫn.
 Khi KHÔNG có điểm thư viện cho một tiêu chí page_lib:
 - overview.genre: chỉ suy ra từ tag/ngữ cảnh đã cho; không bịa thể loại. Tag có thể tiếng Trung — khớp khái niệm. Không chắc thì score null hoặc ~${50} với reasoning rõ "không đủ dữ liệu".
-- overview.developer: Nếu ngữ cảnh có tên Developer hoặc Publisher (snapshot DB — có thể fallback publisher=nhà vận hành): **phải** cho điểm 0–100 và reasoning; đánh giá uy tín studio/nhà phát hành dựa trên kiến thức chung + review (research có chọn lọc). **Không** để score null chỉ vì không khớp studio-tiers.json. Chỉ null khi ngữ cảnh hoàn toàn không có tên dev/publisher và review cũng không nhắc đơn vị rõ ràng.
-- socialization.community_size: KHÔNG bịa fans_count từ review. Nếu không có fans_count snapshot / không khớp community-size-tiers: **bắt buộc** research (Google Trends, Steam, Discord/Reddit, forum TapTap, so sánh game tương tự) để ước lượng quy mô cộng đồng và **luôn** cho điểm 0–100; ghi nguồn suy luận; **không** để score null chỉ vì thiếu snapshot.
+- overview.developer: Nếu ngữ cảnh có tên Developer hoặc Publisher: **phải** cho điểm 0–100. Uy tín studio chỉ lấy từ khối Web research (URL đã search). Không có finding thì ~50, reasoning ghi không có nguồn web. Không dùng kiến thức huấn luyện. Chỉ null khi không có tên dev/publisher và review cũng không nhắc đơn vị.
+- socialization.community_size: KHÔNG bịa fans_count. Không có điểm thư viện thì **chỉ** dùng finding Web research có URL; luôn cho điểm 0–100. Không có finding thì 55 và ghi "tra cứu web không có nguồn".
 - overview.game_size, liveops.content_update_cycle: KHÔNG bịa số MB / ngày từ review; nếu ngữ cảnh không có số liệu snapshot thì score null.
-- overview.ip_theme, overview.system_requirement, overview.art_style: ĐƯỢC suy luận có chọn lọc từ tên + tag + đoạn mô tả trong ngữ cảnh và gợn ý từ review (phong cách, IP, cấu hình); không bịa tên IP/tựa cụ thể nếu không xuất hiện trong dữ liệu; ghi rõ mức độ chắc chắn thấp nếu suy đoán.
+- overview.ip_theme, overview.art_style: ưu tiên finding trong khối Web research. Không có finding thì chỉ suy từ tên + tag + mô tả đã có trong ngữ cảnh; không bịa tên IP hay phong cách từ kiến thức huấn luyện.
+- overview.system_requirement: suy từ tên + tag + mô tả trong ngữ cảnh; không tra web và không bịa thông số.
 `;
 
 const SOCIAL_FEATURES_LLM_RULES = `
@@ -880,7 +881,7 @@ function applySocialCriterionGuards(
   if (row.id === "socialization.community_size" && row.score == null) {
     row.score = 55;
     row.reasoning =
-      [row.reasoning, "Không có fans_count snapshot và LLM chưa chấm — dùng điểm trung tính 55; nên chạy lại phân tích sau khi bổ sung research."]
+      [row.reasoning, "Không có điểm thư viện và không có finding web — dùng điểm trung tính 55."]
         .filter(Boolean)
         .join(" ")
         .trim();

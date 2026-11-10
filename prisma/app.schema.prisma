@@ -255,6 +255,8 @@ model TesterProfile {
   testTimeLabel   String?
   favoriteGenre   String?
   genres          String[]
+  /// in_team | staff | collab — lọc theo mức bảo mật game test (trống = staff)
+  testerType      String?
   active          Boolean            @default(true)
   /// pending | scoring | scored | failed
   scoringStatus   String             @default("pending")
@@ -312,49 +314,310 @@ model TesterScoreCache {
   createdAt DateTime @default(now()) @db.Timestamptz(6)
 }
 
-/// Đợt test (thay tab Game Data); appId gắn TapTap để Radar đọc tình trạng test nội bộ.
+/// Game test (module Test Game); appId gắn TapTap để Radar đọc tình trạng test nội bộ.
 model TestCampaign {
-  id            String           @id @default(cuid())
-  gameName      String
-  appId         Int?
-  iconUrl       String?
-  genre         String?
-  platform      String?
-  mainTags      String[]
-  secondaryTags String[]
-  workloadHours Float            @default(0)
-  startDate     DateTime?        @db.Date
-  endDate       DateTime?        @db.Date
-  team          String?
-  /// planned | running | done | cancelled
-  status        String           @default("planned")
-  /// suitable | unsuitable
-  result        String?
-  resultNote    String?
-  createdBy     String?
-  createdAt     DateTime         @default(now()) @db.Timestamptz(6)
-  updatedAt     DateTime         @updatedAt @db.Timestamptz(6)
-  assignments   TestAssignment[]
+  id               String           @id @default(cuid())
+  gameName         String
+  /// Tên gốc CN/KR
+  originalName     String?
+  testRound        Int              @default(1)
+  /// Game test trước của cùng game (tạo lại → Lần test +1)
+  previousId       String?
+  appId            Int?
+  iconUrl          String?
+  /// Thể loại mô tả tự do
+  genre            String?
+  /// MB | PC | CS (suy từ platforms, dùng lọc tester)
+  platform         String?
+  /// Android | iOS | PC | Console
+  platforms        String[]         @default([])
+  mainTags         String[]
+  secondaryTags    String[]
+  developer        String?
+  ipName           String?
+  devStage         String?
+  taptapUrl        String?
+  googlePlayUrl    String?
+  steamUrl         String?
+  background       String?
+  /// regional_bd | vn_new_game | local_team
+  source           String?
+  requester        String?
+  sourceDetail     String?
+  /// confidential | high | normal
+  securityLevel    String           @default("normal")
+  noTest           Boolean          @default(false)
+  templateId       String?
+  /// Bản template chốt lúc Initiate (câu hỏi, tag, trọng số)
+  templateSnapshot Json?
+  /// self_play | daily | focused | video
+  evalFormat       String?
+  hoursPerDay      Float?
+  testDays         Int?
+  focusedAt        DateTime?        @db.Timestamptz(6)
+  focusedPlace     String?
+  guide            String?
+  /// Link cài đặt ngoài folder Drive (TestFlight, store, bản web...)
+  installUrl       String?
+  /// Ghi chú cho tester: nội dung cần test cụ thể
+  testerNote       String?
+  /// Steam key, tài khoản test — chỉ Admin xem, chèn vào M3
+  accessInfo       String?
+  footageRequired  Boolean          @default(false)
+  apkFolderId      String?
+  apkFolderUrl     String?
+  apkFolderError   String?
+  /// Tiến độ in-game kỳ vọng theo số giờ test (AI web search, dùng duyệt bằng chứng)
+  progressResearch Json?
+  workloadHours    Float            @default(0)
+  coordinatorName  String?
+  coordinatorEmail String?
+  startDate        DateTime?        @db.Date
+  endDate          DateTime?        @db.Date
+  reportDeadline   DateTime?        @db.Date
+  team             String?
+  /// pending | inviting | testing | reporting | done | cancelled
+  status           String           @default("pending")
+  initiatedAt      DateTime?        @db.Timestamptz(6)
+  initiatedBy      String?
+  /// sent | failed | skipped
+  seatalkStatus    String?
+  seatalkError     String?
+  /// suitable | unsuitable — Radar đọc (drop → unsuitable)
+  result           String?
+  resultNote       String?
+  conclusion       String?
+  /// drop | monitor | recommend
+  decision         String?
+  legacyReportUrl  String?
+  createdBy        String?
+  updatedBy        String?
+  createdAt        DateTime         @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime         @updatedAt @db.Timestamptz(6)
+  assignments      TestAssignment[]
+  files            TestFile[]
+  mailLogs         TestMailLog[]
+  report           TestReport?
+  reportRuns       TestReportRun[]
+  shareKeys        TestShareKey[]
+  auditLogs        TestAuditLog[]
 
   @@index([appId])
   @@index([status, startDate])
+  @@index([gameName])
 }
 
-/// Tester được gán vào đợt test (thay tab Test Instance Data).
+/// Dòng gán tester (định danh bằng email) trong một game test.
 model TestAssignment {
   id            String       @id @default(cuid())
   campaignId    String
-  userId        String
+  email         String
+  userId        String?
+  /// added | invited | confirmed | declined | no_response | in_test | submitted
+  status        String       @default("added")
+  invitedAt     DateTime?    @db.Timestamptz(6)
+  respondedAt   DateTime?    @db.Timestamptz(6)
+  submittedAt   DateTime?    @db.Timestamptz(6)
+  /// Câu trả lời questionnaire { [questionId]: value }
+  answers       Json?
   workloadHours Float?
+  /// Admin đã duyệt hoàn thành → tính giờ + benefit
   completed     Boolean      @default(false)
   completedAt   DateTime?    @db.Timestamptz(6)
+  /// pending | approved | rejected
+  reviewStatus  String?
+  reviewNote    String?
+  reviewedBy    String?
+  reviewedAt    DateTime?    @db.Timestamptz(6)
+  /// queued | running | done | failed
+  aiStatus      String?
+  aiReview      Json?
+  aiReviewAt    DateTime?    @db.Timestamptz(6)
+  whitelistInfo String?
+  /// ok | lỗi cấp quyền xem folder APK
+  driveShare    String?
   note          String?
   createdAt     DateTime     @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime     @default(now()) @updatedAt @db.Timestamptz(6)
   campaign      TestCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user          User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  files         TestFile[]
+  mailLogs      TestMailLog[]
 
-  @@unique([campaignId, userId])
+  @@unique([campaignId, email])
   @@index([userId])
+  @@index([email])
+  @@index([reviewStatus])
+}
+
+/// Tệp của game test: guide (tệp hướng dẫn), footage, evidence (ảnh UID/level).
+model TestFile {
+  id           String          @id @default(cuid())
+  campaignId   String
+  assignmentId String?
+  /// guide | footage | evidence
+  kind         String
+  fileName     String
+  mime         String
+  size         Int
+  storagePath  String
+  sha256       String
+  /// dHash 64-bit (hex) cho ảnh — dò ảnh trùng / gần trùng
+  dhash        String?
+  width        Int?
+  height       Int?
+  uploadedBy   String?
+  createdAt    DateTime        @default(now()) @db.Timestamptz(6)
+  campaign     TestCampaign    @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  assignment   TestAssignment? @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId, kind])
+  @@index([assignmentId])
+  @@index([sha256])
+  @@index([kind, dhash])
+}
+
+/// Mẫu mail M1–M7 (Admin sửa, bật/tắt).
+model TestMailTemplate {
+  code      String   @id
+  name      String
+  subject   String
+  body      String
+  enabled   Boolean  @default(true)
+  version   Int      @default(1)
+  updatedBy String?
+  updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+}
+
+/// Nhật ký gửi mail: mỗi mốc gửi tối đa một lần cho mỗi tester.
+model TestMailLog {
+  id           String          @id @default(cuid())
+  campaignId   String
+  assignmentId String?
+  code         String
+  toEmail      String
+  subject      String?
+  /// sent | failed
+  status       String
+  error        String?
+  attempts     Int             @default(1)
+  /// auto | manual | test
+  trigger      String          @default("auto")
+  sentAt       DateTime        @default(now()) @db.Timestamptz(6)
+  campaign     TestCampaign    @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  assignment   TestAssignment? @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId, code])
+  @@index([assignmentId, code])
+}
+
+/// Tag dùng chung cho mọi template (mỗi tag có điểm = một section report).
+model TestTag {
+  name        String   @id
+  scored      Boolean  @default(true)
+  description String   @default("")
+  sortOrder   Int      @default(0)
+  updatedAt   DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+}
+
+/// Template questionnaire theo dòng game; Khung cơ bản có isBase = true.
+model TestQuestionTemplate {
+  id         String   @id @default(cuid())
+  name       String
+  genres     String[] @default([])
+  isBase     Boolean  @default(false)
+  /// draft | active | retired
+  status     String   @default("draft")
+  version    Int      @default(1)
+  /// [{ id, code, text, help, type, role, tag, key, required, options, scaleMin, scaleMax, minLabel, maxLabel }]
+  questions  Json
+  /// { [tag]: weight }
+  tagWeights Json     @default("{}")
+  updatedBy  String?
+  createdAt  DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @db.Timestamptz(6)
+}
+
+/// Report của game test (nội dung Admin đã Lưu; điểm tính lúc đọc).
+model TestReport {
+  campaignId    String       @id
+  /// updating | locked
+  status        String       @default("updating")
+  /// { [tag]: { vi: string, en: string } }
+  sections      Json         @default("{}")
+  usp           String?
+  pros          String?
+  cons          String?
+  conclusion    String?
+  decision      String?
+  /// Kết quả AI-03 (cấu hình yêu cầu + nguồn)
+  configRequirement Json?
+  /// { overall, byPlatform, method: library | ai | unknown }
+  configLevel   Json?
+  configUpdatedAt DateTime?  @db.Timestamptz(6)
+  lockedAt      DateTime?    @db.Timestamptz(6)
+  lockedBy      String?
+  updatedBy     String?
+  createdAt     DateTime     @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime     @updatedAt @db.Timestamptz(6)
+  campaign      TestCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+}
+
+/// Lịch sử các lần "Tổng hợp" (AI-01 → AI-05 → AI-02) và "Cập nhật cấu hình" (AI-03/04).
+model TestReportRun {
+  id         String       @id @default(cuid())
+  campaignId String
+  /// summary | config
+  kind       String
+  /// running | done | failed
+  status     String       @default("running")
+  output     Json?
+  error      String?
+  nSubmitted Int          @default(0)
+  createdBy  String?
+  createdAt  DateTime     @default(now()) @db.Timestamptz(6)
+  finishedAt DateTime?    @db.Timestamptz(6)
+  savedAt    DateTime?    @db.Timestamptz(6)
+  savedBy    String?
+  campaign   TestCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId, kind, createdAt])
+}
+
+/// Key chia sẻ report (chỉ đọc).
+model TestShareKey {
+  id         String       @id @default(cuid())
+  campaignId String
+  key        String       @unique
+  label      String?
+  expiresAt  DateTime?    @db.Timestamptz(6)
+  revokedAt  DateTime?    @db.Timestamptz(6)
+  createdBy  String?
+  createdAt  DateTime     @default(now()) @db.Timestamptz(6)
+  campaign   TestCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId])
+}
+
+/// Nhật ký thao tác module Test Game.
+model TestAuditLog {
+  id         String        @id @default(cuid())
+  campaignId String?
+  actor      String?
+  action     String
+  detail     Json?
+  createdAt  DateTime      @default(now()) @db.Timestamptz(6)
+  campaign   TestCampaign? @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId, createdAt])
+}
+
+/// Cấu hình chung module Test Game (key → JSON).
+model TestGameSetting {
+  key       String   @id
+  value     Json
+  updatedBy String?
+  updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(6)
 }
 
 /// Lượt đổi quà bằng benefit (benefit có = round(giờ test hoàn thành / 3)). Tester tự gửi yêu cầu, PIC trao quà.

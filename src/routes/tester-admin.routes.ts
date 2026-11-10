@@ -4,22 +4,13 @@ import { requireAuth } from "../middleware/auth";
 import {
   TesterAdminError,
   adminMeta,
-  assignTesters,
-  campaignDetail,
-  createCampaign,
-  deleteCampaign,
   exportTesterWorkbook,
-  listCampaigns,
   listRedemptions,
   listTesters,
   processRedemption,
-  recommendTesters,
-  removeAssignment,
   rescoreTester,
   surveyReport,
   testerDetail,
-  updateAssignment,
-  updateCampaign,
   updateTester,
 } from "../services/tester-admin.service";
 import { searchCampaignGames } from "../services/tester-taptap.service";
@@ -53,26 +44,6 @@ router.get("/testers", (_req, res) => handle(res, () => listTesters()));
 router.get("/testers/:userId", (req, res) => handle(res, () => testerDetail(req.params.userId)));
 router.patch("/testers/:userId", (req, res) => handle(res, () => updateTester(req.params.userId, req.body ?? {})));
 router.post("/testers/:userId/rescore", (req, res) => handle(res, () => rescoreTester(req.params.userId)));
-
-router.get("/campaigns", (_req, res) => handle(res, () => listCampaigns()));
-router.post("/campaigns", (req: AuthedRequest, res) => handle(res, () => createCampaign(req.body ?? {}, req.authUser!.email)));
-router.get("/campaigns/:id", (req, res) => handle(res, () => campaignDetail(req.params.id)));
-router.patch("/campaigns/:id", (req, res) => handle(res, () => updateCampaign(req.params.id, req.body ?? {})));
-router.delete("/campaigns/:id", (req, res) => handle(res, () => deleteCampaign(req.params.id)));
-router.get("/campaigns/:id/recommend", (req, res) =>
-  handle(res, () =>
-    recommendTesters(req.params.id, {
-      limit: Number(req.query.limit) || 7,
-      platformFilter: req.query.platform !== "0",
-    }),
-  ),
-);
-router.post("/campaigns/:id/assignments", (req, res) =>
-  handle(res, () => assignTesters(req.params.id, (req.body as { userIds?: unknown } | undefined)?.userIds)),
-);
-
-router.patch("/assignments/:id", (req, res) => handle(res, () => updateAssignment(req.params.id, req.body ?? {})));
-router.delete("/assignments/:id", (req, res) => handle(res, () => removeAssignment(req.params.id)));
 
 router.get("/taptap-search", (req, res) => handle(res, () => searchCampaignGames(String(req.query.q ?? ""))));
 

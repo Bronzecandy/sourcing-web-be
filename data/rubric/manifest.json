@@ -28,7 +28,7 @@
       "input": "page_lib",
       "weightInPart": 0.185,
       "genrePack": null,
-      "promptHint": "Tên dev/publisher từ snapshot DB (raw TapTap); khi không khớp studio-tiers vẫn phải cho điểm uy tín/research có kiểm soát — không để trống chỉ vì không có trong lib."
+      "promptHint": "Tên dev/publisher từ snapshot. Khi không khớp studio-tiers, chấm theo khối Web research (Compass); không dùng kiến thức mô hình."
     },
     {
       "id": "overview.game_size",
