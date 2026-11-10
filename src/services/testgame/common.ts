@@ -119,13 +119,26 @@ export async function getSettings(): Promise<TestGameSettings> {
   return value;
 }
 
-function num(v: unknown, min: number, max: number, fallback: number): number {
-  const n = Number(v);
-  return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : fallback;
-}
+const SETTING_RANGES = {
+  sendHour: { min: 0, max: 23, label: "Giờ gửi", unit: "giờ" },
+  remindAfterDays: { min: 1, max: 14, label: "Nhắc phản hồi sau", unit: "ngày" },
+  responseDays: { min: 1, max: 30, label: "Hạn phản hồi", unit: "ngày" },
+  remindBeforeDays: { min: 1, max: 14, label: "Nhắc trước hạn test", unit: "ngày" },
+  evidenceMax: { min: 1, max: 5, label: "Số ảnh bằng chứng", unit: "ảnh" },
+  footageMaxMb: { min: 10, max: 1024, label: "Dung lượng footage", unit: "MB" },
+} as const;
 
 export async function saveSettings(body: Record<string, unknown>, actor: string): Promise<TestGameSettings> {
   const cur = await getSettings();
+  const issues: string[] = [];
+  const num = (key: keyof typeof SETTING_RANGES): number => {
+    const v = body[key];
+    if (v === undefined) return cur[key];
+    const { min, max, label, unit } = SETTING_RANGES[key];
+    const n = typeof v === "number" || (typeof v === "string" && v.trim() !== "") ? Number(v) : NaN;
+    if (!Number.isInteger(n) || n < min || n > max) issues.push(`${label}: số nguyên ${min}–${max} ${unit}`);
+    return n;
+  };
   const text = (v: unknown, fallback: string) => (typeof v === "string" ? v.trim() : fallback);
   const library = Array.isArray(body.configLibrary)
     ? (body.configLibrary as Array<Record<string, unknown>>)
@@ -133,18 +146,19 @@ export async function saveSettings(body: Record<string, unknown>, actor: string)
         .filter((r) => r.level)
     : cur.configLibrary;
   const next: TestGameSettings = {
-    sendHour: num(body.sendHour, 0, 23, cur.sendHour),
-    remindAfterDays: num(body.remindAfterDays, 1, 14, cur.remindAfterDays),
-    responseDays: num(body.responseDays, 1, 30, cur.responseDays),
-    remindBeforeDays: num(body.remindBeforeDays, 1, 14, cur.remindBeforeDays),
+    sendHour: num("sendHour"),
+    remindAfterDays: num("remindAfterDays"),
+    responseDays: num("responseDays"),
+    remindBeforeDays: num("remindBeforeDays"),
     senderName: text(body.senderName, cur.senderName) || DEFAULT_SETTINGS.senderName,
     senderEmail: text(body.senderEmail, cur.senderEmail) || DEFAULT_SETTINGS.senderEmail,
     seatalkGroupId: text(body.seatalkGroupId, cur.seatalkGroupId),
     driveRootFolderId: text(body.driveRootFolderId, cur.driveRootFolderId),
-    evidenceMax: num(body.evidenceMax, 1, 5, cur.evidenceMax),
-    footageMaxMb: num(body.footageMaxMb, 10, 1024, cur.footageMaxMb),
+    evidenceMax: num("evidenceMax"),
+    footageMaxMb: num("footageMaxMb"),
     configLibrary: library.length > 0 ? library : cur.configLibrary,
   };
+  if (issues.length > 0) throw new TestGameError("Cấu hình chưa hợp lệ", 400, issues);
   await prismaApp.testGameSetting.upsert({
     where: { key: "general" },
     create: { key: "general", value: next as unknown as Prisma.InputJsonValue, updatedBy: actor },

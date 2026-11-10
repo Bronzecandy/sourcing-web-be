@@ -170,6 +170,30 @@ function cleanWeights(raw: unknown, questions: TemplateQuestion[]): Record<strin
   );
 }
 
+function canonical(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(canonical);
+  if (v && typeof v === "object") {
+    return Object.fromEntries(
+      Object.entries(v)
+        .filter(([, x]) => x !== undefined)
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([k, x]) => [k, canonical(x)]),
+    );
+  }
+  return v;
+}
+
+const sameJson = (a: unknown, b: unknown) => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+
+/** Câu hỏi đang lưu qua cùng bước làm sạch, để bản seed / bản cũ thiếu trường mặc định không bị tính là đã sửa. */
+function storedQuestions(raw: unknown, tags: Set<string>): unknown {
+  try {
+    return cleanQuestions(raw, tags);
+  } catch {
+    return raw;
+  }
+}
+
 export async function saveTemplate(body: Record<string, unknown>, actor: string) {
   await ensureTemplateSeed();
   const tags = new Set((await listTags()).map((t) => t.name));
@@ -187,7 +211,9 @@ export async function saveTemplate(body: Record<string, unknown>, actor: string)
   const questions = body.questions !== undefined ? cleanQuestions(body.questions, tags) : (current?.questions as unknown as TemplateQuestion[]);
   if (!questions) throw new TestGameError("Template cần câu hỏi");
   const tagWeights = cleanWeights(body.tagWeights ?? current?.tagWeights, questions);
-  const changedContent = Boolean(current) && (body.questions !== undefined || body.tagWeights !== undefined);
+  const changedContent =
+    Boolean(current) &&
+    (!sameJson(questions, storedQuestions(current!.questions, tags)) || !sameJson(tagWeights, cleanWeights(current!.tagWeights, questions)));
   const data = {
     name,
     genres,

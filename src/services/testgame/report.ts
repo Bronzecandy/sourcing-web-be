@@ -236,6 +236,7 @@ export async function lockReport(campaignId: string, actor: string) {
   return getReport(campaignId);
 }
 
+/** Mở lại: Decision giữ trong report để chọn sẵn khi chốt lại; game test bỏ Quyết định / Kết quả để Radar không đọc kết quả cũ. */
 export async function unlockReport(campaignId: string, actor: string) {
   const report = await prismaApp.testReport.findUnique({ where: { campaignId }, include: { campaign: true } });
   if (!report) throw new TestGameError("Không tìm thấy report", 404);
@@ -244,9 +245,9 @@ export async function unlockReport(campaignId: string, actor: string) {
   const back = end && todayIct() <= end ? "testing" : "reporting";
   await prismaApp.$transaction([
     prismaApp.testReport.update({ where: { campaignId }, data: { status: "updating", lockedAt: null, lockedBy: null } }),
-    prismaApp.testCampaign.update({ where: { id: campaignId }, data: { status: back, updatedBy: actor } }),
+    prismaApp.testCampaign.update({ where: { id: campaignId }, data: { status: back, decision: null, result: null, updatedBy: actor } }),
   ]);
-  await audit(campaignId, actor, "report.unlock", { to: back });
+  await audit(campaignId, actor, "report.unlock", { to: back, clearedDecision: report.campaign.decision });
   return getReport(campaignId);
 }
 

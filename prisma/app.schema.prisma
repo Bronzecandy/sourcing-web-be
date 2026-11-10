@@ -420,6 +420,8 @@ model TestAssignment {
   submittedAt   DateTime?    @db.Timestamptz(6)
   /// Câu trả lời questionnaire { [questionId]: value }
   answers       Json?
+  /// Lần lưu câu trả lời gần nhất (nháp hoặc nộp)
+  answersUpdatedAt DateTime? @db.Timestamptz(6)
   workloadHours Float?
   /// Admin đã duyệt hoàn thành → tính giờ + benefit
   completed     Boolean      @default(false)

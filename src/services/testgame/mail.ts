@@ -19,12 +19,18 @@ export async function ensureMailTemplates(): Promise<void> {
   seeded = true;
 }
 
+type MailTemplateRow = Awaited<ReturnType<typeof prismaApp.testMailTemplate.findUniqueOrThrow>>;
+
+function mailTemplateDto(r: MailTemplateRow) {
+  return { ...r, updatedAt: r.updatedAt.toISOString(), defaultSubject: DEFAULT_MAIL_TEMPLATES.find((d) => d.code === r.code)?.subject };
+}
+
 export async function listMailTemplates() {
   await ensureMailTemplates();
   const rows = await prismaApp.testMailTemplate.findMany();
   return MAIL_CODES.map((code) => rows.find((r) => r.code === code)!)
     .filter(Boolean)
-    .map((r) => ({ ...r, updatedAt: r.updatedAt.toISOString(), defaultSubject: DEFAULT_MAIL_TEMPLATES.find((d) => d.code === r.code)?.subject }));
+    .map(mailTemplateDto);
 }
 
 export async function saveMailTemplate(code: string, body: { subject?: unknown; body?: unknown; enabled?: unknown; reset?: unknown }, actor: string) {
@@ -47,7 +53,7 @@ export async function saveMailTemplate(code: string, body: { subject?: unknown; 
     },
   });
   await audit(null, actor, "mail_template.update", { code, version: saved.version, enabled: saved.enabled });
-  return saved;
+  return mailTemplateDto(saved);
 }
 
 function testFormat(c: Campaign): string {

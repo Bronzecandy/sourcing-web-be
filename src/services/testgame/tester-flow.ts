@@ -189,6 +189,7 @@ export async function surveyForm(user: AuthUserDto, id: string) {
     questions: tpl.questions,
     tags: tpl.tags,
     answers: (a.answers ?? {}) as Answers,
+    answersUpdatedAt: a.answersUpdatedAt?.toISOString() ?? null,
     evidence: a.files.filter((f) => f.kind === "evidence").map(fileDto),
     footage: a.files.filter((f) => f.kind === "footage").map(fileDto),
     evidenceMax: settings.evidenceMax,
@@ -216,8 +217,17 @@ export async function saveSurvey(user: AuthUserDto, id: string, body: { answers?
   await prismaApp.testAssignment.update({
     where: { id },
     data: submit
-      ? { answers: answers as Prisma.InputJsonValue, status: "submitted", submittedAt: now, reviewStatus: "pending", reviewNote: null, reviewedBy: null, reviewedAt: null }
-      : { answers: answers as Prisma.InputJsonValue },
+      ? {
+          answers: answers as Prisma.InputJsonValue,
+          answersUpdatedAt: now,
+          status: "submitted",
+          submittedAt: now,
+          reviewStatus: "pending",
+          reviewNote: null,
+          reviewedBy: null,
+          reviewedAt: null,
+        }
+      : { answers: answers as Prisma.InputJsonValue, answersUpdatedAt: now },
   });
   if (submit) {
     await audit(a.campaignId, user.email, a.status === "submitted" ? "survey.resubmit" : "survey.submit", { email: a.email, evidence });
