@@ -95,6 +95,7 @@ export function resolvePermissionForApiPath(path: string, method: string): ApiPe
 
   if (path.startsWith("/ranking")) return "analytics.potential";
   if (path.startsWith("/radar")) return "analytics.potential";
+  if (path.startsWith("/deep-research")) return "analytics.potential";
 
   if (path.startsWith("/analytics")) return "analytics.distribution";
 

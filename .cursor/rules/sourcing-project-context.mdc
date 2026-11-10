@@ -32,8 +32,10 @@ Tính năng chính:
 ### Backend (`be`)
 
 - `src/index.ts` → `app.ts` — mount routes
-- `src/routes/` — `game`, `ranking`, `analysis`, `libraries`, `translate`, `radar`, `tester`, `tester-admin`, `testgame`, `testgame-admin`
-- `src/services/` — logic: `game`, `ranking`, `ai-analysis`, `libraries`, `taptap-client`, `steam-client`, `radar-*`, `tester-*`, `testgame/*` (module Test Game)
+- `src/routes/` — `game`, `ranking`, `analysis`, `libraries`, `translate`, `radar`, `tester`, `tester-admin`, `testgame`, `testgame-admin`, `deep-research`
+- `src/services/` — logic: `game`, `ranking`, `ai-analysis`, `libraries`, `taptap-client`, `steam-client`, `radar-*`, `tester-*`, `testgame/*` (module Test Game), `deep-research/*` (module Deep Research)
+- `src/utils/market-data.ts` — client portal market-data.garena.vn (`POST /api/v1/query`, source `sensortower` | `steam`, SQL chỉ SELECT; portal chặn từ khoá như call/merge/update/drop/`--`/`;` kể cả trong chuỗi và không cho gọi hàm ở source steam → luôn dựng literal bằng `sqlText`/`sqlLike`)
+- `data/deep-research/genre-frameworks.json` — pattern đánh giá theo genre (match subgenre → genre → class, trọng số chỉ số); sửa tay, đọc lại khi file đổi
 - `prisma/app.schema.prisma` + `prisma/migrations-app/` — DB app (user, tester, Test Game); `npm run prisma:migrate:app`
 - `scripts/apps-script/testgame-bot.gs` — Apps Script deploy dưới testgame@garena.vn: gửi Gmail, tạo/share folder Drive
 - `data/radar/` — prompt trích dữ kiện, `top-tier-publishers.json`, `known-games.json` (tên EN/NPH/genre từ report cũ)
@@ -50,6 +52,7 @@ Tính năng chính:
 - `src/pages/` — `/`, `/ranking`, `/game/:id`, `/potential`, `/radar`, `/ai-analysis`, `/libraries`, `/admin/*` (`pages/admin/AdminLayout` + tab: users, test-campaigns, tester-benefits, tester-survey)
 - `src/tester/` — Tester Program `/tester/*`: `TesterShell` (header/footer chung), landing công khai `/tester`, `/tester/profile` (nút bắt đầu khảo sát), `/survey`, `/benefits`; style `tp-*` trong `index.css`, ảnh `public/tester/*.webp`
 - `src/testgame/` — module Test Game: `admin/` (`/admin/test-campaigns`, `/admin/test-campaigns/:id`, `/admin/test-templates`, `/admin/test-settings`), `tester/` (`/tester/tests`, `/tester/tests/:id`, `/tester/tests/:id/survey`), `report/`, `share/` (`/share/test-report/:key` công khai); `types.ts` mirror BE `services/testgame`
+- `src/deep-research/` — `/deep-research` (lịch sử chạy), `/deep-research/:appId` (`?run=`, `?days=&platform=&segment=` từ Potential); `MarketCell` = cột "Market (ST)" + nút kính viễn vọng trên bảng Potential; `types.ts` mirror BE `services/deep-research/types.ts`
 - `public/brand/` — logo SVG Sourcing-Game + Tester Program; `src/lib/brand.ts` đổi tên tab/favicon theo route
 - `src/services/api.ts` — Axios; `VITE_API_BASE_URL` hoặc `/api` (dev proxy → `localhost:3001`)
 - `src/components/` — `RubricPanel`, `RedFlagSection`, `layout/Sidebar`
@@ -63,7 +66,7 @@ Tính năng chính:
 ## API & phân tách trách nhiệm
 
 - Prefix `/api/*`; response `{ success: true, data }` hoặc `{ success: false, error }`
-- Routes (`app.ts`): `/api/games`, `/api/ranking`, `/api/analysis`, `/api/libraries`, `/api/translate`, `/api/radar`, `/api/tester`, `/api/tester/admin` (quyền `tester.manage`), `/api/testgame` (tester đã đăng nhập), `/api/testgame/admin` (quyền `tester.manage`), `/api/testgame/share/:key` (công khai, report chia sẻ), `/api/health`
+- Routes (`app.ts`): `/api/games`, `/api/ranking`, `/api/analysis`, `/api/libraries`, `/api/translate`, `/api/radar`, `/api/tester`, `/api/tester/admin` (quyền `tester.manage`), `/api/testgame` (tester đã đăng nhập), `/api/testgame/admin` (quyền `tester.manage`), `/api/testgame/share/:key` (công khai, report chia sẻ), `/api/deep-research` (quyền `analytics.potential`), `/api/health`
 - **BE**: tính điểm, LLM, đọc/ghi libraries, lưu analysis
 - **FE**: hiển thị rubric, Có/Không, red flag; i18n VI/EN (`ContentLangProvider`); **không** nhúng logic rubric
 
@@ -100,6 +103,7 @@ Tính năng chính:
 | `TESTGAME_SMTP_USER`, `TESTGAME_SMTP_PASS` | Fallback gửi mail qua Gmail SMTP (App Password, không phải mật khẩu thường); không có Drive |
 | `TESTGAME_DRIVE_ROOT_FOLDER_ID`, `SEATALK_TESTGAME_GROUP_ID` | Mặc định cho folder Drive gốc / nhóm SeaTalk vận hành (ghi đè được ở `/admin/test-settings`) |
 | `TESTGAME_UPLOAD_DIR` | Nơi lưu ảnh bằng chứng / footage / tệp hướng dẫn (mặc định `data/uploads/testgame`, gitignore) |
+| `MARKET_DATA_URL`, `MARKET_DATA_API_KEY` | Portal Sensor Tower/Steam cho Deep Research (mặc định `https://market-data.garena.vn`; key source `all`, header `X-API-Key`) |
 
 **Neon replica / warm-up OOM:** xem rule `neon-precompute-safety.mdc` (40001, fail-soft, concurrency).
 
@@ -118,6 +122,7 @@ Scripts BE: `npm run dev`, `prisma:*`, `seed`, `smoke:rubric`, `src/inspect-db.t
 - Phân tích AI nhận `reviewWindow`: `{ mode: "all" }` | `{ mode: "days", days: 7|14|30|60 }` | `{ mode: "range", from, to }` trên `POST /api/analysis/analyze/*`.
 - Tiêu chí thiếu điểm thư viện (developer, community size, IP, art) được tra bằng Compass `POST /compass-api/v1/responses` + tool `web_search` (model `COMPASS_WEB_SEARCH_MODEL`, mặc định gpt-5.4) trước khi chấm. Chỉ finding có URL trong `web_search_call.action.sources` vào prompt; model không được tự điền các ô đó từ kiến thức huấn luyện.
 - `GET /api/games/:id` hỗ trợ `days` hoặc `from`+`to` cho lịch sử biểu đồ.
+- Deep Research: `POST /api/deep-research/market-summary {appIds}` (cột Market trên Potential), `GET /apps/:appId` (mapping + lịch sử + lần chạy mới nhất), `POST /apps/:appId/runs {days, platform, segment}`, `GET /runs/:id`, `POST /runs/:id/continue`, `GET /apps/:appId/candidates?q=`, `PUT /apps/:appId/mapping {st: {unifiedId}|{none}|{reset}, steam: {steamAppId}|{none}|{reset}}`, `GET /runs`, `GET /frameworks`.
 
 ## Trạng thái gần đây (cập nhật khi đổi)
 
@@ -128,5 +133,7 @@ Game Radar Recap + Executive Summary chạy **mỗi tuần** (Thứ Hai, chạy 
 Tester Program `/tester`: landing công khai (API `GET /api/tester/public`), nút Đăng nhập trên header → Google `?portal=tester` → `/tester/profile`; bảng hỏi 26 câu từ tab Questionnaire (CONNECT Q8 → Q9–Q23), bắt đầu từ Hồ sơ; chấm hardcore 0–100/dòng game (port `Hardcore Score.gs`, cache `TesterScoreCache`). `TestCampaign.appId` đồng bộ vào Radar (đang test trong tuần, plan test, kết quả không phù hợp → Drop). Tạo đợt test: chọn game TapTap (`GET /api/tester/admin/taptap-search?q=` tên/link/ID, qua proxy) → tự điền tên (EN nếu Radar biết), appId, `iconUrl`, genre, platform, main/secondary tag (`tester-taptap.service.ts`). Benefit: tester tự đổi quà ở `/tester/benefits` (`POST /api/tester/benefits/redeem` với `tier`, `item`, `option` khi quà có "HOẶC", `gameAccount`; `POST /api/tester/benefits/:id/cancel`) → `BenefitRedemption` `pending` trừ benefit ngay; PIC xử lý ở tab Benefit tester (`GET /api/tester/admin/redemptions?status=`, `PATCH /api/tester/admin/redemptions/:id` → `fulfilled` | `rejected` + lý do, hoàn benefit). Tier tích cực: ≥3 game hoặc ≥10 giờ hoàn thành trong tháng ICT, tối đa 1 lần/tháng.
 
 Test Game (`services/testgame/*`, thay "Đợt test" cũ; route cũ `/api/tester/admin/campaigns*` đã bỏ): mỗi `TestCampaign` = 1 lần test (`testRound`, `previousId`), tiến độ `pending → inviting → testing → reporting → done` (+ `cancelled`; game `noTest` chốt thẳng Done). Admin tạo game test (TapTap picker, mức bảo mật confidential/high/normal → loại tester được mời in_team/staff/collab, template questionnaire tự chọn theo dòng game, hướng dẫn + ghi chú tester + link cài tuỳ chọn, tự tạo folder Drive `[Confidential] MM.YYYY | Game` để upload APK, tester xác nhận được share quyền xem) → thêm tester (gợi ý theo điểm dòng game / platform / lịch bận, hoặc dán email) → Initiate (chốt `templateSnapshot`, gửi M1, báo SeaTalk). Mail M1–M7 qua Apps Script/SMTP, mẫu sửa ở `/admin/test-settings`; scheduler mỗi giờ phút 1 ICT, chạy 1 lần/ngày sau `sendHour` (M2 nhắc, tự chuyển Testing/Reporting, M4–M7). Tester `/tester/tests/:id` xác nhận/từ chối → làm questionnaire + nộp 1–3 ảnh bằng chứng (UID, level/tiến trình) và footage. AI kiểm tra bằng chứng (`evidence-ai.ts`): dHash so trùng ảnh với tester khác / bài cũ của chính họ, model vision đọc UID/level, Compass web search tiến độ hợp lý theo số giờ → `aiReview.verdict` approve/review/reject; Admin duyệt ở ReviewDrawer (hoặc "Duyệt N bài AI đề xuất") → `completed` = tính giờ + benefit (`statsFor`). Report: AI tổng hợp theo tag câu hỏi, cấu hình máy (web search + thư viện), chốt report = quyết định Drop/Monitor/Recommend, link chia sẻ `/share/test-report/:key`, xuất xlsx.
+
+Deep Research (`services/deep-research/*`, mọi user có `analytics.potential` chạy được, kết quả dùng chung): ghép game TapTap ↔ Sensor Tower (`GameMarketMapping`) tự động theo `itunes_id` → package Android → tên CN trùng duy nhất; Steam theo tên EN của bản ST; không ra thì AI web search (Compass) tìm tên quốc tế/NPH/link Steam → ứng viên có điểm → user chọn (status `auto | confirmed | none | unmapped`, user chọn thắng auto, không bị ghi đè). Một lần chạy (`DeepResearchRun`, chạy nền trong process, tối đa 2 song song, treo > 20 phút → failed): identify → mapping (ST chưa quyết → `needs_mapping`, chờ `POST /runs/:id/continue`) → market (ST 18 tháng + 120 ngày, thị trường chính CN nếu có, chấm percentile so cohort subgenre — < 8 game thì lùi về genre — theo trọng số pattern genre → Market score + độ tin cậy) → steam (CCU, review, followers/wishlist/bán VGI → Steam score) → web (Compass: hiệu quả game + tài chính NPT/NPH, finding chỉ giữ URL có trong sources và ngày có trong brief) → synthesis (LLM chỉ dùng số liệu + finding, mỗi ý có ref). Lưu ý dữ liệu: ST CN chỉ App Store, revenue là IAP (cent → USD), DAU/MAU 0 = không ước tính; VN ít tin cậy nên chỉ hiện khi đủ lớn; các view retention/launch performance/demographics của portal chưa có dữ liệu. Cột Market trên Potential: doanh thu/DAU tháng đủ gần nhất (CN, không có thì WW) + MoM + kết luận lần chạy gần nhất; bộ lọc Có số liệu ST / Đã Deep Research, sắp theo doanh thu.
 
 Nhiều role: `User.roles UserRole[]` = tối đa 1 role Sourcing (SUPER_ADMIN/ADMIN/STAFF/USER) + `TESTER`; DTO có `roles` + `role` (role cao nhất, `TESTER` = chỉ là tester) + `isTester`. Đăng ký qua `/tester` → `[TESTER]`; gửi khảo sát tự thêm `TESTER`. Quản lý tester nằm trong admin Sourcing `/admin/users` (lọc Tất cả / Sourcing / Tester / Chờ duyệt, drawer có tab Hồ sơ tester) + tab Đợt test / Benefit tester / Bảng hỏi tester; Admin tự có `tester.manage`; Staff chỉ có `tester.manage` dùng `/admin/testers`. PATCH `/api/admin/users/:id` nhận `{ roles }` (vẫn nhận `role`).

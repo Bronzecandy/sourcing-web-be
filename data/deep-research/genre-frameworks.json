@@ -1,0 +1,209 @@
+{
+  "version": 1,
+  "metrics": {
+    "revenue": { "label": "Doanh thu tháng (IAP)", "labelEn": "Monthly revenue (IAP)", "unit": "usd", "kind": "percentile" },
+    "dau": { "label": "DAU trung bình", "labelEn": "Average DAU", "unit": "count", "kind": "percentile" },
+    "downloads": { "label": "Lượt tải tháng", "labelEn": "Monthly downloads", "unit": "count", "kind": "percentile" },
+    "arpdau": { "label": "ARPDAU", "labelEn": "ARPDAU", "unit": "usd", "kind": "percentile" },
+    "rpd": { "label": "Doanh thu / lượt tải", "labelEn": "Revenue per download", "unit": "usd", "kind": "percentile" },
+    "stickiness": { "label": "Độ dính DAU/MAU", "labelEn": "Stickiness (DAU/MAU)", "unit": "ratio", "kind": "percentile" },
+    "dauTrend": { "label": "Xu hướng DAU (so TB 3 tháng trước)", "labelEn": "DAU trend (vs prior 3-month avg)", "unit": "pct", "kind": "growth" },
+    "revenueTrend": { "label": "Xu hướng doanh thu (so TB 3 tháng trước)", "labelEn": "Revenue trend (vs prior 3-month avg)", "unit": "pct", "kind": "growth" },
+    "downloadsTrend": { "label": "Xu hướng lượt tải (so TB 3 tháng trước)", "labelEn": "Downloads trend (vs prior 3-month avg)", "unit": "pct", "kind": "growth" },
+    "revenueTrend6m": { "label": "Doanh thu 3 tháng gần / 3 tháng trước đó", "labelEn": "Revenue last 3 months vs previous 3", "unit": "pct", "kind": "growth" },
+    "revenueStability": { "label": "Độ ổn định doanh thu (6 tháng)", "labelEn": "Revenue stability (6 months)", "unit": "ratio", "kind": "stability" }
+  },
+  "patterns": [
+    {
+      "key": "competitive",
+      "label": "Đối kháng / Competitive",
+      "labelEn": "Competitive (MOBA, shooter, fighting)",
+      "match": {
+        "subgenres": ["MOBA", "FPS / 3PS", "Battle Royale", "Auto Chess", "Fighting", "Brawl", "Asymmetric Battle", "Vehicular Shooter", "Sniper", "Artillery Shooter", "Party Royale", ".io"],
+        "genres": ["Shooter"]
+      },
+      "summary": "Sống nhờ quy mô người chơi và hiệu ứng mạng (matchmaking, xem/chơi cùng bạn bè); doanh thu đến sau từ skin/battle pass. Ưu tiên DAU lớn, DAU giữ được sau tháng ra mắt và độ dính cao.",
+      "summaryEn": "Lives on player scale and network effects (matchmaking, playing with friends); revenue follows via skins and battle passes. Weighs large DAU, DAU holding after launch, and high stickiness.",
+      "watch": [
+        "DAU giảm > 30% sau 3 tháng đầu thường báo hiệu hàng đợi ghép trận mỏng dần và vòng xoáy rời game.",
+        "Độ dính DAU/MAU < 0,2 ở game đối kháng là thấp — người chơi không quay lại hằng ngày.",
+        "ARPDAU thấp là bình thường; chỉ đáng lo khi DAU cũng giảm."
+      ],
+      "watchEn": [
+        "DAU falling > 30% after the first 3 months usually means thinning matchmaking queues and a churn spiral.",
+        "DAU/MAU below 0.2 is low for a competitive game — players do not come back daily.",
+        "Low ARPDAU is normal; it only matters when DAU is also falling."
+      ],
+      "weights": { "dau": 0.3, "dauTrend": 0.2, "stickiness": 0.2, "downloadsTrend": 0.15, "arpdau": 0.15 }
+    },
+    {
+      "key": "gacha",
+      "label": "Gacha / thu thập nhân vật",
+      "labelEn": "Gacha / character collection",
+      "match": {
+        "subgenres": ["Squad RPG", "Turn-based RPG", "Action RPG", "Open World Adventure", "Card Battler", "Puzzle RPG", "Hack and Slash", "Beat 'em Up", "Shoot 'em Up", "Interactive Story", "Customization", "Music / Rhythm"]
+      },
+      "summary": "Doanh thu tập trung vào nhóm chi tiêu lớn, theo nhịp banner/phiên bản. Ưu tiên doanh thu, ARPDAU và việc doanh thu giữ được qua các bản cập nhật hơn là số người chơi.",
+      "summaryEn": "Revenue concentrates in big spenders and follows banner/version cycles. Weighs revenue, ARPDAU and revenue holding across updates over raw player count.",
+      "watch": [
+        "So doanh thu tháng gần nhất với trung bình 3 tháng trước: giảm đều qua nhiều bản cập nhật là tín hiệu nội dung không còn kéo chi tiêu.",
+        "Đỉnh doanh thu ngắn theo banner là bình thường; độ ổn định 6 tháng thấp kèm xu hướng giảm mới là xấu.",
+        "ARPDAU cao nhưng DAU nhỏ: phụ thuộc cá voi, rủi ro khi mở rộng sang thị trường khác."
+      ],
+      "watchEn": [
+        "Compare the latest month with the prior 3-month average: steady declines across updates mean content no longer drives spending.",
+        "Short banner spikes are normal; low 6-month stability together with a downward trend is the bad sign.",
+        "High ARPDAU on a small DAU means whale dependence and risk when expanding to other markets."
+      ],
+      "weights": { "revenue": 0.25, "arpdau": 0.2, "revenueTrend": 0.2, "dauTrend": 0.15, "revenueStability": 0.1, "dau": 0.1 }
+    },
+    {
+      "key": "mmo",
+      "label": "MMORPG / sinh tồn online",
+      "labelEn": "MMORPG / online survival",
+      "match": { "subgenres": ["MMORPG", "Survival", "Action Sandbox"] },
+      "summary": "Kinh tế người chơi và cạnh tranh server tạo chi tiêu lớn, nhưng thường giảm dần sau ra mắt (gộp server). Ưu tiên doanh thu, ARPDAU và tốc độ suy giảm DAU.",
+      "summaryEn": "Player economies and server competition drive heavy spending, but titles usually decay after launch (server merges). Weighs revenue, ARPDAU and the pace of DAU decay.",
+      "watch": [
+        "DAU giảm nhanh hơn doanh thu: game đang vắt nhóm chi tiêu còn lại — doanh thu sẽ giảm theo.",
+        "Doanh thu tháng 2–3 thấp hơn 50% tháng ra mắt là mô hình 'đốt UA' điển hình của MMO Trung Quốc.",
+        "Độ dính cao (> 0,35) là điểm cộng lớn với MMO."
+      ],
+      "watchEn": [
+        "DAU falling faster than revenue: the game is squeezing its remaining spenders — revenue will follow.",
+        "Month 2–3 revenue under 50% of launch month is the typical 'UA burn' pattern of Chinese MMOs.",
+        "High stickiness (> 0.35) is a strong plus for an MMO."
+      ],
+      "weights": { "revenue": 0.3, "arpdau": 0.25, "dauTrend": 0.2, "revenueTrend": 0.15, "stickiness": 0.1 }
+    },
+    {
+      "key": "slg",
+      "label": "SLG / chiến thuật 4X",
+      "labelEn": "SLG / 4X strategy",
+      "match": { "subgenres": ["4X Strategy", "Empire Simulation", "Build & Battle", "Real-Time Strategy", "Turn-Based Tactics", "Other Strategy"] },
+      "summary": "Vòng đời dài, LTV cao, doanh thu thường tăng dần nhiều tháng sau ra mắt nhờ UA đều đặn. Ưu tiên ARPDAU, doanh thu và xu hướng doanh thu 6 tháng; DAU nhỏ là bình thường.",
+      "summaryEn": "Long life cycles and high LTV; revenue often keeps growing for months after launch on steady UA. Weighs ARPDAU, revenue and the 6-month revenue trend; small DAU is normal.",
+      "watch": [
+        "Doanh thu 3 tháng gần cao hơn 3 tháng trước là dấu hiệu tốt nhất của một SLG khỏe.",
+        "Lượt tải đều đặn cho thấy nhà phát hành vẫn tin vào LTV và tiếp tục chi UA.",
+        "ARPDAU dưới trung vị cùng nhóm là cảnh báo: SLG sống nhờ chi tiêu sâu."
+      ],
+      "watchEn": [
+        "Last 3 months above the previous 3 is the best sign of a healthy SLG.",
+        "Steady downloads show the publisher still trusts LTV and keeps spending on UA.",
+        "ARPDAU below the cohort median is a warning: SLGs live on deep spending."
+      ],
+      "weights": { "arpdau": 0.3, "revenue": 0.25, "revenueTrend6m": 0.2, "revenueStability": 0.15, "downloads": 0.1 }
+    },
+    {
+      "key": "idle_hybrid",
+      "label": "Idle / hybrid-casual",
+      "labelEn": "Idle / hybrid-casual",
+      "match": { "subgenres": ["Idle RPG", "Idler", "Tower Defense"] },
+      "summary": "Tăng trưởng bằng mua người chơi (UA) và kiếm tiền lai (IAP + quảng cáo). Điều quan trọng là hiệu quả: doanh thu trên mỗi lượt tải và ARPDAU có đủ trả cho UA không, cộng với quy mô lượt tải.",
+      "summaryEn": "Grows through paid UA and hybrid monetisation (IAP + ads). Efficiency is what matters: revenue per download and ARPDAU versus UA cost, plus download scale.",
+      "watch": [
+        "Doanh thu IAP của Sensor Tower không gồm quảng cáo — game nặng quảng cáo bị đánh giá thấp hơn thực tế.",
+        "Lượt tải tăng mà doanh thu/lượt tải giảm: UA đang mua người chơi chất lượng thấp hơn.",
+        "Lượt tải giảm mạnh thường có nghĩa nhà phát hành đã ngừng UA."
+      ],
+      "watchEn": [
+        "Sensor Tower IAP revenue excludes ads — ad-heavy games look weaker than they are.",
+        "Downloads rising while revenue per download falls: UA is buying lower-quality players.",
+        "A sharp drop in downloads usually means the publisher stopped UA."
+      ],
+      "weights": { "rpd": 0.25, "downloads": 0.25, "arpdau": 0.2, "downloadsTrend": 0.15, "revenueTrend": 0.15 }
+    },
+    {
+      "key": "casual",
+      "label": "Casual / puzzle / arcade",
+      "labelEn": "Casual / puzzle / arcade",
+      "match": { "genres": ["Puzzle", "Arcade", "Tabletop", "Party", "Geolocation"], "subgenres": ["Virtual Pet", "Ultracasual"] },
+      "summary": "Kiếm tiền chủ yếu từ quảng cáo và gói nhỏ; sức mạnh nằm ở phễu người chơi rộng và thói quen chơi hằng ngày. Ưu tiên lượt tải, DAU và độ dính.",
+      "summaryEn": "Mostly ad- and small-pack monetised; strength is a wide funnel and a daily habit. Weighs downloads, DAU and stickiness.",
+      "watch": [
+        "Doanh thu IAP thấp không có nghĩa game yếu — kiểm tra DAU và độ dính trước.",
+        "Độ dính > 0,3 cho thấy thói quen chơi hằng ngày, hợp với kiếm tiền quảng cáo.",
+        "Lượt tải tăng đều nhiều tháng là tín hiệu viral/UA còn hiệu quả."
+      ],
+      "watchEn": [
+        "Low IAP revenue does not mean a weak game — check DAU and stickiness first.",
+        "Stickiness above 0.3 shows a daily habit, which suits ad monetisation.",
+        "Downloads growing for several months signals viral or UA still working."
+      ],
+      "weights": { "downloads": 0.3, "dau": 0.25, "stickiness": 0.2, "downloadsTrend": 0.15, "revenue": 0.1 }
+    },
+    {
+      "key": "simulation",
+      "label": "Mô phỏng / sandbox / quản lý",
+      "labelEn": "Simulation / sandbox / tycoon",
+      "match": { "genres": ["Simulation"], "subgenres": ["Simulator", "Tycoon / Crafting", "Time Management"] },
+      "summary": "Giữ chân bằng tiến trình dài và sáng tạo; kiếm tiền vừa phải nhưng bền. Ưu tiên độ dính, DAU và doanh thu, kèm xu hướng DAU.",
+      "summaryEn": "Retains through long progression and creativity; monetisation is moderate but durable. Weighs stickiness, DAU and revenue, plus the DAU trend.",
+      "watch": [
+        "DAU ổn định hoặc tăng nhẹ sau 6 tháng là điển hình của sim khỏe.",
+        "Doanh thu dao động mạnh theo sự kiện mùa là bình thường.",
+        "Độ dính thấp kèm lượt tải cao: người chơi thử rồi bỏ, vòng lặp chính chưa đủ sâu."
+      ],
+      "watchEn": [
+        "Flat or slightly rising DAU after 6 months is typical of a healthy sim.",
+        "Revenue swinging with seasonal events is normal.",
+        "Low stickiness with high downloads: players try and leave, the core loop lacks depth."
+      ],
+      "weights": { "stickiness": 0.25, "dau": 0.25, "revenue": 0.2, "dauTrend": 0.15, "downloadsTrend": 0.15 }
+    },
+    {
+      "key": "sports_racing",
+      "label": "Thể thao / đua xe",
+      "labelEn": "Sports / racing",
+      "match": { "classes": ["Sports & Racing"] },
+      "summary": "Phụ thuộc mùa giải, bản quyền và cộng đồng chơi đối kháng. Ưu tiên DAU, độ dính, doanh thu và xu hướng DAU (lưu ý mùa vụ).",
+      "summaryEn": "Driven by seasons, licences and a competitive community. Weighs DAU, stickiness, revenue and the DAU trend (mind seasonality).",
+      "watch": [
+        "So DAU với cùng kỳ mùa giải trước nếu có — xu hướng 3 tháng có thể lệch do mùa vụ.",
+        "Doanh thu tập trung vào gói thẻ/mùa giải; ổn định qua mùa là điểm cộng.",
+        "Lượt tải tăng mạnh quanh giải đấu lớn rồi giảm là bình thường."
+      ],
+      "watchEn": [
+        "Compare DAU with the same point of the previous season if possible — 3-month trends can be seasonal.",
+        "Revenue concentrates on card packs and season passes; stability across seasons is a plus.",
+        "Download spikes around major tournaments followed by declines are normal."
+      ],
+      "weights": { "dau": 0.25, "stickiness": 0.2, "revenue": 0.2, "dauTrend": 0.2, "downloads": 0.15 }
+    },
+    {
+      "key": "casino",
+      "label": "Casino / bài / mạt chược",
+      "labelEn": "Casino / cards / mahjong",
+      "match": { "classes": ["Casino"] },
+      "summary": "Nhóm người chơi trung thành chi tiêu đều đặn; quy mô mới thấp. Ưu tiên ARPDAU, doanh thu và độ ổn định doanh thu.",
+      "summaryEn": "A loyal base that spends steadily; little new-player scale. Weighs ARPDAU, revenue and revenue stability.",
+      "watch": [
+        "Doanh thu ổn định quan trọng hơn tăng trưởng.",
+        "Rủi ro pháp lý (TQ hạn chế cờ bạc trực tuyến) cần tra thêm qua web research.",
+        "DAU giảm đều là tín hiệu nhóm trung thành đang thu hẹp."
+      ],
+      "watchEn": [
+        "Revenue stability matters more than growth.",
+        "Regulatory risk (China restricts online gambling) needs checking through web research.",
+        "Steadily falling DAU means the loyal base is shrinking."
+      ],
+      "weights": { "arpdau": 0.35, "revenue": 0.25, "revenueStability": 0.2, "dau": 0.2 }
+    },
+    {
+      "key": "default",
+      "label": "Cân bằng (chưa rõ genre)",
+      "labelEn": "Balanced (genre unknown)",
+      "match": {},
+      "summary": "Không xác định được genre trên Sensor Tower: dùng trọng số cân bằng giữa quy mô, doanh thu và xu hướng.",
+      "summaryEn": "Genre not known on Sensor Tower: uses balanced weights across scale, revenue and trends.",
+      "watch": [
+        "Kiểm tra lại taxonomy của game trên Sensor Tower và chọn pattern phù hợp nếu cần."
+      ],
+      "watchEn": [
+        "Double-check the game's Sensor Tower taxonomy and pick a matching pattern if needed."
+      ],
+      "weights": { "revenue": 0.25, "dau": 0.25, "downloads": 0.15, "dauTrend": 0.15, "revenueTrend": 0.1, "stickiness": 0.1 }
+    }
+  ]
+}

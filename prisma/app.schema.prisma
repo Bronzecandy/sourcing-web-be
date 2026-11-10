@@ -665,3 +665,61 @@ model RadarGameSnapshot {
   @@id([date, appId])
   @@index([appId, date])
 }
+
+/// TapTap appId → Sensor Tower unified app / Steam app. status: auto | confirmed | none | unmapped.
+model GameMarketMapping {
+  appId        Int       @id
+  title        String
+  stStatus     String    @default("unmapped")
+  stUnifiedId  String?
+  stName       String?
+  stMethod     String?
+  stRef        Json?
+  steamStatus  String    @default("unmapped")
+  steamAppId   Int?
+  steamName    String?
+  steamMethod  String?
+  steamRef     Json?
+  /// Web-searched international names, developer/publisher (EN), Steam URL.
+  identity     Json?
+  identityAt   DateTime? @db.Timestamptz(6)
+  checkedAt    DateTime  @default(now()) @db.Timestamptz(6)
+  confirmedBy  String?
+  confirmedAt  DateTime? @db.Timestamptz(6)
+  createdAt    DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime  @updatedAt @db.Timestamptz(6)
+
+  @@index([stUnifiedId])
+  @@index([steamAppId])
+}
+
+/// status: queued | running | needs_mapping | done | failed.
+model DeepResearchRun {
+  id            String    @id @default(cuid())
+  appId         Int
+  title         String
+  iconUrl       String?
+  status        String    @default("queued")
+  stage         String?
+  stages        Json?
+  context       Json?
+  createdById   String?
+  createdByName String?
+  taptap        Json?
+  mapping       Json?
+  candidates    Json?
+  market        Json?
+  steam         Json?
+  web           Json?
+  summary       Json?
+  verdict       String?
+  marketScore   Float?
+  error         String?
+  startedAt     DateTime? @db.Timestamptz(6)
+  finishedAt    DateTime? @db.Timestamptz(6)
+  createdAt     DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime  @updatedAt @db.Timestamptz(6)
+
+  @@index([appId, createdAt])
+  @@index([createdAt])
+}
