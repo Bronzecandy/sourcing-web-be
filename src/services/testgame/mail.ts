@@ -297,8 +297,12 @@ export async function sendCampaignMail(
   return status;
 }
 
-export async function sendTestMail(code: string, c: Campaign, toEmail: string, actor: string) {
-  const sample = await prismaApp.testAssignment.findFirst({ where: { campaignId: c.id }, orderBy: { createdAt: "asc" } });
+/** Gửi thử với dữ liệu của tester đang chọn ở phần xem trước (mặc định tester đầu tiên), giống hệt bản xem trước. */
+export async function sendTestMail(code: string, c: Campaign, toEmail: string, actor: string, assignmentId?: string | null) {
+  const sample = assignmentId
+    ? await prismaApp.testAssignment.findFirst({ where: { id: assignmentId, campaignId: c.id } })
+    : await prismaApp.testAssignment.findFirst({ where: { campaignId: c.id }, orderBy: { createdAt: "asc" } });
+  if (assignmentId && !sample) throw new TestGameError("Tester không thuộc game test này", 400);
   const mail = await renderCampaignMail(code, c, sample);
   const log = await prismaApp.testMailLog.create({
     data: { campaignId: c.id, assignmentId: null, code, toEmail, subject: mail.subject, status: "queued", trigger: "test" },

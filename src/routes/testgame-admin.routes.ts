@@ -194,7 +194,8 @@ router.post("/campaigns/:id/mail-test", (req: AuthedRequest, res) =>
   handle(res, async () => {
     const c = await prismaApp.testCampaign.findUnique({ where: { id: String(req.params.id) } });
     if (!c) throw new TestGameError("Không tìm thấy game test", 404);
-    return sendTestMail(String(req.body?.code ?? "M1"), c, actor(req), actor(req));
+    const assignmentId = typeof req.body?.assignmentId === "string" && req.body.assignmentId ? req.body.assignmentId : null;
+    return sendTestMail(String(req.body?.code ?? "M1"), c, actor(req), actor(req), assignmentId);
   }),
 );
 router.get("/mail-templates", (_req, res) => handle(res, () => listMailTemplates()));
