@@ -499,7 +499,7 @@ model TestMailLog {
   code         String
   toEmail      String
   subject      String?
-  /// sent | failed
+  /// queued (đã giao bot, chờ kết quả) | sent | failed
   status       String
   error        String?
   attempts     Int             @default(1)
@@ -511,6 +511,25 @@ model TestMailLog {
 
   @@index([campaignId, code])
   @@index([assignmentId, code])
+}
+
+/// Việc giao bot Apps Script (testgame@garena.vn) qua trạm trung chuyển trên VM data; kết quả về thì áp vào bản ghi trong context.
+model TestBotJob {
+  id         String    @id @default(cuid())
+  /// sendMail | createFolder | shareFolder
+  action     String
+  campaignId String?
+  /// { kind: "mail", mailLogId } | { kind: "folder" } | { kind: "share", assignmentIds }
+  context    Json
+  /// queued | done | failed
+  status     String    @default("queued")
+  error      String?
+  result     Json?
+  createdAt  DateTime  @default(now()) @db.Timestamptz(6)
+  finishedAt DateTime? @db.Timestamptz(6)
+
+  @@index([status, createdAt])
+  @@index([campaignId, action, status])
 }
 
 /// Tag dùng chung cho mọi template (mỗi tag có điểm = một section report).

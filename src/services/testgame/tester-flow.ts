@@ -5,7 +5,7 @@ import { genreLabel } from "../tester-config";
 import { audit, getSettings, isoDate, normalizeEmail, TestGameError, todayIct } from "./common";
 import { EVAL_FORMATS, labelOf } from "./defaults";
 import { deleteStoredFile, fileDto, storeUpload, type FileKind, type UploadedTemp } from "./files";
-import { shareDriveFolder } from "./google-bot";
+import { queueDriveShare } from "./bot-jobs";
 import { queueEvidenceReview } from "./evidence-ai";
 import { responseDeadline, sendCampaignMail } from "./mail";
 import { campaignTemplate, cleanAnswers, type Answers } from "./templates";
@@ -165,14 +165,7 @@ export async function respondInvite(user: AuthUserDto, id: string, body: { actio
     void (async () => {
       await sendCampaignMail("M3", c, updated).catch((e) => console.error("[testgame] M3", e));
       if (testing) await sendCampaignMail("M4", c, updated).catch((e) => console.error("[testgame] M4", e));
-      if (c.apkFolderId) {
-        try {
-          const r = await shareDriveFolder(c.apkFolderId, [a.email]);
-          await prismaApp.testAssignment.update({ where: { id }, data: { driveShare: r[a.email] ?? "ok" } });
-        } catch (err) {
-          await prismaApp.testAssignment.update({ where: { id }, data: { driveShare: (err as Error).message.slice(0, 200) } });
-        }
-      }
+      if (c.apkFolderId) await queueDriveShare(c.id, c.apkFolderId, [{ id, email: a.email }]).catch((e) => console.error("[testgame] share", e));
     })();
   }
   return myTestGame(user, id);

@@ -42,7 +42,7 @@ export async function runTestGameSchedule(opts: { actor?: string } = {}): Promis
   const today = todayIct();
   const summary: RunSummary = { date: today, at: new Date().toISOString(), campaigns: 0, mails: {}, failed: 0, transitions: [] };
   const count = (code: string, r: string) => {
-    if (r === "sent") summary.mails[code] = (summary.mails[code] ?? 0) + 1;
+    if (r === "sent" || r === "queued") summary.mails[code] = (summary.mails[code] ?? 0) + 1;
     if (r === "failed") summary.failed++;
   };
   try {

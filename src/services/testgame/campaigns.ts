@@ -9,7 +9,8 @@ import { genreLabel } from "../tester-config";
 import { audit, getSettings, isoDate, parseDateInput, publicUrl, TestGameError, todayIct, viDate } from "./common";
 import { DECISIONS, EVAL_FORMATS, labelOf, MAIL_CODES, PLATFORMS, SECURITY_LEVELS, SOURCES } from "./defaults";
 import { fileDto, uploadRoot } from "./files";
-import { createDriveFolder, driveAvailable } from "./google-bot";
+import { folderJobPending, queueDriveFolder } from "./bot-jobs";
+import { driveAvailable } from "./google-bot";
 import { nextMail, sendCampaignMail } from "./mail";
 import { startConfigRun } from "./report";
 import { startDueCampaigns } from "./scheduler";
@@ -172,24 +173,22 @@ function folderName(c: Pick<CampaignRow, "gameName" | "startDate">): string {
   return `[Confidential] ${mm}.${d.getUTCFullYear()} | ${c.gameName}`;
 }
 
-/** Tạo folder APK trên Drive gốc; lỗi chỉ ghi lại để Admin bấm "Tạo lại folder". */
+/** Giao bot tạo folder APK trên Drive gốc (kết quả áp ở bot-jobs); lỗi chỉ ghi lại để Admin bấm "Tạo lại folder". */
 async function ensureDriveFolder(c: CampaignRow, actor: string): Promise<void> {
   if (c.noTest || c.apkFolderId) return;
   const settings = await getSettings();
   let error: string | null = null;
-  if (!driveAvailable()) error = "Chưa cấu hình Apps Script (TESTGAME_APPS_SCRIPT_URL)";
+  if (!driveAvailable()) error = "Chưa cấu hình bot Drive (TESTGAME_BOT_RELAY_URL)";
   else if (!settings.driveRootFolderId) error = "Chưa cấu hình thư mục Drive gốc";
-  if (error) {
-    await prismaApp.testCampaign.update({ where: { id: c.id }, data: { apkFolderError: error } });
-    return;
+  else if (await folderJobPending(c.id)) return;
+  else {
+    try {
+      await queueDriveFolder(c.id, settings.driveRootFolderId, folderName(c), actor);
+    } catch (err) {
+      error = (err as Error).message.slice(0, 300);
+    }
   }
-  try {
-    const folder = await createDriveFolder(settings.driveRootFolderId, folderName(c));
-    await prismaApp.testCampaign.update({ where: { id: c.id }, data: { apkFolderId: folder.id, apkFolderUrl: folder.url, apkFolderError: null } });
-    await audit(c.id, actor, "drive.folder_created", { url: folder.url });
-  } catch (err) {
-    await prismaApp.testCampaign.update({ where: { id: c.id }, data: { apkFolderError: (err as Error).message.slice(0, 300) } });
-  }
+  await prismaApp.testCampaign.update({ where: { id: c.id }, data: { apkFolderError: error } });
 }
 
 export async function retryDriveFolder(id: string, actor: string) {
@@ -441,7 +440,7 @@ export function campaignSummary(
   settings: Awaited<ReturnType<typeof getSettings>>,
 ) {
   const a = c.assignments;
-  const sentCodes = new Set(c.mailLogs.filter((m) => m.status === "sent" && m.trigger !== "test").map((m) => m.code));
+  const sentCodes = new Set(c.mailLogs.filter((m) => (m.status === "sent" || m.status === "queued") && m.trigger !== "test").map((m) => m.code));
   const mails = Object.fromEntries(
     MAIL_CODES.map((code) => {
       const logs = c.mailLogs.filter((m) => m.code === code && m.trigger !== "test");
@@ -580,6 +579,7 @@ export async function campaignDetail(id: string) {
     footageRequired: c.footageRequired,
     apkFolderUrl: c.apkFolderUrl,
     apkFolderError: c.apkFolderError,
+    apkFolderPending: !c.noTest && !c.apkFolderId ? await folderJobPending(c.id) : false,
     coordinatorEmail: c.coordinatorEmail,
     team: c.team,
     conclusion: c.conclusion,

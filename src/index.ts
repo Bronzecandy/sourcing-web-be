@@ -6,6 +6,7 @@ import { warmLibraryCache } from "./services/library-store";
 import { loadResponseDiskCache } from "./utils/cache";
 import { startCrawlDbProbeLoop } from "./utils/crawl-db-circuit";
 import { installProcessDiagnostics, logDiag, logDiagError } from "./utils/process-diagnostics";
+import { startBotJobSync } from "./services/testgame/bot-jobs";
 import { tickTestGameSchedule } from "./services/testgame/scheduler";
 
 installProcessDiagnostics();
@@ -66,7 +67,10 @@ async function start(): Promise<void> {
       nodeEnv: process.env.NODE_ENV ?? "(unset)",
     });
     void warmAppDb();
-    if (process.env.DATABASE_URL_APP) setTimeout(() => void tickTestGameSchedule(), 30_000);
+    if (process.env.DATABASE_URL_APP) {
+      setTimeout(() => void tickTestGameSchedule(), 30_000);
+      startBotJobSync();
+    }
     if (process.env.SKIP_WARMUP === "1") {
       console.log(`[warm-up] Skipped (SKIP_WARMUP=1)`);
     } else {

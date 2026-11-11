@@ -1,9 +1,13 @@
 import nodemailer, { type Transporter } from "nodemailer";
+import type { Prisma } from "../../../generated/prisma-app/client";
+import { prismaApp } from "../../utils/prisma-app";
 
 /**
- * Gửi mail + Drive qua Apps Script web app chạy dưới testgame@garena.vn
- * (scripts/apps-script/testgame-bot.gs). Gmail có 2FA nên mật khẩu thường không SMTP được;
- * SMTP chỉ dùng khi có App Password (TESTGAME_SMTP_USER / TESTGAME_SMTP_PASS).
+ * Gửi mail + Drive bằng bot Apps Script chạy dưới testgame@garena.vn (scripts/apps-script/testgame-bot.gs).
+ * Sea chỉ cho web app "Anyone within Sea" và BE nằm trong mạng nội bộ, nên hai bên không gọi thẳng nhau được:
+ * BE đặt việc lên trạm `/bot` của taptap-proxy (VM data, TESTGAME_BOT_RELAY_URL), script ghé mỗi phút nhận việc
+ * và trả kết quả; bot-jobs.ts lấy kết quả về áp vào mail log / folder / share.
+ * SMTP (TESTGAME_SMTP_USER / TESTGAME_SMTP_PASS = App Password) chỉ gửi mail, dùng khi không cấu hình trạm.
  */
 
 export interface MailAttachment {
@@ -22,12 +26,19 @@ export interface OutgoingMail {
   attachments?: MailAttachment[];
 }
 
-function scriptUrl(): string | null {
-  return process.env.TESTGAME_APPS_SCRIPT_URL?.trim() || null;
+export type BotAction = "sendMail" | "createFolder" | "shareFolder";
+
+export type BotJobContext =
+  | { kind: "mail"; mailLogId: string }
+  | { kind: "folder"; actor: string }
+  | { kind: "share"; assignmentIds: string[] };
+
+function relayBase(): string | null {
+  return process.env.TESTGAME_BOT_RELAY_URL?.trim().replace(/\/+$/, "") || null;
 }
 
-function scriptSecret(): string | null {
-  return process.env.TESTGAME_APPS_SCRIPT_SECRET?.trim() || null;
+function relayKey(): string | null {
+  return process.env.TESTGAME_BOT_RELAY_KEY?.trim() || process.env.TAPTAP_PROXY_KEY?.trim() || null;
 }
 
 function smtpAuth(): { user: string; pass: string } | null {
@@ -36,53 +47,71 @@ function smtpAuth(): { user: string; pass: string } | null {
   return user && pass ? { user, pass } : null;
 }
 
-export function mailTransport(): "apps_script" | "smtp" | null {
-  if (scriptUrl() && scriptSecret()) return "apps_script";
+export function mailTransport(): "relay" | "smtp" | null {
+  if (relayBase() && relayKey()) return "relay";
   if (smtpAuth()) return "smtp";
   return null;
 }
 
 export function driveAvailable(): boolean {
-  return Boolean(scriptUrl() && scriptSecret());
+  return Boolean(relayBase() && relayKey());
 }
 
-async function callScript<T>(action: string, payload: Record<string, unknown>): Promise<T> {
-  const url = scriptUrl();
-  const secret = scriptSecret();
-  if (!url || !secret) throw new Error("Chưa cấu hình TESTGAME_APPS_SCRIPT_URL / TESTGAME_APPS_SCRIPT_SECRET");
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ secret, action, ...payload }),
-    redirect: "follow",
-    signal: AbortSignal.timeout(60_000),
+export async function relayCall<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
+  const base = relayBase();
+  const key = relayKey();
+  if (!base || !key) throw new Error("Chưa cấu hình trạm bot (TESTGAME_BOT_RELAY_URL)");
+  const res = await fetch(`${base}/bot${path}`, {
+    method,
+    headers: { "x-api-key": key, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    signal: AbortSignal.timeout(30_000),
   });
   const text = await res.text();
-  let json: { ok?: boolean; error?: string } & Record<string, unknown>;
+  let json: { success?: boolean; data?: T; error?: string };
   try {
     json = JSON.parse(text);
   } catch {
-    throw new Error(`Apps Script trả về không phải JSON (HTTP ${res.status}): ${text.slice(0, 160)}`);
+    throw new Error(`Trạm bot trả về không phải JSON (HTTP ${res.status}): ${text.slice(0, 160)}`);
   }
-  if (!json.ok) throw new Error(json.error || `Apps Script lỗi (HTTP ${res.status})`);
-  return json as T;
+  if (!res.ok || !json.success) throw new Error(json.error || `Trạm bot lỗi (HTTP ${res.status})`);
+  return json.data as T;
+}
+
+/** Ghi việc vào DB rồi đặt lên trạm; đặt không được thì việc chốt failed và ném lỗi cho nơi gọi. */
+export async function enqueueBotJob(action: BotAction, payload: Record<string, unknown>, context: BotJobContext, campaignId: string | null): Promise<string> {
+  const job = await prismaApp.testBotJob.create({ data: { action, campaignId, context: context as unknown as Prisma.InputJsonValue } });
+  try {
+    await relayCall("POST", "/jobs", { id: job.id, action, payload });
+  } catch (err) {
+    const error = (err as Error).message.slice(0, 500);
+    await prismaApp.testBotJob.update({ where: { id: job.id }, data: { status: "failed", error, finishedAt: new Date() } });
+    throw err;
+  }
+  return job.id;
 }
 
 let smtp: Transporter | null = null;
 
-export async function sendMail(mail: OutgoingMail): Promise<void> {
+/** Qua trạm: trả "queued", mail log cập nhật khi bot báo kết quả. SMTP: gửi ngay, trả "sent". */
+export async function deliverMail(mail: OutgoingMail, mailLogId: string, campaignId: string | null): Promise<"queued" | "sent"> {
   const mode = mailTransport();
-  if (mode === "apps_script") {
-    await callScript("sendMail", {
-      to: mail.to,
-      subject: mail.subject,
-      htmlBody: mail.html,
-      body: mail.text,
-      name: mail.fromName,
-      replyTo: mail.replyTo ?? undefined,
-      attachments: mail.attachments ?? [],
-    });
-    return;
+  if (mode === "relay") {
+    await enqueueBotJob(
+      "sendMail",
+      {
+        to: mail.to,
+        subject: mail.subject,
+        htmlBody: mail.html,
+        body: mail.text,
+        name: mail.fromName,
+        replyTo: mail.replyTo ?? undefined,
+        attachments: mail.attachments ?? [],
+      },
+      { kind: "mail", mailLogId },
+      campaignId,
+    );
+    return "queued";
   }
   if (mode === "smtp") {
     const auth = smtpAuth()!;
@@ -96,28 +125,51 @@ export async function sendMail(mail: OutgoingMail): Promise<void> {
       replyTo: mail.replyTo ?? undefined,
       attachments: (mail.attachments ?? []).map((a) => ({ filename: a.name, contentType: a.mimeType, content: Buffer.from(a.base64, "base64") })),
     });
-    return;
+    return "sent";
   }
-  throw new Error("Chưa cấu hình gửi mail (Apps Script hoặc Gmail App Password)");
+  throw new Error("Chưa cấu hình gửi mail (bot Apps Script qua trạm hoặc Gmail App Password)");
 }
 
-export async function createDriveFolder(parentId: string, name: string): Promise<{ id: string; url: string }> {
-  const r = await callScript<{ id: string; url: string }>("createFolder", { parentId, name });
-  return { id: r.id, url: r.url };
+export interface BotStatus {
+  transport: "relay" | "smtp" | null;
+  drive: boolean;
+  /** Bot Apps Script ghé trạm trong 3 phút gần nhất */
+  online?: boolean;
+  account?: string | null;
+  quota?: number | null;
+  lastPollAt?: string | null;
+  /** Việc trên trạm chưa có kết quả */
+  pending?: number;
+  error?: string;
 }
 
-export async function shareDriveFolder(folderId: string, emails: string[]): Promise<Record<string, string>> {
-  const r = await callScript<{ results: Record<string, string> }>("shareFolder", { folderId, emails });
-  return r.results ?? {};
-}
+const ONLINE_MS = 3 * 60_000;
 
-export async function botStatus(): Promise<{ transport: string | null; drive: boolean; account?: string; quota?: number; error?: string }> {
+export async function botStatus(): Promise<BotStatus> {
   const transport = mailTransport();
   if (!driveAvailable()) return { transport, drive: false };
   try {
-    const r = await callScript<{ email?: string; quota?: number }>("ping", {});
-    return { transport, drive: true, account: r.email, quota: r.quota };
+    const s = await relayCall<{
+      lastPoll: { at: string; account: string | null; quota: number | null } | null;
+      counts: { pending: number; claimed: number; finished: number };
+    }>("GET", "/status");
+    const lastPollAt = s.lastPoll?.at ?? null;
+    const online = Boolean(lastPollAt && Date.now() - Date.parse(lastPollAt) < ONLINE_MS);
+    return {
+      transport,
+      drive: true,
+      online,
+      account: s.lastPoll?.account ?? null,
+      quota: s.lastPoll?.quota ?? null,
+      lastPollAt,
+      pending: s.counts.pending + s.counts.claimed,
+      error: online
+        ? undefined
+        : lastPollAt
+          ? "Bot Apps Script không ghé trạm hơn 3 phút — kiểm tra trigger poll trong script"
+          : "Bot Apps Script chưa ghé trạm lần nào — chạy hàm setup() trong script",
+    };
   } catch (err) {
-    return { transport, drive: false, error: (err as Error).message };
+    return { transport, drive: true, online: false, error: (err as Error).message };
   }
 }

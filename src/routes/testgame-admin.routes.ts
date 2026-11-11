@@ -48,6 +48,7 @@ import {
   updateAssignment,
 } from "../services/testgame/assignments";
 import { absolutePath, deleteStoredFile, fileDto, storeUpload, uploadTmpDir } from "../services/testgame/files";
+import { syncBotJobs } from "../services/testgame/bot-jobs";
 import { botStatus } from "../services/testgame/google-bot";
 import { listMailTemplates, previewMail, saveMailTemplate, sendTestMail } from "../services/testgame/mail";
 import {
@@ -208,7 +209,12 @@ router.get("/tags", (_req, res) => handle(res, () => listTags()));
 router.post("/tags", (req: AuthedRequest, res) => handle(res, () => saveTag(req.body ?? {}, actor(req))));
 router.delete("/tags/:name", (req: AuthedRequest, res) => handle(res, () => deleteTag(String(req.params.name), actor(req))));
 
-router.get("/settings", (_req, res) => handle(res, async () => ({ settings: await getSettings(), bot: await botStatus(), scheduler: await schedulerStatus() })));
+router.get("/settings", (_req, res) =>
+  handle(res, async () => {
+    await syncBotJobs();
+    return { settings: await getSettings(), bot: await botStatus(), scheduler: await schedulerStatus() };
+  }),
+);
 router.patch("/settings", (req: AuthedRequest, res) => handle(res, () => saveSettings(req.body ?? {}, actor(req))));
 router.post("/scheduler/run", (req: AuthedRequest, res) => handle(res, () => runTestGameSchedule({ actor: actor(req) })));
 

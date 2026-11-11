@@ -3,7 +3,7 @@ import { prismaApp } from "../../utils/prisma-app";
 import { addDays, audit, daysBetween, getSettings, ictDateOf, isoDate, publicUrl, TestGameError, todayIct, viDate } from "./common";
 import { DEFAULT_MAIL_TEMPLATES, EVAL_FORMATS, labelOf, MAIL_CODES, type TestGameSettings } from "./defaults";
 import { absolutePath } from "./files";
-import { sendMail, type MailAttachment } from "./google-bot";
+import { deliverMail, type MailAttachment } from "./google-bot";
 
 type Campaign = Awaited<ReturnType<typeof prismaApp.testCampaign.findUniqueOrThrow>>;
 type Assignment = Awaited<ReturnType<typeof prismaApp.testAssignment.findUniqueOrThrow>>;
@@ -246,11 +246,24 @@ export async function previewMail(code: string, opts: { campaignId?: string | nu
   return { ...renderTemplate(subject, body, params), sample: false, to: a?.email ?? null, attachments: guide.names };
 }
 
-export type SendResult = "sent" | "failed" | "skipped";
+export type SendResult = "sent" | "queued" | "failed" | "skipped";
+
+/** Giao mail cho bot (log ở "queued" tới khi bot báo kết quả) hoặc gửi SMTP ngay; lỗi thì log chốt "failed". */
+async function deliverLogged(logId: string, campaignId: string, mail: Parameters<typeof deliverMail>[0]): Promise<{ status: "sent" | "queued" | "failed"; error: string | null }> {
+  try {
+    const status = await deliverMail(mail, logId, campaignId);
+    if (status === "sent") await prismaApp.testMailLog.update({ where: { id: logId }, data: { status: "sent", error: null } });
+    return { status, error: null };
+  } catch (err) {
+    const error = (err as Error).message.slice(0, 500);
+    await prismaApp.testMailLog.update({ where: { id: logId }, data: { status: "failed", error } });
+    return { status: "failed", error };
+  }
+}
 
 /**
  * Gửi một mốc mail cho một tester. Mỗi mốc gửi tối đa một lần (trừ `force` khi Admin bấm gửi lại);
- * mốc lỗi được thử lại ở lần chạy sau, tối đa 3 lần.
+ * mốc lỗi được thử lại ở lần chạy sau, tối đa 3 lần; mốc đang chờ bot gửi thì không giao lại.
  */
 export async function sendCampaignMail(
   code: string,
@@ -259,35 +272,27 @@ export async function sendCampaignMail(
   opts: { trigger?: "auto" | "manual"; force?: boolean; actor?: string } = {},
 ): Promise<SendResult> {
   const existing = await prismaApp.testMailLog.findFirst({ where: { assignmentId: a.id, code, trigger: { not: "test" } }, orderBy: { sentAt: "desc" } });
-  if (!opts.force && existing && (existing.status === "sent" || existing.attempts >= 3)) return "skipped";
+  if (!opts.force && existing && (existing.status === "sent" || existing.status === "queued" || existing.attempts >= 3)) return "skipped";
   const mail = await renderCampaignMail(code, c, a);
   if (!mail.template.enabled) return "skipped";
-  let status: "sent" | "failed" = "sent";
-  let error: string | null = null;
-  try {
-    await sendMail({
-      to: a.email,
-      subject: mail.subject,
-      html: mail.html,
-      text: mail.text,
-      fromName: mail.settings.senderName,
-      replyTo: c.coordinatorEmail,
-      attachments: mail.attachments,
-    });
-  } catch (err) {
-    status = "failed";
-    error = (err as Error).message.slice(0, 500);
-  }
-  if (existing && existing.status === "failed" && !opts.force) {
-    await prismaApp.testMailLog.update({
-      where: { id: existing.id },
-      data: { status, error, attempts: existing.attempts + 1, sentAt: new Date(), subject: mail.subject },
-    });
-  } else {
-    await prismaApp.testMailLog.create({
-      data: { campaignId: c.id, assignmentId: a.id, code, toEmail: a.email, subject: mail.subject, status, error, trigger: opts.trigger ?? "auto" },
-    });
-  }
+  const log =
+    existing && existing.status === "failed" && !opts.force
+      ? await prismaApp.testMailLog.update({
+          where: { id: existing.id },
+          data: { status: "queued", error: null, attempts: existing.attempts + 1, sentAt: new Date(), subject: mail.subject },
+        })
+      : await prismaApp.testMailLog.create({
+          data: { campaignId: c.id, assignmentId: a.id, code, toEmail: a.email, subject: mail.subject, status: "queued", trigger: opts.trigger ?? "auto" },
+        });
+  const { status } = await deliverLogged(log.id, c.id, {
+    to: a.email,
+    subject: mail.subject,
+    html: mail.html,
+    text: mail.text,
+    fromName: mail.settings.senderName,
+    replyTo: c.coordinatorEmail,
+    attachments: mail.attachments,
+  });
   if (opts.trigger === "manual") await audit(c.id, opts.actor, "mail.resend", { code, to: a.email, status });
   return status;
 }
@@ -295,28 +300,21 @@ export async function sendCampaignMail(
 export async function sendTestMail(code: string, c: Campaign, toEmail: string, actor: string) {
   const sample = await prismaApp.testAssignment.findFirst({ where: { campaignId: c.id }, orderBy: { createdAt: "asc" } });
   const mail = await renderCampaignMail(code, c, sample);
-  let status: "sent" | "failed" = "sent";
-  let error: string | null = null;
-  try {
-    await sendMail({
-      to: toEmail,
-      subject: `[Gửi thử] ${mail.subject}`,
-      html: mail.html,
-      text: mail.text,
-      fromName: mail.settings.senderName,
-      replyTo: c.coordinatorEmail,
-      attachments: mail.attachments,
-    });
-  } catch (err) {
-    status = "failed";
-    error = (err as Error).message.slice(0, 500);
-  }
-  await prismaApp.testMailLog.create({
-    data: { campaignId: c.id, assignmentId: null, code, toEmail, subject: mail.subject, status, error, trigger: "test" },
+  const log = await prismaApp.testMailLog.create({
+    data: { campaignId: c.id, assignmentId: null, code, toEmail, subject: mail.subject, status: "queued", trigger: "test" },
+  });
+  const { status, error } = await deliverLogged(log.id, c.id, {
+    to: toEmail,
+    subject: `[Gửi thử] ${mail.subject}`,
+    html: mail.html,
+    text: mail.text,
+    fromName: mail.settings.senderName,
+    replyTo: c.coordinatorEmail,
+    attachments: mail.attachments,
   });
   await audit(c.id, actor, "mail.test", { code, to: toEmail, status });
   if (status === "failed") throw new TestGameError(`Gửi thử lỗi: ${error}`, 502);
-  return { sent: true };
+  return { sent: status === "sent", queued: status === "queued" };
 }
 
 /** Mốc mail kế tiếp chưa gửi: { code, date } hoặc null ("-"). */
