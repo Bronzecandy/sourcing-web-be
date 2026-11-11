@@ -1,4 +1,6 @@
+import { pool } from "../utils/prisma";
 import { prismaApp } from "../utils/prisma-app";
+import { withDbRetry } from "../utils/db-retry";
 import { toPostgresIntAppId } from "../utils/pg-int-app-id";
 import { fetchTapTapDetailRawViaProxy, searchTapTapApps } from "../utils/taptap-proxy-fetch";
 import {
@@ -95,19 +97,106 @@ async function toOptions(apps: TapTapSearchApp[]): Promise<CampaignGameOption[]>
   });
 }
 
-/** Tìm game trên TapTap theo tên, link hoặc TapTap ID. */
+const CRAWL_SEARCH_DAYS = 60;
+
+type CrawledRaw = TapTapRawApp & { platform_info?: { supported_platforms?: Array<{ key?: string }> } };
+
+function fromCrawl(appId: number, raw: CrawledRaw): TapTapSearchApp {
+  return normalizeTapTapSearchApp({
+    ...raw,
+    id: appId,
+    supported_platforms: raw.supported_platforms ?? raw.platform_info?.supported_platforms,
+  });
+}
+
+/**
+ * Bản chụp TapTap từ dữ liệu bảng xếp hạng đã crawl — dùng khi proxy và TapTap trực tiếp đều lỗi.
+ * Chỉ có game từng lên bảng; tên tiếng Anh tra qua mapping Sensor Tower / Steam và Radar.
+ */
+async function searchCrawledApps(query: string, appId: number | null): Promise<TapTapSearchApp[]> {
+  const ids = new Set<number>(appId ? [appId] : []);
+  if (!appId) {
+    const contains = { contains: query, mode: "insensitive" as const };
+    const [mapped, radar] = await Promise.all([
+      prismaApp.gameMarketMapping
+        .findMany({ where: { OR: [{ title: contains }, { stName: contains }, { steamName: contains }] }, select: { appId: true }, take: 10 })
+        .catch(() => []),
+      prismaApp.radarRecapRow.findMany({ where: { titleEn: contains }, select: { appId: true }, distinct: ["appId"], take: 10 }).catch(() => []),
+    ]);
+    for (const r of [...mapped, ...radar]) ids.add(r.appId);
+  }
+
+  const byId = ids.size
+    ? await withDbRetry(
+        () =>
+          pool.query<{ appId: number; raw: CrawledRaw }>(
+            `SELECT DISTINCT ON ("appId") "appId", raw FROM "AppRank"
+              WHERE "appId" = ANY($1::int[]) AND raw IS NOT NULL
+              ORDER BY "appId", date DESC`,
+            [[...ids]],
+          ),
+        "tester-taptap-crawl-ids",
+      )
+    : { rows: [] };
+  const byTitle = appId
+    ? { rows: [] }
+    : await withDbRetry(
+        () =>
+          pool.query<{ appId: number; raw: CrawledRaw }>(
+            `SELECT DISTINCT ON ("appId") "appId", raw FROM "AppRank"
+              WHERE date >= CURRENT_DATE - $2::int AND raw->>'title' ILIKE $1
+              ORDER BY "appId", date DESC
+              LIMIT 20`,
+            [`%${query.replace(/[\\%_]/g, (c) => `\\${c}`)}%`, CRAWL_SEARCH_DAYS],
+          ),
+        "tester-taptap-crawl-title",
+      );
+
+  const seen = new Set<number>();
+  const apps = [...byId.rows, ...byTitle.rows]
+    .filter((r) => r.raw && typeof r.raw.title === "string" && !seen.has(r.appId) && seen.add(r.appId))
+    .map((r) => fromCrawl(r.appId, r.raw));
+  const q = query.toLowerCase();
+  const rank = (a: TapTapSearchApp) => (a.title.toLowerCase() === q ? 0 : a.title.toLowerCase().startsWith(q) ? 1 : 2);
+  return apps.sort((a, b) => rank(a) - rank(b) || (b.fansCount ?? 0) - (a.fansCount ?? 0)).slice(0, 10);
+}
+
+async function searchLive(query: string, appId: number | null): Promise<TapTapSearchApp[]> {
+  if (!appId) return searchTapTapApps(query, 10);
+  const detail = (await fetchTapTapDetailRawViaProxy(appId)) ?? (await fetchAppDetailRaw(appId));
+  if (!detail || typeof detail.title !== "string") return [];
+  const base = normalizeTapTapSearchApp({ ...(detail as TapTapRawApp), id: appId });
+  // Chi tiết app không có nhà phát hành/nền tảng → tìm theo tên để lấy đủ.
+  const byTitle = await searchTapTapApps(base.title, 10).catch(() => []);
+  return [byTitle.find((a) => a.id === appId) ?? base];
+}
+
+/** Tìm game trên TapTap theo tên, link hoặc TapTap ID; TapTap không truy cập được thì tra dữ liệu đã crawl. */
 export async function searchCampaignGames(q: string): Promise<CampaignGameOption[]> {
   const query = q.trim().slice(0, 100);
   if (!query) return [];
   const appId = parseAppIdFromInput(query);
-  if (!appId) return toOptions(await searchTapTapApps(query, 10));
-
-  const detail = (await fetchTapTapDetailRawViaProxy(appId)) ?? (await fetchAppDetailRaw(appId));
-  if (!detail || typeof detail.title !== "string") {
-    throw new TesterAdminError("Không tìm thấy game với TapTap ID này", 404);
+  let liveError: string | null = null;
+  try {
+    const live = await searchLive(query, appId);
+    if (live.length > 0) return toOptions(live);
+  } catch (err) {
+    liveError = (err as Error).message;
+    console.warn(`[tester-taptap] TapTap search "${query}" failed, falling back to crawled data: ${liveError}`);
   }
-  const base = normalizeTapTapSearchApp({ ...(detail as TapTapRawApp), id: appId });
-  // Chi tiết app không có nhà phát hành/nền tảng → tìm theo tên để lấy đủ.
-  const byTitle = await searchTapTapApps(base.title, 10).catch(() => []);
-  return toOptions([byTitle.find((a) => a.id === appId) ?? base]);
+  const crawled = await searchCrawledApps(query, appId);
+  if (crawled.length > 0) return toOptions(crawled);
+  if (appId) {
+    throw new TesterAdminError(
+      "Không tìm thấy game với TapTap ID này. Nếu ID đúng thì có thể TapTap đang không truy cập được — điền tay thông tin game.",
+      404,
+    );
+  }
+  if (liveError) {
+    throw new TesterAdminError(
+      "TapTap đang không truy cập được và không có game nào trong dữ liệu bảng xếp hạng khớp từ khoá. Thử tên tiếng Trung, TapTap ID, hoặc điền tay thông tin game.",
+      503,
+    );
+  }
+  return [];
 }
